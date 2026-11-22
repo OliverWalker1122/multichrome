@@ -1,0 +1,128 @@
+{
+    "name": "multichrome",
+    "version": "1.3.0",
+    "type": "module",
+    "description": "Chrome多环境管理工具",
+    "main": "dist/electron/main.js",
+    "scripts": {
+        "postinstall": "electron-builder install-app-deps",
+        "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+        "dev:vite": "vite",
+        "dev:electron": "tsc -p electron/tsconfig.json && npx cpx2 \"electron/{preload.cjs,kernelManifest.json}\" \"dist/electron\" && cross-env NODE_ENV=development npx electron .",
+        "build": "npm run build:vite && npm run build:electron",
+        "build:vite": "vite build",
+        "build:electron": "tsc -p electron/tsconfig.json && npx cpx2 \"electron/{preload.cjs,kernelManifest.json}\" \"dist/electron\"",
+        "start": "npx electron .",
+        "package:win": "node scripts/package-win.cjs",
+        "package:mac": "electron-builder --mac --publish never",
+        "package:linux": "electron-builder --linux --publish never",
+        "lint": "eslint . --ext .js,.ts,.tsx",
+        "lint:fix": "eslint . --ext .js,.ts,.tsx --fix",
+        "test": "node --test",
+        "test:e2e": "node scripts/e2e-verify.mjs",
+        "test:ui": "node scripts/e2e-ui-suite.mjs",
+        "audit:live": "node scripts/audit-live-sites.mjs",
+        "ci": "npm run prepare:singbox && npm run lint && npm run check && npm test && npm run build",
+        "prepare:singbox": "node scripts/prepare-singbox.js",
+        "check": "tsc --noEmit -p tsconfig.json"
+    },
+    "keywords": [
+        "chrome",
+        "profile",
+        "manager",
+        "electron",
+        "react"
+    ],
+    "author": {
+        "name": "MultiChrome Contributors",
+        "email": "noreply@multichrome.app"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/OliverWalker1122/multichrome.git"
+    },
+    "bugs": {
+        "url": "https://github.com/OliverWalker1122/multichrome/issues"
+    },
+    "homepage": "https://github.com/OliverWalker1122/multichrome#readme",
+    "license": "MIT",
+    "dependencies": {
+        "@fluentui/react-components": "^9.75.2",
+        "@fluentui/react-icons": "^2.0.347",
+        "better-sqlite3": "^9.2.2",
+        "dayjs": "^1.11.13",
+        "electron-log": "^5.0.1",
+        "electron-store": "^8.1.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0",
+        "uuid": "^9.0.1",
+        "ws": "^8.18.3"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.8",
+        "@types/node": "^20.10.5",
+        "@types/react": "^18.2.45",
+        "@types/react-dom": "^18.2.18",
+        "@types/uuid": "^9.0.7",
+        "@types/ws": "^8.18.1",
+        "@typescript-eslint/eslint-plugin": "^6.15.0",
+        "@typescript-eslint/parser": "^6.15.0",
+        "@vitejs/plugin-react": "^4.2.1",
+        "concurrently": "^8.2.2",
+        "cpx2": "^8.0.0",
+        "cross-env": "^7.0.3",
+        "electron": "^28.0.0",
+        "electron-builder": "^24.9.1",
+        "eslint": "^8.56.0",
+        "eslint-plugin-react": "^7.33.2",
+        "eslint-plugin-react-hooks": "^4.6.0",
+        "typescript": "^5.3.3",
+        "vite": "^5.0.10"
+    },
+    "build": {
+        "appId": "com.multichrome.app",
+        "productName": "MultiChrome",
+        "directories": {
+            "output": "release"
+        },
+        "files": [
+            "dist/**/*",
+            "package.json",
+            "assets/icon.ico",
+            "assets/icon.png"
+        ],
+        "win": {
+            "target": [
+                "nsis"
+            ],
+            "icon": "assets/icon.ico",
+            "forceCodeSigning": false
+        },
+        "mac": {
+            "target": [
+                "dmg",
+                "zip"
+            ],
+            "category": "public.app-category.utilities",
+            "icon": "assets/icon.icns"
+        },
+        "linux": {
+            "target": [
+                "AppImage",
+                "deb"
+            ],
+            "category": "Utility",
+            "icon": "assets/icon.png"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true
+        },
+        "asar": true,
+        "asarUnpack": [
+            "**/*.node"
+        ],
+        "npmRebuild": false
+    }
+}

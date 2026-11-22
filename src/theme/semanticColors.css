@@ -1,0 +1,44 @@
+:root {
+    --tone-green-background: #e5f4eb;
+    --tone-green-foreground: #17613c;
+    --tone-teal-background: #e0f3f1;
+    --tone-teal-foreground: #116b65;
+    --tone-blue-background: #e7effb;
+    --tone-blue-foreground: #245ba2;
+    --tone-violet-background: #f0eafb;
+    --tone-violet-foreground: #7041a3;
+    --tone-amber-background: #fff2d7;
+    --tone-amber-foreground: #895a12;
+    --tone-rose-background: #fce9ee;
+    --tone-rose-foreground: #a13256;
+    --glass-shell: rgba(244, 247, 253, 0.56);
+    --glass-workspace: rgba(255, 255, 255, 0.72);
+    --glass-card: rgba(255, 255, 255, 0.82);
+    --glass-drawer: rgba(255, 255, 255, 0.96);
+    --glass-card-inner: rgba(248, 250, 254, 0.72);
+    --glass-pill: rgba(235, 241, 250, 0.62);
+    --glass-border: rgba(15, 23, 42, 0.08);
+    --glass-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+}
+:root[data-theme='dark'] {
+    --tone-green-background: #203e2e;
+    --tone-green-foreground: #94ddb1;
+    --tone-teal-background: #193c39;
+    --tone-teal-foreground: #89d5cb;
+    --tone-blue-background: #22364c;
+    --tone-blue-foreground: #9ec5ff;
+    --tone-violet-background: #382d49;
+    --tone-violet-foreground: #ccb0f1;
+    --tone-amber-background: #43381e;
+    --tone-amber-foreground: #eccb80;
+    --tone-rose-background: #472b36;
+    --tone-rose-foreground: #f2aec5;
+    --glass-shell: rgba(14, 18, 28, 0.62);
+    --glass-workspace: rgba(22, 27, 39, 0.72);
+    --glass-card: rgba(31, 38, 54, 0.68);
+    --glass-drawer: rgba(22, 27, 40, 0.96);
+    --glass-card-inner: rgba(22, 27, 39, 0.62);
+    --glass-pill: rgba(255, 255, 255, 0.06);
+    --glass-border: rgba(255, 255, 255, 0.09);
+    --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+}

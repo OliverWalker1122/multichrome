@@ -1,0 +1,866 @@
+#!/usr/bin/env node
+/**
+ * MultiChrome Full UI + 11-Feature End-to-End Verification Suite
+ *
+ * Launches the REAL compiled Electron app against a completely isolated temporary
+ * userData directory, connects to the live renderer over CDP, verifies zero uncaught
+ * exceptions, clicks through real Fluent UI controls, and launches a real browser
+ * environment to verify startup-URL deduplication, bookmark template sync, live memory
+ * stats, and close-all flow.
+ */
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import net from 'node:net';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import WebSocket from 'ws';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.resolve(__dirname, '..');
+const require = createRequire(import.meta.url);
+const electronBinary = require('electron');
+
+const results = [];
+const consoleErrors = [];
+const pageExceptions = [];
+
+function record(id, title, passed, detail = '') {
+    results.push({ id, title, passed, detail });
+    const icon = passed ? 'PASS' : 'FAIL';
+    console.log(`[${icon}] ${id}: ${title}${detail ? ` — ${detail}` : ''}`);
+}
+
+function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+}
+
+function findFreePort() {
+    return new Promise((resolve, reject) => {
+        const srv = net.createServer();
+        srv.once('error', reject);
+        srv.listen(0, '127.0.0.1', () => {
+            const port = srv.address().port;
+            srv.close(() => resolve(port));
+        });
+    });
+}
+
+function httpGetJson(url) {
+    return new Promise((resolve, reject) => {
+        const req = http.get(url, (res) => {
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        req.on('error', reject);
+        req.setTimeout(3000, () => {
+            req.destroy();
+            reject(new Error('timeout'));
+        });
+    });
+}
+
+async function waitForRendererTarget(debugPort, timeoutMs = 20000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try {
+            const targets = await httpGetJson(
+                `http://127.0.0.1:${debugPort}/json/list`,
+            );
+            const page = targets.find(
+                (t) =>
+                    t.type === 'page' &&
+                    typeof t.webSocketDebuggerUrl === 'string' &&
+                    !t.url.startsWith('devtools://'),
+            );
+            if (page) return page;
+        } catch {
+            // retry
+        }
+        await sleep(250);
+    }
+    throw new Error(`Timed out waiting for Electron renderer target on port ${debugPort}`);
+}
+
+class SimpleCDP {
+    constructor(wsUrl) {
+        this.wsUrl = wsUrl;
+        this.ws = null;
+        this.id = 0;
+        this.pending = new Map();
+    }
+
+    async connect() {
+        this.ws = new WebSocket(this.wsUrl);
+        await new Promise((resolve, reject) => {
+            this.ws.once('open', resolve);
+            this.ws.once('error', reject);
+        });
+        this.ws.on('message', (raw) => {
+            try {
+                const msg = JSON.parse(raw.toString());
+                if (msg.id && this.pending.has(msg.id)) {
+                    const { resolve, reject } = this.pending.get(msg.id);
+                    this.pending.delete(msg.id);
+                    if (msg.error) reject(new Error(msg.error.message || JSON.stringify(msg.error)));
+                    else resolve(msg.result);
+                } else if (msg.method === 'Runtime.exceptionThrown') {
+                    const text =
+                        msg.params?.exceptionDetails?.exception?.description ||
+                        msg.params?.exceptionDetails?.text ||
+                        'Unknown page exception';
+                    pageExceptions.push(text);
+                } else if (
+                    msg.method === 'Runtime.consoleAPICalled' &&
+                    msg.params?.type === 'error'
+                ) {
+                    const args = (msg.params.args || [])
+                        .map((a) => a.value ?? a.description ?? '')
+                        .join(' ');
+                    if (args) consoleErrors.push(args);
+                }
+            } catch {
+                // ignore
+            }
+        });
+        await this.send('Runtime.enable');
+    }
+
+    send(method, params = {}) {
+        const id = ++this.id;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                if (this.pending.has(id)) {
+                    this.pending.delete(id);
+                    reject(new Error(`CDP timeout: ${method}`));
+                }
+            }, 15000);
+            this.pending.set(id, {
+                resolve: (val) => {
+                    clearTimeout(timer);
+                    resolve(val);
+                },
+                reject: (err) => {
+                    clearTimeout(timer);
+                    reject(err);
+                },
+            });
+            this.ws.send(JSON.stringify({ id, method, params }));
+        });
+    }
+
+    async eval(expression) {
+        const res = await this.send('Runtime.evaluate', {
+            expression,
+            awaitPromise: true,
+            returnByValue: true,
+        });
+        if (res.exceptionDetails) {
+            throw new Error(
+                res.exceptionDetails.exception?.description ||
+                    res.exceptionDetails.text ||
+                    'Evaluate exception',
+            );
+        }
+        return res.result?.value;
+    }
+
+    close() {
+        try {
+            this.ws?.close();
+        } catch {
+            // ignore
+        }
+    }
+}
+
+async function waitUntil(fn, timeoutMs = 8000, intervalMs = 150) {
+    const deadline = Date.now() + timeoutMs;
+    let last;
+    while (Date.now() < deadline) {
+        last = await fn();
+        if (last) return last;
+        await sleep(intervalMs);
+    }
+    return last;
+}
+
+function startLocalTestServer() {
+    let hits = 0;
+    const server = http.createServer((req, res) => {
+        hits += 1;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(
+            `<!doctype html><html><head><title>E2E Startup Page</title></head><body><h1>MultiChrome E2E OK</h1><p>Hit #${hits}</p></body></html>`,
+        );
+    });
+    return new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => {
+            resolve({
+                port: server.address().port,
+                getHits: () => hits,
+                close: () => new Promise((r) => server.close(() => r())),
+            });
+        });
+    });
+}
+
+async function main() {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-ui-e2e-'));
+    const tempUserData = path.join(tempRoot, 'userData');
+    fs.mkdirSync(tempUserData, { recursive: true });
+
+    const debugPort = await findFreePort();
+    const localServer = await startLocalTestServer();
+    const localStartupUrl = `http://127.0.0.1:${localServer.port}/startup`;
+
+    const childEnv = {
+        ...process.env,
+        MULTICHROME_USER_DATA: tempUserData,
+        NODE_ENV: 'production',
+    };
+    delete childEnv.ELECTRON_RUN_AS_NODE;
+
+    console.log(`[E2E-UI] Starting Electron app with isolated userData: ${tempUserData}`);
+    const electronProc = spawn(
+        electronBinary,
+        [projectRoot, `--remote-debugging-port=${debugPort}`],
+        {
+            cwd: projectRoot,
+            env: childEnv,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        },
+    );
+
+    let electronStderr = '';
+    electronProc.stderr.on('data', (chunk) => {
+        electronStderr += chunk.toString('utf8');
+    });
+
+    let cdp = null;
+    try {
+        const target = await waitForRendererTarget(debugPort, 25000);
+        cdp = new SimpleCDP(target.webSocketDebuggerUrl);
+        await cdp.connect();
+
+        // Wait until React app mounts and electronAPI is ready
+        const mounted = await waitUntil(
+            () =>
+                cdp.eval(`Boolean(
+                    window.electronAPI &&
+                    document.body &&
+                    document.body.innerText.includes('新建环境')
+                )`),
+            12000,
+        );
+        record(
+            'E2E-00',
+            '主窗口启动渲染 & Preload API 就绪',
+            Boolean(mounted),
+            mounted ? `url=${target.url}` : 'Renderer did not mount expected UI',
+        );
+
+        // Helper functions injected into page for reliable React UI interactions
+        const injectHelpers = async () => {
+            await cdp.eval(`
+                window.__e2e = {
+                    clickByText(text, selector = 'button, [role="menuitem"], [role="tab"]') {
+                        const els = Array.from(document.querySelectorAll(selector));
+                        const match = els.find((el) => {
+                            if (el.offsetParent === null) return false;
+                            const t = (el.innerText || el.textContent || '').trim();
+                            return t === text || t.includes(text);
+                        });
+                        if (!match) return false;
+                        match.click();
+                        return true;
+                    },
+                    clickExact(text, selector = 'button, [role="menuitem"], [role="tab"]') {
+                        const els = Array.from(document.querySelectorAll(selector));
+                        const match = els.find((el) => {
+                            if (el.offsetParent === null) return false;
+                            const t = (el.innerText || el.textContent || '').trim();
+                            return t === text;
+                        });
+                        if (!match) return false;
+                        match.click();
+                        return true;
+                    },
+                    setReactValue(el, value) {
+                        const proto = el.tagName === 'TEXTAREA'
+                            ? window.HTMLTextAreaElement.prototype
+                            : window.HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                        setter.call(el, value);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    },
+                    bodyText() {
+                        return document.body.innerText || '';
+                    }
+                };
+                true;
+            `);
+        };
+        const reloadUI = async () => {
+            await cdp.eval(`window.location.reload(); true;`);
+            await sleep(400);
+            await waitUntil(
+                () =>
+                    cdp
+                        .eval(
+                            `Boolean(window.electronAPI && document.body && document.body.innerText.includes('新建环境'))`,
+                        )
+                        .catch(() => false),
+                10000,
+                200,
+            );
+            await injectHelpers();
+        };
+        await injectHelpers();
+
+        // ---------------------------------------------------------------
+        // E2E-01: Verify zero crypto/wallet copy across main UI & Create modal
+        // ---------------------------------------------------------------
+        await cdp.eval(`window.__e2e.clickExact('新建环境')`);
+        await sleep(300);
+        const modalText = await cdp.eval(`window.__e2e.bodyText()`);
+        const hasCryptoCopy = /钱包地址|大额钱包|交易所/.test(modalText);
+        await cdp.eval(`window.__e2e.clickExact('取消')`);
+        await sleep(200);
+        record(
+            'E2E-01',
+            '通用指纹浏览器定位（界面无币圈/钱包残留）',
+            !hasCryptoCopy,
+            hasCryptoCopy ? 'Found unexpected crypto copy in create modal' : 'Clean general-purpose UI',
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-02: Create environments, group rename, status filter, context menu, group delete
+        // ---------------------------------------------------------------
+        const envA = await cdp.eval(`
+            window.electronAPI.chromeEnvironments.create('测试环境Alpha', '测试组A', '用于UI端到端验证', { browserEngine: 'system-chrome' })
+        `);
+        const envB = await cdp.eval(`
+            window.electronAPI.chromeEnvironments.create('测试环境Beta', '测试组A', '', { browserEngine: 'system-chrome' })
+        `);
+        // Sync UI after direct IPC environment creation
+        await reloadUI();
+        await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`));
+
+        // Test status filter pills (运行中 -> empty, 未运行 -> shows envA)
+        await cdp.eval(`window.__e2e.clickByText('运行中 (')`);
+        await sleep(200);
+        const runningEmpty = await cdp.eval(`!window.__e2e.bodyText().includes('测试环境Alpha')`);
+        await cdp.eval(`window.__e2e.clickByText('未运行 (')`);
+        await sleep(200);
+        const stoppedShows = await cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`);
+        await cdp.eval(`window.__e2e.clickExact('全部')`);
+        await sleep(200);
+
+        // Test right-click context menu on row
+        const contextMenuItems = await cdp.eval(`
+            (() => {
+                const rows = Array.from(document.querySelectorAll('tbody tr'));
+                const row = rows.find((r) => (r.innerText || '').includes('测试环境Alpha'));
+                if (!row) return null;
+                row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 260, clientY: 220 }));
+                return true;
+            })()
+        `);
+        await sleep(200);
+        const menuText = await cdp.eval(`document.querySelector('[role="menu"]')?.innerText || ''`);
+        const contextMenuOk =
+            Boolean(contextMenuItems) &&
+            menuText.includes('克隆环境') &&
+            menuText.includes('安全自检') &&
+            menuText.includes('打开数据目录');
+        // Dismiss context menu
+        await cdp.eval(`document.body.click()`);
+        await sleep(150);
+
+        // Click sidebar group '测试组A' -> Rename to '测试组B' via real dialog
+        const clickedGroup = await cdp.eval(`window.__e2e.clickByText('测试组A', 'aside button, nav button')`);
+        await sleep(300);
+        const clickedRename = await cdp.eval(`window.__e2e.clickByText('重命名分组', 'main button')`);
+        await sleep(300);
+        await cdp.eval(`
+            (() => {
+                const input = document.querySelector('[role="dialog"] input');
+                if (input) window.__e2e.setReactValue(input, '测试组B');
+            })()
+        `);
+        await sleep(150);
+        await cdp.eval(`window.__e2e.clickByText('确认重命名', '[role="dialog"] button')`);
+        const renamedVisible = await waitUntil(
+            () =>
+                cdp.eval(
+                    `window.__e2e.bodyText().includes('测试组B') && !window.__e2e.bodyText().includes('测试组A')`,
+                ),
+            5000,
+        );
+
+        // Delete group '测试组B' (move environments to 默认分组) via real dialog
+        await sleep(250);
+        const clickedDeleteGroup = await cdp.eval(`window.__e2e.clickByText('删除分组', 'main button')`);
+        await sleep(300);
+        await cdp.eval(`window.__e2e.clickExact('确认删除', '[role="dialog"] button')`);
+        const deletedGroupOk = await waitUntil(
+            () =>
+                cdp.eval(
+                    `window.__e2e.bodyText().includes('测试环境Alpha') && !window.__e2e.bodyText().includes('测试组B') && !window.__e2e.bodyText().includes('测试组A')`,
+                ),
+            5000,
+        );
+        record(
+            'E2E-02',
+            '分组重命名/删除 + 运行状态筛选 + 表格行右键菜单',
+            Boolean(
+                runningEmpty &&
+                    stoppedShows &&
+                    contextMenuOk &&
+                    clickedGroup &&
+                    clickedRename &&
+                    renamedVisible &&
+                    clickedDeleteGroup &&
+                    deletedGroupOk,
+            ),
+            `filter=${runningEmpty && stoppedShows}, ctxMenu=${contextMenuOk}, groupClick=${Boolean(clickedGroup)}, rename=${Boolean(renamedVisible)}, deleteGroup=${Boolean(clickedDeleteGroup && deletedGroupOk)}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-03: Environment Clone (fresh isolated dir + new fingerprint seed)
+        // ---------------------------------------------------------------
+        const cloned = await cdp.eval(
+            `window.electronAPI.chromeEnvironments.clone(${JSON.stringify(envA.id)})`,
+        );
+        await reloadUI();
+        const cloneVisible = await waitUntil(
+            () => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha - 副本')`),
+            4000,
+        );
+        const cloneIsolated =
+            Boolean(cloned) &&
+            cloned.id !== envA.id &&
+            cloned.dataDir !== envA.dataDir &&
+            cloned.fingerprintConfig?.seed !== envA.fingerprintConfig?.seed;
+        record(
+            'E2E-03',
+            '环境克隆（独立目录 & 全新 32-bit 指纹种子）',
+            Boolean(cloneVisible && cloneIsolated),
+            `seedA=${envA.fingerprintConfig?.seed} -> seedClone=${cloned?.fingerprintConfig?.seed}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-04: Profile Storage Stats & One-Click Cache Cleanup (UI + Disk)
+        // ---------------------------------------------------------------
+        const defaultProfileDir = path.join(envA.dataDir, 'Default');
+        const cacheDataDir = path.join(defaultProfileDir, 'Cache', 'Cache_Data');
+        fs.mkdirSync(cacheDataDir, { recursive: true });
+        fs.writeFileSync(path.join(cacheDataDir, 'f_000001'), Buffer.alloc(300 * 1024, 0x41));
+        fs.writeFileSync(path.join(defaultProfileDir, 'Cookies'), 'KEEP_LOGIN_SESSION');
+        fs.writeFileSync(path.join(defaultProfileDir, 'Preferences'), '{"ok":true}');
+
+        // Select envA row and open details panel
+        await cdp.eval(`
+            (() => {
+                const rows = Array.from(document.querySelectorAll('tbody tr'));
+                const row = rows.find((r) => (r.innerText || '').includes('测试环境Alpha') && !(r.innerText || '').includes('副本'));
+                if (row) {
+                    row.click();
+                    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                }
+            })()
+        `);
+        const storageShown = await waitUntil(
+            () => cdp.eval(`window.__e2e.bodyText().includes('清缓存') && window.__e2e.bodyText().includes('KB')`),
+            5000,
+        );
+        await cdp.eval(`window.__e2e.clickByText('清缓存')`);
+        const cacheCleared = await waitUntil(
+            () => !fs.existsSync(path.join(cacheDataDir, 'f_000001')),
+            5000,
+        );
+        const cookiesKept =
+            fs.readFileSync(path.join(defaultProfileDir, 'Cookies'), 'utf8') ===
+                'KEEP_LOGIN_SESSION' &&
+            fs.existsSync(path.join(defaultProfileDir, 'Preferences'));
+        record(
+            'E2E-04',
+            'Profile 体积统计 & 详情面板一键清缓存（保留 Cookie/Preferences）',
+            Boolean(storageShown && cacheCleared && cookiesKept),
+            `uiShown=${Boolean(storageShown)}, cacheRemoved=${Boolean(cacheCleared)}, cookiesPreserved=${cookiesKept}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-05: Batch Proxy Import + Duplicate Proxy Reminder across UI
+        // ---------------------------------------------------------------
+        await cdp.eval(`window.__e2e.clickByText('代理', 'nav button, aside button, button')`);
+        await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('批量导入')`), 5000);
+        await cdp.eval(`window.__e2e.clickByText('批量导入')`);
+        await sleep(250);
+        await cdp.eval(`
+            (() => {
+                const ta = document.querySelector('[role="dialog"] textarea');
+                if (ta) {
+                    window.__e2e.setReactValue(ta, [
+                        '美西测试-1 | http://127.0.0.1:18081',
+                        '日本测试-2 | socks5://user:pass@127.0.0.1:18082',
+                        'http://127.0.0.1:18081',
+                        'ftp://invalid.example:21',
+                    ].join('\\n'));
+                }
+            })()
+        `);
+        await sleep(150);
+        await cdp.eval(`window.__e2e.clickByText('开始导入', '[role="dialog"] button')`);
+        const batchImportSummaryOk = await waitUntil(
+            () =>
+                cdp.eval(
+                    `(() => {
+                        const t = document.querySelector('[role="dialog"]')?.innerText || '';
+                        return t.includes('成功 2 条') && t.includes('跳过重复 1 条') && t.includes('失败 1 条');
+                    })()`,
+                ),
+            8000,
+        );
+        await cdp.eval(`window.__e2e.clickExact('关闭', '[role="dialog"] button')`);
+        await sleep(250);
+
+        const proxies = await cdp.eval(`window.electronAPI.proxies.list()`);
+        const proxy1 = proxies.find((p) => p.name === '美西测试-1');
+        let duplicateBadgeProxyOk = false;
+        let duplicateBadgeEnvOk = false;
+        let duplicateDetailsWarnOk = false;
+        if (proxy1) {
+            // Bind same proxy to envA and envB
+            await cdp.eval(`window.electronAPI.chromeEnvironments.update(${JSON.stringify(envA.id)}, { proxyId: ${JSON.stringify(proxy1.id)} })`);
+            await cdp.eval(`window.electronAPI.chromeEnvironments.update(${JSON.stringify(envB.id)}, { proxyId: ${JSON.stringify(proxy1.id)} })`);
+            // Reload UI so React state reflects direct IPC proxy bindings cleanly
+            await reloadUI();
+            duplicateBadgeEnvOk = await waitUntil(
+                () => cdp.eval(`window.__e2e.bodyText().includes('共用×2')`),
+                4000,
+            );
+            // Open envA details to see duplicate warning banner
+            await cdp.eval(`
+                (() => {
+                    const rows = Array.from(document.querySelectorAll('tbody tr'));
+                    const row = rows.find((r) => (r.innerText || '').includes('测试环境Alpha') && !(r.innerText || '').includes('副本'));
+                    if (row) {
+                        row.click();
+                        row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                    }
+                })()
+            `);
+            duplicateDetailsWarnOk = await waitUntil(
+                () => cdp.eval(`window.__e2e.bodyText().includes('共用 IP 存在关联风险')`),
+                4000,
+            );
+            // Check Proxies page '复用' badge
+            await cdp.eval(`window.__e2e.clickByText('代理', 'nav button, aside button, button')`);
+            duplicateBadgeProxyOk = await waitUntil(
+                () => cdp.eval(`window.__e2e.bodyText().includes('复用')`),
+                4000,
+            );
+            // Unbind proxy1 from envA so we can later launch envA directly against our local test HTTP server
+            await cdp.eval(`window.electronAPI.chromeEnvironments.update(${JSON.stringify(envA.id)}, { proxyId: '' })`);
+        }
+        record(
+            'E2E-05',
+            '代理批量导入（去重/错行提示）& 多环境复用查重提醒',
+            Boolean(
+                batchImportSummaryOk &&
+                    duplicateBadgeProxyOk &&
+                    duplicateBadgeEnvOk &&
+                    duplicateDetailsWarnOk,
+            ),
+            `batchUI=${Boolean(batchImportSummaryOk)}, proxyBadge=${Boolean(duplicateBadgeProxyOk)}, envBadge=${Boolean(duplicateBadgeEnvOk)}, detailsWarn=${Boolean(duplicateDetailsWarnOk)}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-06: Settings Tabs — Auto Language, Bookmarks, Memory Saver Mode
+        // ---------------------------------------------------------------
+        await cdp.eval(`window.__e2e.clickByText('设置', 'nav button, aside button, button')`);
+        await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('数据目录')`), 5000);
+
+        // Tab: 隐私 -> verify & toggle 自动匹配语言
+        await cdp.eval(`window.__e2e.clickByText('隐私', '[role="tab"], button')`);
+        const autoLangVisible = await waitUntil(
+            () => cdp.eval(`window.__e2e.bodyText().includes('自动匹配语言')`),
+            4000,
+        );
+        await cdp.eval(`
+            (() => {
+                const switches = Array.from(document.querySelectorAll('input[type="checkbox"][role="switch"]'));
+                // switches: [0]=启动前安全检查, [1]=全局备用代理, [2]=自动匹配时区, [3]=自动匹配语言
+                if (switches[3] && !switches[3].checked) switches[3].click();
+            })()
+        `);
+        await sleep(150);
+
+        // Tab: 浏览器 -> toggle 省内存模式 & add bookmark template
+        await cdp.eval(`window.__e2e.clickByText('浏览器', '[role="tab"], button')`);
+        const templatesTabVisible = await waitUntil(
+            () =>
+                cdp.eval(
+                    `window.__e2e.bodyText().includes('常用书签') && window.__e2e.bodyText().includes('本地扩展')`,
+                ),
+            4000,
+        );
+        const memSaverVisible = await waitUntil(
+            () => cdp.eval(`window.__e2e.bodyText().includes('省内存模式')`),
+            4000,
+        );
+        await cdp.eval(`
+            (() => {
+                const sw = document.querySelector('input[type="checkbox"][role="switch"]');
+                if (sw && !sw.checked) sw.click();
+                const nameInput = document.querySelector('input[placeholder="名称"]');
+                const urlInputs = Array.from(document.querySelectorAll('input[placeholder="https://example.com/"]'));
+                const urlInput = urlInputs[urlInputs.length - 1];
+                const folderInput = document.querySelector('input[placeholder="文件夹（可选）"]');
+                if (nameInput) window.__e2e.setReactValue(nameInput, 'E2E检测书签');
+                if (urlInput) window.__e2e.setReactValue(urlInput, 'https://ip125.com/');
+                if (folderInput) window.__e2e.setReactValue(folderInput, '常用工具');
+            })()
+        `);
+        await sleep(150);
+        await cdp.eval(`
+            (() => {
+                const btns = Array.from(document.querySelectorAll('button')).filter((b) => b.textContent?.trim() === '添加');
+                const bmAddBtn = btns[btns.length - 1];
+                if (bmAddBtn) bmAddBtn.click();
+            })()
+        `);
+        await sleep(200);
+        await cdp.eval(`window.__e2e.clickExact('保存设置')`);
+        await sleep(500);
+        const savedSettings = await cdp.eval(`window.electronAPI.settings.getSettings()`);
+        const settingsPersisted =
+            savedSettings?.memorySaverMode === true &&
+            savedSettings?.fingerprint?.autoMatchLanguage === true &&
+            Array.isArray(savedSettings?.bookmarkTemplates) &&
+            savedSettings.bookmarkTemplates.some((b) => b.name === 'E2E检测书签');
+        record(
+            'E2E-06',
+            '设置中心：自动匹配语言、常用书签与扩展、省内存模式保存',
+            Boolean(autoLangVisible && templatesTabVisible && memSaverVisible && settingsPersisted),
+            `autoLang=${Boolean(autoLangVisible)}, templatesTab=${Boolean(templatesTabVisible)}, memSaver=${Boolean(memSaverVisible)}, persisted=${settingsPersisted}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-07: Pre-Launch Consistency Guard Dialog
+        // ---------------------------------------------------------------
+        await cdp.eval(`window.__e2e.clickByText('全部环境', 'nav button, aside button, button')`);
+        await sleep(350);
+        // Set envB to fingerprint-chromium (no kernel installed in isolated temp dir -> triggers guard error dialog)
+        await cdp.eval(
+            `window.electronAPI.chromeEnvironments.update(${JSON.stringify(envB.id)}, { browserEngine: 'fingerprint-chromium' })`,
+        );
+        await reloadUI();
+        await sleep(300);
+        await cdp.eval(`
+            (() => {
+                const rows = Array.from(document.querySelectorAll('tbody tr'));
+                const row = rows.find((r) => (r.innerText || '').includes('测试环境Beta'));
+                const btn = row ? Array.from(row.querySelectorAll('button')).find((b) => (b.innerText || '').includes('启动')) : null;
+                if (btn) btn.click();
+            })()
+        `);
+        const guardShown = await waitUntil(
+            () =>
+                cdp.eval(
+                    `(() => {
+                        const t = document.querySelector('[role="dialog"]')?.innerText || '';
+                        return t.includes('启动前一致性护栏') && t.includes('缺少 C++ 指纹浏览器内核');
+                    })()`,
+                ),
+            5000,
+        );
+        await cdp.eval(`window.__e2e.clickExact('取消', '[role="dialog"] button')`);
+        await sleep(200);
+        record(
+            'E2E-07',
+            '启动前「防呆一致性护栏」拦截弹窗',
+            Boolean(guardShown),
+            guardShown ? 'Guard dialog intercepted missing kernel cleanly' : 'Guard dialog did not appear',
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-08: Environment Health Check Dialog
+        // ---------------------------------------------------------------
+        await cdp.eval(`
+            (() => {
+                const rows = Array.from(document.querySelectorAll('tbody tr'));
+                const row = rows.find((r) => (r.innerText || '').includes('测试环境Alpha') && !(r.innerText || '').includes('副本'));
+                if (row) {
+                    row.click();
+                    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                }
+            })()
+        `);
+        await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('健康自检')`), 4000);
+        await cdp.eval(`window.__e2e.clickByText('健康自检')`);
+        const healthDialogOk = await waitUntil(
+            () =>
+                cdp.eval(
+                    `(() => {
+                        const t = document.querySelector('[role="dialog"]')?.innerText || '';
+                        return (
+                            t.includes('健康自检') &&
+                            t.includes('代理与出口 IP') &&
+                            t.includes('时区与 Geolocation') &&
+                            t.includes('WebRTC & DNS 防泄露')
+                        );
+                    })()`,
+                ),
+            8000,
+        );
+        await cdp.eval(`window.__e2e.clickExact('关闭', '[role="dialog"] button')`);
+        await sleep(200);
+        record(
+            'E2E-08',
+            '一键防泄露 / 指纹健康自检弹窗',
+            Boolean(healthDialogOk),
+            healthDialogOk ? 'All health check cards rendered' : 'Health dialog incomplete',
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-09: Real Browser Launch — Bookmark Sync, Env Startup URL Dedup, Live Memory Stats, Close All
+        // ---------------------------------------------------------------
+        await cdp.eval(
+            `window.electronAPI.chromeEnvironments.update(${JSON.stringify(envA.id)}, { startupUrl: ${JSON.stringify(localStartupUrl)} })`,
+        );
+        const launch1Ok = await cdp.eval(
+            `window.electronAPI.chromeEnvironments.launch(${JSON.stringify(envA.id)})`,
+        );
+        await sleep(3000);
+
+        // 1) Verify Bookmarks file synced with template bookmark
+        const bookmarksPath = path.join(envA.dataDir, 'Default', 'Bookmarks');
+        let bookmarkSynced = false;
+        if (fs.existsSync(bookmarksPath)) {
+            const bmText = fs.readFileSync(bookmarksPath, 'utf8');
+            bookmarkSynced = bmText.includes('E2E检测书签') && bmText.includes('常用工具');
+        }
+
+        // 2) Verify live memory stats API & UI subtitle + "关闭全部 (1)" button
+        const memStats = await waitUntil(async () => {
+            const s = await cdp.eval(`window.electronAPI.chromeEnvironments.getRunningResourceStats()`);
+            return s && s.totalMemoryBytes > 0 ? s : null;
+        }, 8000, 500);
+        const closeAllBtnVisible = await waitUntil(
+            () =>
+                cdp.eval(
+                    `window.__e2e.bodyText().includes('关闭全部 (1)') && /内存\\s+\\d/.test(window.__e2e.bodyText())`,
+                ),
+            6000,
+        );
+
+        // 3) Verify startup URL opened on first launch
+        const hitsAfterFirstLaunch = localServer.getHits();
+
+        // 4) Close envA via UI "关闭全部 (1)" button + confirm dialog
+        await cdp.eval(`window.__e2e.clickByText('关闭全部 (1)')`);
+        await sleep(250);
+        await cdp.eval(`window.__e2e.clickByText('确认关闭全部', '[role="dialog"] button')`);
+        const closedAllOk = await waitUntil(async () => {
+            const list = await cdp.eval(`window.electronAPI.chromeEnvironments.getAll()`);
+            return Array.isArray(list) && list.every((e) => !e.isRunning);
+        }, 10000, 300);
+
+        // 5) Relaunch envA (now has saved Chrome Sessions) -> verify startup URL is NOT duplicated
+        // Ensure a Sessions marker exists if Chrome closed quickly
+        const sessionsDir = path.join(envA.dataDir, 'Default', 'Sessions');
+        if (!fs.existsSync(sessionsDir) || fs.readdirSync(sessionsDir).length === 0) {
+            fs.mkdirSync(sessionsDir, { recursive: true });
+            fs.writeFileSync(path.join(sessionsDir, 'Session_1'), 'stub');
+        }
+        const hitsBeforeSecondLaunch = localServer.getHits();
+        const launch2Ok = await cdp.eval(
+            `window.electronAPI.chromeEnvironments.launch(${JSON.stringify(envA.id)})`,
+        );
+        await sleep(3000);
+        const hitsAfterSecondLaunch = localServer.getHits();
+        // Close cleanly
+        await cdp.eval(`window.electronAPI.chromeEnvironments.closeAll()`);
+        await sleep(1500);
+
+        // On second launch with existing restored tab (localStartupUrl), Chrome restores the 1 existing tab
+        // (at most +1 reload of the restored tab, NEVER +2 duplicate tabs!)
+        const secondLaunchDelta = hitsAfterSecondLaunch - hitsBeforeSecondLaunch;
+        const dedupOk = Boolean(launch1Ok && launch2Ok) && hitsAfterFirstLaunch >= 1 && secondLaunchDelta <= 1;
+
+        record(
+            'E2E-09',
+            '真实 Chrome 启动：书签模板分发 + 实时内存监控 + 一键关闭全部 + 启动页智能去重',
+            Boolean(bookmarkSynced && memStats && closeAllBtnVisible && closedAllOk && dedupOk),
+            `bookmark=${bookmarkSynced}, memMB=${memStats ? Math.round(memStats.totalMemoryBytes / 1024 / 1024) : 0}MB, closeAllUI=${Boolean(closeAllBtnVisible && closedAllOk)}, hits1=${hitsAfterFirstLaunch}, delta2=${secondLaunchDelta}`,
+        );
+
+        // ---------------------------------------------------------------
+        // E2E-10: Zero uncaught page exceptions
+        // ---------------------------------------------------------------
+        record(
+            'E2E-10',
+            '全程无未捕获前端异常',
+            pageExceptions.length === 0,
+            pageExceptions.length === 0
+                ? `0 uncaught exceptions (consoleErrors=${consoleErrors.length})`
+                : pageExceptions.join(' | '),
+        );
+    } finally {
+        cdp?.close();
+        try {
+            electronProc.kill('SIGTERM');
+        } catch {
+            // ignore
+        }
+        await sleep(800);
+        if (!electronProc.killed) {
+            try {
+                electronProc.kill('SIGKILL');
+            } catch {
+                // ignore
+            }
+        }
+        await localServer.close();
+        try {
+            fs.rmSync(tempRoot, { recursive: true, force: true });
+        } catch {
+            // ignore on Windows file lock delay
+        }
+    }
+
+    const failed = results.filter((r) => !r.passed);
+    console.log('\n==================================================');
+    console.log(`E2E UI Suite Summary: ${results.length - failed.length}/${results.length} passed`);
+    if (consoleErrors.length > 0) {
+        console.log('Console errors observed:', consoleErrors);
+    }
+    if (failed.length > 0) {
+        console.log('Failed checks:', failed);
+        if (electronStderr.trim()) {
+            console.log('Electron stderr tail:', electronStderr.slice(-1000));
+        }
+        process.exit(1);
+    }
+}
+
+main().catch((err) => {
+    console.error('[E2E-UI] Fatal error:', err);
+    process.exit(1);
+});

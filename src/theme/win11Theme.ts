@@ -1,0 +1,73 @@
+import {
+    webDarkTheme,
+    webLightTheme,
+    type Theme,
+} from '@fluentui/react-components';
+
+const modernFontBase =
+    "'Inter', 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif";
+const modernFontMono =
+    "'JetBrains Mono', 'Cascadia Mono', 'Cascadia Code', 'SFMono-Regular', 'Consolas', monospace";
+
+export const win11LightTheme: Theme = {
+    ...webLightTheme,
+    fontFamilyBase: modernFontBase,
+    fontFamilyMonospace: modernFontMono,
+    fontFamilyNumeric: modernFontBase,
+    borderRadiusMedium: '8px',
+    borderRadiusLarge: '12px',
+    borderRadiusXLarge: '16px',
+    colorNeutralBackground1: '#ffffff',
+    colorNeutralBackground1Hover: '#f8fafc',
+    colorNeutralBackground1Pressed: '#eef2f7',
+    colorNeutralBackground1Selected: '#eff6ff',
+    colorNeutralBackground2: '#f8fafc',
+    colorNeutralBackground3: '#f4f6fa',
+    colorNeutralBackground4: '#f1f5f9',
+    colorNeutralForeground1: '#0f172a',
+    colorNeutralForeground2: '#475569',
+    colorNeutralForeground3: '#64748b',
+    colorNeutralStroke1: '#cbd5e1',
+    colorNeutralStroke2: '#e6ebf2',
+    colorSubtleBackgroundSelected: '#e8f0fe',
+    colorSubtleBackgroundHover: '#edf2f7',
+    colorBrandBackground: '#2563eb',
+    colorBrandBackgroundHover: '#1d4ed8',
+    colorBrandBackgroundPressed: '#1e40af',
+    colorBrandBackground2: '#eff6ff',
+    colorBrandForeground1: '#2563eb',
+    colorBrandForeground2: '#1d4ed8',
+    colorPaletteGreenForeground1: '#059669',
+};
+
+export const win11DarkTheme: Theme = {
+    ...webDarkTheme,
+    fontFamilyBase: modernFontBase,
+    fontFamilyMonospace: modernFontMono,
+    fontFamilyNumeric: modernFontBase,
+    borderRadiusMedium: '8px',
+    borderRadiusLarge: '12px',
+    borderRadiusXLarge: '16px',
+    colorNeutralBackground1: '#1a1e28',
+    colorNeutralBackground2: '#151922',
+    colorNeutralBackground3: '#11141c',
+    colorNeutralBackground4: '#0d1017',
+    colorNeutralBackground1Hover: '#222836',
+    colorNeutralBackground1Pressed: '#283244',
+    colorNeutralBackground1Selected: '#1e2c44',
+    colorNeutralForeground1: '#f1f5f9',
+    colorNeutralForeground2: '#cbd5e1',
+    colorNeutralForeground3: '#94a3b8',
+    colorNeutralStroke1: '#334155',
+    colorNeutralStroke2: '#252c3b',
+    colorSubtleBackgroundSelected: '#1e2c44',
+    colorSubtleBackgroundHover: '#202634',
+    colorBrandBackground: '#3b82f6',
+    colorBrandBackgroundHover: '#60a5fa',
+    colorBrandBackgroundPressed: '#2563eb',
+    colorNeutralForegroundOnBrand: '#ffffff',
+    colorBrandBackground2: '#172554',
+    colorBrandForeground1: '#60a5fa',
+    colorBrandForeground2: '#93c5fd',
+    colorPaletteGreenForeground1: '#34d399',
+};

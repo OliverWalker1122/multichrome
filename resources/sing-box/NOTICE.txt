@@ -1,0 +1,17 @@
+MultiChrome bundles an unmodified sing-box executable as a separate process.
+
+Component: sing-box 1.14.4
+Copyright (C) 2022 by nekohasekai <contact-sagernet@sekai.icu>
+License: GNU General Public License, version 3 or later; see LICENSE and COPYING.
+Upstream release: https://github.com/SagerNet/sing-box/releases/tag/v1.14.4
+Corresponding source: https://github.com/SagerNet/sing-box/tree/v1.14.4
+Source archive: https://github.com/SagerNet/sing-box/archive/refs/tags/v1.14.4.tar.gz
+Build/dependency instructions: https://sing-box.sagernet.org/installation/build-from-source/
+Official release archive digests are pinned in manifest.json.
+
+This application is independently developed. It is not affiliated with or
+endorsed by SagerNet or the sing-box project. The bundled executable retains
+the upstream name and license; MultiChrome does not modify that executable.
+
+The source links above point to the exact upstream release. When distributing
+a modified core, also provide its corresponding modified source and notices.

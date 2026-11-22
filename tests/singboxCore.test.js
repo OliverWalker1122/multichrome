@@ -1,0 +1,332 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { once } from 'node:events';
+import { SingboxCore } from '../electron/singboxCore.js';
+import {
+    buildSingboxConfig,
+    simpleProxyToConfig,
+} from '../electron/singboxConfig.js';
+
+const binaryPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../resources/sing-box',
+    process.platform === 'win32' ? 'sing-box.exe' : 'sing-box',
+);
+const available = existsSync(binaryPath);
+const core = new SingboxCore({ binaryPath });
+
+async function unusedPort() {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    return port;
+}
+
+function request(port) {
+    return new Promise((resolve, reject) => {
+        const req = http.get(
+            {
+                hostname: '127.0.0.1',
+                port,
+                path: 'http://fixture.invalid/private?demo=do-not-log',
+                agent: false,
+            },
+            (response) => {
+                let body = '';
+                response.on('data', (chunk) => {
+                    body += chunk;
+                });
+                response.on('end', () =>
+                    resolve({ code: response.statusCode, body }),
+                );
+                response.on('error', reject);
+            },
+        );
+        req.on('error', reject);
+        req.setTimeout(3000, () => req.destroy(new Error('fixture timeout')));
+    });
+}
+
+test('内核缺失以固定文案报错，不泄露传入配置', async () => {
+    const missing = new SingboxCore({
+        binaryPath: path.join(
+            path.dirname(binaryPath),
+            'not-installed-sing-box',
+        ),
+    });
+    assert.equal(missing.getInfo().available, false);
+    await assert.rejects(
+        missing.check({ password: 'synthetic-secret' }),
+        (error) => !error.message.includes('synthetic-secret'),
+    );
+});
+
+test(
+    '真实核心check接受HTTP SOCKS VLESS并拒绝非法配置且错误脱敏',
+    { skip: !available },
+    async () => {
+        for (const protocol of ['http', 'https', 'socks5']) {
+            await core.check(
+                buildSingboxConfig(
+                    simpleProxyToConfig({
+                        protocol,
+                        host: '127.0.0.1',
+                        port: 32100,
+                        username: 'fixture',
+                        password: 'fixture-only',
+                    }),
+                    0,
+                ),
+            );
+        }
+        await core.check(
+            buildSingboxConfig(
+                {
+                    type: 'vless',
+                    server: 'example.invalid',
+                    server_port: 443,
+                    uuid: '11111111-1111-4111-8111-111111111111',
+                    tls: { enabled: true, server_name: 'example.invalid' },
+                },
+                0,
+            ),
+        );
+        await assert.rejects(
+            core.check(
+                buildSingboxConfig(
+                    {
+                        type: 'vless',
+                        server: 'example.invalid',
+                        server_port: 'SYNTHETIC-SECRET-INVALID',
+                        uuid: '11111111-1111-4111-8111-111111111111',
+                    },
+                    0,
+                ),
+            ),
+            (error) => !error.message.includes('SYNTHETIC'),
+        );
+    },
+);
+
+test(
+    '真实核心通过stdin运行认证HTTP，日志脱敏，关闭释放监听且不直连',
+    { skip: !available },
+    async (t) => {
+        const username = 'fixture-user';
+        const password = 'fixture-only/p@ss:%?#';
+        let received = 0;
+        const sockets = new Set();
+        const upstream = http.createServer((req, response) => {
+            const expected = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+            if (req.headers['proxy-authorization'] !== expected) {
+                response.writeHead(407).end();
+                return;
+            }
+            received++;
+            response.end('through-singbox');
+        });
+        // sing-box deliberately uses CONNECT to an HTTP upstream even for an HTTP
+        // destination. Keep the fake tunnel in-process: no destination DNS or dial.
+        upstream.on('connect', (req, socket, head) => {
+            const expected = `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
+            if (req.headers['proxy-authorization'] !== expected) {
+                socket.end(
+                    'HTTP/1.1 407 Proxy Authentication Required\r\n\r\n',
+                );
+                return;
+            }
+            received++;
+            socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            const reply = () =>
+                socket.end(
+                    'HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\nthrough-singbox',
+                );
+            if (head.length) reply();
+            else socket.once('data', reply);
+        });
+        upstream.on('connection', (socket) => {
+            sockets.add(socket);
+            socket.on('error', () => {});
+            socket.on('close', () => sockets.delete(socket));
+        });
+        upstream.listen(0, '127.0.0.1');
+        await once(upstream, 'listening');
+        t.after(async () => {
+            for (const socket of sockets) socket.destroy();
+            if (upstream.listening)
+                await new Promise((resolve) => upstream.close(resolve));
+        });
+        const port = await unusedPort();
+        const config = buildSingboxConfig(
+            simpleProxyToConfig({
+                protocol: 'http',
+                host: '127.0.0.1',
+                port: upstream.address().port,
+                username,
+                password,
+            }),
+            port,
+        );
+        await core.check(config);
+        const logs = [];
+        const exits = [];
+        const process = await core.start(config, {
+            onLog: (item) => logs.push(item),
+            onExit: (item) => exits.push(item),
+        });
+        t.after(() => process.stop());
+        assert.equal((await request(port)).body, 'through-singbox');
+        assert.equal(received, 1);
+        for (const socket of sockets) socket.destroy();
+        await new Promise((resolve) => upstream.close(resolve));
+        const failed = await request(port).catch(() => ({ code: 0 }));
+        assert.notEqual(failed.code, 200);
+        assert.equal(received, 1);
+        await process.stop();
+        await assert.rejects(request(port));
+        assert.equal(exits.length, 1);
+        assert.equal(exits[0].unexpected, false);
+        const text = JSON.stringify(logs);
+        for (const sensitive of [
+            username,
+            password,
+            'private',
+            'do-not-log',
+            'Authorization',
+        ])
+            assert.ok(!text.includes(sensitive));
+        assert.ok(logs.some((item) => item.message.includes('核心已就绪')));
+    },
+);
+
+test(
+    '真实核心不会将已被其他进程占用的端口误判成启动成功',
+    { skip: !available },
+    async (t) => {
+        const occupied = net.createServer((socket) => socket.end());
+        occupied.listen(0, '127.0.0.1');
+        await once(occupied, 'listening');
+        t.after(() => new Promise((resolve) => occupied.close(resolve)));
+        const config = buildSingboxConfig(
+            simpleProxyToConfig({
+                protocol: 'http',
+                host: '127.0.0.1',
+                port: 9,
+            }),
+            occupied.address().port,
+        );
+        await assert.rejects(core.start(config));
+    },
+);
+
+test(
+    '真实核心SOCKS5认证与域名转发不依赖本地目标DNS',
+    { skip: !available },
+    async (t) => {
+        const username = 'fixture-socks';
+        const password = 'fixture-socks-only';
+        const sockets = new Set();
+        let authenticated = false;
+        let requestedDomain;
+        const upstream = net.createServer((socket) => {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+            socket.on('error', () => {});
+            let stage = 0;
+            let buffer = Buffer.alloc(0);
+            socket.on('data', (chunk) => {
+                buffer = Buffer.concat([buffer, chunk]);
+                while (buffer.length) {
+                    if (stage === 0) {
+                        if (buffer.length < 2 || buffer.length < 2 + buffer[1])
+                            return;
+                        if (
+                            buffer[0] !== 5 ||
+                            !buffer.subarray(2, 2 + buffer[1]).includes(2)
+                        ) {
+                            socket.destroy();
+                            return;
+                        }
+                        buffer = buffer.subarray(2 + buffer[1]);
+                        socket.write(Buffer.from([5, 2]));
+                        stage = 1;
+                    } else if (stage === 1) {
+                        if (buffer.length < 2 || buffer.length < 3 + buffer[1])
+                            return;
+                        const usernameLength = buffer[1];
+                        const passwordLength = buffer[2 + usernameLength];
+                        const total = 3 + usernameLength + passwordLength;
+                        if (buffer.length < total) return;
+                        authenticated =
+                            buffer
+                                .subarray(2, 2 + usernameLength)
+                                .toString() === username &&
+                            buffer
+                                .subarray(3 + usernameLength, total)
+                                .toString() === password;
+                        buffer = buffer.subarray(total);
+                        socket.write(Buffer.from([1, authenticated ? 0 : 1]));
+                        if (!authenticated) {
+                            socket.destroy();
+                            return;
+                        }
+                        stage = 2;
+                    } else if (stage === 2) {
+                        if (buffer.length < 5) return;
+                        if (buffer[3] !== 3) {
+                            socket.destroy();
+                            return;
+                        }
+                        const total = 7 + buffer[4];
+                        if (buffer.length < total) return;
+                        requestedDomain = buffer
+                            .subarray(5, 5 + buffer[4])
+                            .toString();
+                        buffer = buffer.subarray(total);
+                        socket.write(
+                            Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]),
+                        );
+                        stage = 3;
+                    } else {
+                        if (!buffer.includes(Buffer.from('\r\n\r\n'))) return;
+                        buffer = Buffer.alloc(0);
+                        socket.end(
+                            'HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\nthrough-singbox',
+                        );
+                    }
+                }
+            });
+        });
+        upstream.listen(0, '127.0.0.1');
+        await once(upstream, 'listening');
+        t.after(async () => {
+            for (const socket of sockets) socket.destroy();
+            await new Promise((resolve) => upstream.close(resolve));
+        });
+        const port = await unusedPort();
+        const config = buildSingboxConfig(
+            simpleProxyToConfig({
+                protocol: 'socks5',
+                host: '127.0.0.1',
+                port: upstream.address().port,
+                username,
+                password,
+            }),
+            port,
+        );
+        await core.check(config);
+        const runtime = await core.start(config);
+        t.after(() => runtime.stop());
+        assert.equal((await request(port)).body, 'through-singbox');
+        assert.equal(authenticated, true);
+        assert.equal(requestedDomain, 'fixture.invalid');
+        await runtime.stop();
+    },
+);

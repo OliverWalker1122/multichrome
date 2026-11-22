@@ -1,0 +1,74 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { resolveProxyIPViaHttpProxy } from '../electron/proxyProbeClient.js';
+
+for (const authenticated of [false, true]) {
+    test(`生产 HTTP 出口探测${authenticated ? '有认证' : '无认证'}完整发送请求头并及时取得 IP`, async (t) => {
+        const observations = [];
+        const sockets = new Set();
+        const expectedIP = '203.0.113.42';
+        const server = http.createServer((request, response) => {
+            observations.push({
+                method: request.method,
+                url: request.url,
+                host: request.headers.host,
+                authorization: request.headers['proxy-authorization'],
+            });
+            response.writeHead(200, {
+                'Content-Type': 'text/plain',
+                Connection: 'close',
+            });
+            response.end(`${expectedIP}\n`);
+        });
+        server.on('connection', (socket) => {
+            sockets.add(socket);
+            socket.on('close', () => sockets.delete(socket));
+        });
+        t.after(async () => {
+            for (const socket of sockets) socket.destroy();
+            await new Promise((resolve) => server.close(resolve));
+        });
+        await new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolve);
+        });
+        const port = server.address().port;
+        const credentials = authenticated
+            ? { username: 'fixture-user', password: 'fixture-password' }
+            : {};
+        let timer;
+        try {
+            const ip = await Promise.race([
+                resolveProxyIPViaHttpProxy(
+                    { protocol: 'http:', host: '127.0.0.1', port, ...credentials },
+                    { host: 'fixture.invalid', path: '/ip' },
+                ),
+                new Promise((_, reject) => {
+                    timer = setTimeout(
+                        () =>
+                            reject(
+                                new Error(
+                                    '本地代理未在 1500ms 内收到完整 HTTP 请求头并返回 IP',
+                                ),
+                            ),
+                        1500,
+                    );
+                }),
+            ]);
+            assert.equal(ip, expectedIP);
+            assert.deepEqual(observations, [
+                {
+                    method: 'GET',
+                    url: 'http://fixture.invalid/ip',
+                    host: 'fixture.invalid',
+                    authorization: authenticated
+                        ? `Basic ${Buffer.from('fixture-user:fixture-password').toString('base64')}`
+                        : undefined,
+                },
+            ]);
+        } finally {
+            clearTimeout(timer);
+        }
+    });
+}

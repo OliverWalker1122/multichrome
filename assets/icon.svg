@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <clipPath id="squircleClip">
+      <rect x="24" y="24" width="464" height="464" rx="112" />
+    </clipPath>
+
+    <linearGradient id="bgGrad" x1="40" y1="28" x2="472" y2="484" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2BC0FF" />
+      <stop offset="48%" stop-color="#0078D4" />
+      <stop offset="100%" stop-color="#00449E" />
+    </linearGradient>
+
+    <linearGradient id="rimGrad" x1="256" y1="24" x2="256" y2="488" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.52" />
+      <stop offset="35%" stop-color="#FFFFFF" stop-opacity="0.10" />
+      <stop offset="100%" stop-color="#001A45" stop-opacity="0.30" />
+    </linearGradient>
+
+    <linearGradient id="backCard" x1="156" y1="92" x2="408" y2="306" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.44" />
+      <stop offset="100%" stop-color="#B8E4FF" stop-opacity="0.16" />
+    </linearGradient>
+
+    <linearGradient id="midCard" x1="128" y1="138" x2="394" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.74" />
+      <stop offset="100%" stop-color="#D7F1FF" stop-opacity="0.42" />
+    </linearGradient>
+
+    <linearGradient id="frontCard" x1="100" y1="184" x2="378" y2="418" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.99" />
+      <stop offset="100%" stop-color="#E8F5FF" stop-opacity="0.95" />
+    </linearGradient>
+
+    <linearGradient id="coreGrad" x1="182" y1="252" x2="304" y2="374" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00A4EF" />
+      <stop offset="52%" stop-color="#0067C0" />
+      <stop offset="100%" stop-color="#00C49A" />
+    </linearGradient>
+
+    <filter id="cardShadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#002255" flood-opacity="0.26" />
+    </filter>
+    <filter id="outerShadow" x="-8%" y="-8%" width="116%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#001633" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <!-- Main Fluent Squircle (100% transparent outside) -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bgGrad)" filter="url(#outerShadow)" />
+
+  <!-- Clipped internal lighting & layered glass profile cards -->
+  <g clip-path="url(#squircleClip)">
+    <ellipse cx="150" cy="96" rx="200" ry="110" fill="#9AE8FF" opacity="0.20" transform="rotate(-16 150 96)" />
+
+    <!-- Layer 3 (Back isolated profile) -->
+    <rect x="162" y="96" width="248" height="206" rx="34" fill="url(#backCard)" stroke="#FFFFFF" stroke-opacity="0.38" stroke-width="3" />
+
+    <!-- Layer 2 (Middle isolated profile) -->
+    <rect x="132" y="140" width="260" height="214" rx="36" fill="url(#midCard)" stroke="#FFFFFF" stroke-opacity="0.62" stroke-width="3" filter="url(#cardShadow)" />
+
+    <!-- Layer 1 (Front primary browser window) -->
+    <g filter="url(#cardShadow)">
+      <rect x="102" y="186" width="272" height="228" rx="38" fill="url(#frontCard)" />
+      <!-- Minimal window chrome dots -->
+      <circle cx="142" cy="218" r="8" fill="#0078D4" opacity="0.46" />
+      <circle cx="168" cy="218" r="8" fill="#0078D4" opacity="0.30" />
+      <circle cx="194" cy="218" r="8" fill="#0078D4" opacity="0.18" />
+      <!-- Isolated green running beacon -->
+      <circle cx="332" cy="218" r="10.5" fill="#10B981" />
+
+      <!-- Crisp multi-profile browser aperture emblem -->
+      <circle cx="238" cy="318" r="56" fill="none" stroke="url(#coreGrad)" stroke-width="21" />
+      <circle cx="238" cy="318" r="24" fill="url(#coreGrad)" />
+    </g>
+  </g>
+
+  <!-- Crisp inner glass bezel -->
+  <rect x="27" y="27" width="458" height="458" rx="109" fill="none" stroke="url(#rimGrad)" stroke-width="6" />
+</svg>

@@ -1,0 +1,86 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+    background: transparent;
+    font-family:
+        'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI',
+        'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+}
+
+#root {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
+}
+
+/* 允许日志、详情字段、代码与输入框选中复制 */
+input,
+textarea,
+code,
+pre,
+[data-selectable='true'] {
+    user-select: text;
+}
+
+/* Electron 原生标题栏拖动区域 */
+.win11-drag {
+    -webkit-app-region: drag;
+}
+
+.win11-no-drag {
+    -webkit-app-region: no-drag;
+}
+
+/* Windows 11 纤细滚动条 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.35);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(128, 128, 128, 0.58);
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
+}
