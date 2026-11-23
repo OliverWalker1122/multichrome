@@ -166,6 +166,7 @@ interface RunningEnvironmentRecord {
     dataDir: string;
     debugPort?: number;
     launchedAt: number;
+    proxyId?: string;
     startupGate?: ProxyStartupGate;
 }
 
@@ -351,6 +352,10 @@ export class ChromeManager {
 
             // 移除已结束的进程
             endedIds.forEach(id => {
+                const endedRecord = this.runningProcesses.get(id);
+                if (endedRecord?.proxyId) {
+                    this.proxyManager?.touchActivity?.(endedRecord.proxyId);
+                }
                 this.runningProcesses.delete(id);
             });
 
@@ -913,15 +918,15 @@ export class ChromeManager {
                 (this.proxyManager.list() as ManagedProxyRecord[]).find(
                     (item) => item.id === env.proxyId,
                 ) || null;
-            if (
-                managedProxy &&
-                (!managedProxy.localAddress || managedProxy.status !== 'running')
-            ) {
+            if (managedProxy) {
                 try {
-                    proxyAddress = await this.proxyManager.ensureStarted(env.proxyId);
+                    proxyAddress = await this.ensureManagedProxyReady(
+                        env.proxyId,
+                        id,
+                    );
                 } catch (err) {
                     log.warn(
-                        `健康自检按需启动内置代理失败 (${managedProxy.name}):`,
+                        `健康自检按需启动或重建内置代理失败 (${managedProxy.name}):`,
                         err,
                     );
                 }
@@ -1174,6 +1179,62 @@ export class ChromeManager {
     // 释放预留的端口
     private releasePort(port: number): void {
         this.reservedPorts.delete(port);
+    }
+
+    private async isManagedProxyInUseByOtherBrowser(
+        proxyId: string,
+        excludeEnvId?: string,
+    ): Promise<boolean> {
+        const rows = this.db
+            .prepare('SELECT id, dataDir FROM environments WHERE proxyId = ?')
+            .all(proxyId) as Array<{ id: string; dataDir?: string }>;
+        for (const row of rows) {
+            if (row.id === excludeEnvId) continue;
+            if (this.runningProcesses.has(row.id)) {
+                return true;
+            }
+        }
+        for (const row of rows) {
+            if (row.id === excludeEnvId || !row.dataDir) continue;
+            const local = await isProfileRunningLocally(row.dataDir);
+            if (local.running) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private evictProxyGeoCache(proxyAddress?: string): void {
+        if (!proxyAddress) return;
+        const parsed = parseProxyAddress(proxyAddress);
+        if (!parsed) return;
+        const cacheKey = `${parsed.protocol}//${parsed.host}:${parsed.port}`;
+        this.proxyGeoCache.delete(cacheKey);
+    }
+
+    private async ensureManagedProxyReady(
+        proxyId: string,
+        excludeEnvId?: string,
+    ): Promise<string> {
+        const previousAddress = (
+            this.proxyManager.list() as ManagedProxyRecord[]
+        ).find((item) => item.id === proxyId)?.localAddress;
+
+        const nextAddress =
+            typeof this.proxyManager.ensureFresh === 'function'
+                ? await this.proxyManager.ensureFresh(proxyId, {
+                      isInUse: () =>
+                          this.isManagedProxyInUseByOtherBrowser(
+                              proxyId,
+                              excludeEnvId,
+                          ),
+                  })
+                : await this.proxyManager.ensureStarted(proxyId);
+
+        if (previousAddress && previousAddress !== nextAddress) {
+            this.evictProxyGeoCache(previousAddress);
+        }
+        return nextAddress;
     }
 
     private async resolveProxyExitInfoBeforeLaunch(
@@ -1451,11 +1512,11 @@ export class ChromeManager {
                 }
             }
 
-            // 并行执行：分配私有随机高调试端口 + 启动内置代理（如有）
+            // 并行执行：分配私有随机高调试端口 + 启动/重建内置代理（如有）
             const [debugPort, proxyAddress] = await Promise.all([
                 this.findAvailableDebugPort(),
                 env.proxyId
-                    ? this.proxyManager.ensureStarted(env.proxyId)
+                    ? this.ensureManagedProxyReady(env.proxyId, id)
                     : Promise.resolve(env.proxy || (globalProxy?.enabled ? globalProxy?.address : undefined)),
             ]);
             allocatedDebugPort = debugPort;
@@ -1798,14 +1859,18 @@ export class ChromeManager {
                 }
             });
 
-            // 标记为运行中（保存调试端口与启动闸门）
+            // 标记为运行中（保存调试端口、关联代理与启动闸门）
             this.runningProcesses.set(id, {
                 envId: id,
                 dataDir: env.dataDir,
                 debugPort: debugPort,
                 launchedAt: Date.now(),
+                proxyId: env.proxyId,
                 startupGate,
             });
+            if (env.proxyId) {
+                this.proxyManager?.touchActivity?.(env.proxyId);
+            }
             const launchRecord = this.runningProcesses.get(id);
 
             // 更新最后使用时间
@@ -1820,6 +1885,9 @@ export class ChromeManager {
                 if (this.runningProcesses.get(id) !== launchRecord) return;
                 log.info(`[${env.name}] 浏览器已关闭 - 端口:${debugPort}, ID:${envIdShort}`);
                 this.releasePort(debugPort);
+                if (launchRecord?.proxyId) {
+                    this.proxyManager?.touchActivity?.(launchRecord.proxyId);
+                }
                 if (launchRecord?.startupGate) {
                     void launchRecord.startupGate.close();
                     launchRecord.startupGate = undefined;
@@ -2281,7 +2349,10 @@ export class ChromeManager {
                 }
             }
 
-            // 从运行列表中移除
+            // 从运行列表中移除并刷新关联代理最近活跃时间
+            if (envProcess.proxyId) {
+                this.proxyManager?.touchActivity?.(envProcess.proxyId);
+            }
             this.runningProcesses.delete(id);
 
             // 通知前端更新

@@ -484,3 +484,285 @@ test('batchImport validates concurrently with a single atomic persist and preser
     assert.ok(maxConcurrentChecks >= 2 && maxConcurrentChecks <= 4);
     assert.ok(events.some((evt) => evt.kind === 'state'));
 });
+
+test('ensureFresh reuses warm proxies and touchActivity extends the warm window', async () => {
+    const { manager, calls } = fixture();
+    let now = 1_000_000;
+    manager.now = () => now;
+    manager.idleRecycleMs = 120_000;
+
+    const saved = await manager.save(simpleInput());
+    const firstAddress = await manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    assert.equal(calls.started.length, 1);
+    assert.equal(calls.stopped, 0);
+
+    now += 60_000;
+    const warmAddress = await manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    assert.equal(warmAddress, firstAddress);
+    assert.equal(calls.started.length, 1);
+    assert.equal(calls.stopped, 0);
+
+    // Simulates browser close refreshing lastActiveAt shortly before reopen.
+    now += 100_000;
+    manager.touchActivity(saved.id);
+    now += 50_000;
+    const afterTouch = await manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    assert.equal(afterTouch, firstAddress);
+    assert.equal(calls.started.length, 1);
+    assert.equal(calls.stopped, 0);
+
+    await manager.closeAll();
+});
+
+test('ensureFresh recycles idle-stale proxies only when unused and fails safe if isInUse throws', async () => {
+    const { manager, calls } = fixture();
+    let now = 2_000_000;
+    manager.now = () => now;
+    manager.idleRecycleMs = 120_000;
+
+    const saved = await manager.save(simpleInput());
+    const firstAddress = await manager.ensureStarted(saved.id);
+    assert.equal(calls.started.length, 1);
+
+    now += 120_000;
+    assert.equal(manager.getStaleReason(saved.id), 'idle-timeout');
+
+    // Never tear down a listener while another browser is actively bound to it.
+    const whileInUse = await manager.ensureFresh(saved.id, {
+        isInUse: () => true,
+    });
+    assert.equal(whileInUse, firstAddress);
+    assert.equal(calls.started.length, 1);
+    assert.equal(calls.stopped, 0);
+
+    // Fail-safe when usage verification throws.
+    now += 120_000;
+    const whileCheckErrors = await manager.ensureFresh(saved.id, {
+        isInUse: async () => {
+            throw new Error('process scan failed');
+        },
+    });
+    assert.equal(whileCheckErrors, firstAddress);
+    assert.equal(calls.started.length, 1);
+    assert.equal(calls.stopped, 0);
+
+    // Unused + idle-stale => transparent recycle onto a fresh sing-box process.
+    now += 120_000;
+    assert.equal(manager.getStaleReason(saved.id), 'idle-timeout');
+    const recycledAddress = await manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    assert.match(recycledAddress, /^http:\/\/127\.0\.0\.1:\d+$/);
+    assert.equal(calls.stopped, 1);
+    assert.equal(calls.started.length, 2);
+    assert.equal(manager.getStaleReason(saved.id), null);
+    assert.ok(
+        manager
+            .getLogs(saved.id)
+            .some((log) =>
+                log.message.includes(
+                    '检测到代理长时间闲置，正在重建 sing-box 通道以避免首开卡顿',
+                ),
+            ),
+    );
+
+    await manager.closeAll();
+});
+
+test('ensureFresh recycles on upstream-error and system-resume; exit probe clears upstream-error only', async () => {
+    const { manager, calls } = fixture();
+    let now = 3_000_000;
+    manager.now = () => now;
+    manager.idleRecycleMs = 10 * 60_000;
+
+    let shouldFailProbe = false;
+    manager.exitProbe = async () => {
+        if (shouldFailProbe) throw new Error('upstream timeout');
+        return { ip: '192.0.2.30', country: '测试国家' };
+    };
+
+    const saved = await manager.save(simpleInput());
+    await manager.ensureStarted(saved.id);
+    // Let the background start exitProbe settle.
+    await manager.refreshExitInfo(saved.id);
+
+    // Upstream log error marks stale; a subsequent healthy exit check clears it.
+    calls.handlers[0].onLog({ level: 'error', message: 'dial timeout' });
+    assert.equal(manager.getStaleReason(saved.id), 'upstream-error');
+    assert.equal(manager.list()[0].lastError, 'dial timeout');
+
+    now += 20_000;
+    await manager.refreshExitInfo(saved.id);
+    assert.equal(manager.getStaleReason(saved.id), null);
+    assert.equal(manager.list()[0].lastError, undefined);
+
+    // Failed exit probe marks stale -> ensureFresh recycles.
+    shouldFailProbe = true;
+    now += 20_000;
+    await manager.refreshExitInfo(saved.id);
+    assert.equal(manager.getStaleReason(saved.id), 'upstream-error');
+
+    shouldFailProbe = false;
+    await manager.ensureFresh(saved.id, { isInUse: () => false });
+    assert.equal(calls.stopped, 1);
+    assert.equal(calls.started.length, 2);
+    assert.ok(
+        manager
+            .getLogs(saved.id)
+            .some((log) =>
+                log.message.includes(
+                    '检测到代理先前出现连接异常，正在重建 sing-box 通道',
+                ),
+            ),
+    );
+    await manager.refreshExitInfo(saved.id);
+
+    // System resume marks stale and is NOT downgraded or cleared by log/probe activity.
+    manager.markAllStale('system-resume');
+    assert.equal(manager.getStaleReason(saved.id), 'system-resume');
+    calls.handlers[1].onLog({ level: 'error', message: 'transient error' });
+    assert.equal(manager.getStaleReason(saved.id), 'system-resume');
+    now += 20_000;
+    await manager.refreshExitInfo(saved.id);
+    assert.equal(manager.getStaleReason(saved.id), 'system-resume');
+
+    await manager.ensureFresh(saved.id, { isInUse: () => false });
+    assert.equal(calls.stopped, 2);
+    assert.equal(calls.started.length, 3);
+    assert.equal(manager.getStaleReason(saved.id), null);
+    assert.ok(
+        manager
+            .getLogs(saved.id)
+            .some((log) =>
+                log.message.includes(
+                    '检测到系统从休眠恢复，正在重建 sing-box 通道',
+                ),
+            ),
+    );
+
+    await manager.closeAll();
+});
+
+test('concurrent ensureFresh shares one recycle and stop/closeAll during recycle leaves no running child', async () => {
+    const startGate = deferred();
+    let gateSecondStart = false;
+    const stopGate = deferred();
+    let gateSecondStop = false;
+    let activeChildren = 0;
+
+    const { manager, calls } = fixture({
+        start: async (config, handlers) => {
+            calls.started.push(config);
+            calls.handlers.push(handlers);
+            if (gateSecondStart) {
+                gateSecondStart = false;
+                await startGate.promise;
+            }
+            activeChildren += 1;
+            let stopped = false;
+            return {
+                stop: async () => {
+                    if (stopped) return;
+                    stopped = true;
+                    if (gateSecondStop) {
+                        gateSecondStop = false;
+                        await stopGate.promise;
+                    }
+                    activeChildren -= 1;
+                    calls.stopped += 1;
+                    handlers.onExit({ unexpected: false, code: 0 });
+                },
+            };
+        },
+    });
+
+    const saved = await manager.save(simpleInput());
+    await manager.ensureStarted(saved.id);
+    assert.equal(activeChildren, 1);
+
+    manager.markAllStale('system-resume');
+    const inUseGate = deferred();
+    gateSecondStart = true;
+
+    const p1 = manager.ensureFresh(saved.id, {
+        isInUse: () => inUseGate.promise,
+    });
+    const p2 = manager.ensureFresh(saved.id, {
+        isInUse: () => inUseGate.promise,
+    });
+
+    inUseGate.resolve(false);
+    // Yield so recycle enters stop -> start and registers recyclingPromises.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Overlapping ensureStarted joins the same recycle, and edits are blocked.
+    const p3 = manager.ensureStarted(saved.id);
+    await assert.rejects(
+        manager.save({ ...simpleInput(), id: saved.id }),
+        /先停止/,
+    );
+
+    startGate.resolve();
+    const [a1, a2, a3] = await Promise.all([p1, p2, p3]);
+    assert.equal(a1, a2);
+    assert.equal(a2, a3);
+    assert.equal(calls.stopped, 1);
+    assert.equal(calls.started.length, 2);
+    assert.equal(activeChildren, 1);
+
+    // Explicit stop() during an in-flight recycle cancels restart and stops cleanly.
+    manager.markAllStale('system-resume');
+    gateSecondStop = true;
+    const recycleBeforeStop = manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    // Wait one tick so recycle enters stopInternal() before stop() is invoked.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const stopPromise = manager.stop(saved.id);
+    stopGate.resolve();
+    await assert.rejects(recycleBeforeStop, /取消/);
+    await stopPromise;
+    assert.equal(manager.list()[0].status, 'stopped');
+    assert.equal(activeChildren, 0);
+
+    // Explicit stop() called immediately while isInUse is still pending also cancels cleanly.
+    await manager.ensureStarted(saved.id);
+    assert.equal(activeChildren, 1);
+    manager.markAllStale('system-resume');
+    const pendingInUse = deferred();
+    const recycleDuringInUse = manager.ensureFresh(saved.id, {
+        isInUse: () => pendingInUse.promise,
+    });
+    const immediateStop = manager.stop(saved.id);
+    pendingInUse.resolve(false);
+    await assert.rejects(recycleDuringInUse, /取消/);
+    await immediateStop;
+    assert.equal(manager.list()[0].status, 'stopped');
+    assert.equal(activeChildren, 0);
+
+    // closeAll() during an in-flight recycle cancels cleanly with zero leaked children.
+    await manager.ensureStarted(saved.id);
+    assert.equal(activeChildren, 1);
+    manager.markAllStale('system-resume');
+    const closeStopGate = deferred();
+    const origStart = manager.core.start;
+    manager.core.start = async (config, handlers) => {
+        await closeStopGate.promise;
+        return origStart(config, handlers);
+    };
+    const recycleDuringClose = manager.ensureFresh(saved.id, {
+        isInUse: () => false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    const closePromise = manager.closeAll();
+    closeStopGate.resolve();
+    await assert.rejects(recycleDuringClose, /启动失败|退出|取消/);
+    await closePromise;
+    assert.equal(activeChildren, 0);
+});

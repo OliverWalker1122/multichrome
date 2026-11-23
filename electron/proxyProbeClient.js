@@ -280,11 +280,33 @@ function connectSecureSocket(host, port, timeoutMs = 3500, signal) {
     });
 }
 
-export async function fetchHttpViaHttpProxy(proxy, target, signal) {
+const DEFAULT_PROBE_CONNECT_TIMEOUT_MS = 3500;
+const DEFAULT_PROBE_RESPONSE_TIMEOUT_MS = 5000;
+
+export async function fetchHttpViaHttpProxy(
+    proxy,
+    target,
+    signal,
+    timeoutMs = DEFAULT_PROBE_RESPONSE_TIMEOUT_MS,
+) {
+    const connectTimeoutMs = Math.min(
+        DEFAULT_PROBE_CONNECT_TIMEOUT_MS,
+        timeoutMs,
+    );
     const socket =
         proxy.protocol === 'https:'
-            ? await connectSecureSocket(proxy.host, proxy.port, 3500, signal)
-            : await connectPlainSocket(proxy.host, proxy.port, 3500, signal);
+            ? await connectSecureSocket(
+                  proxy.host,
+                  proxy.port,
+                  connectTimeoutMs,
+                  signal,
+              )
+            : await connectPlainSocket(
+                  proxy.host,
+                  proxy.port,
+                  connectTimeoutMs,
+                  signal,
+              );
 
     const onAbort = () => socket.destroy();
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -324,7 +346,7 @@ export async function fetchHttpViaHttpProxy(proxy, target, signal) {
 
             const timer = setTimeout(
                 () => finish(undefined, new Error('proxy response timeout')),
-                3500,
+                timeoutMs,
             );
             const handleData = (chunk) => {
                 chunks.push(chunk);
@@ -344,16 +366,35 @@ export async function fetchHttpViaHttpProxy(proxy, target, signal) {
     }
 }
 
-export async function resolveProxyIPViaHttpProxy(proxy, target, signal) {
-    const response = await fetchHttpViaHttpProxy(proxy, target, signal);
+export async function resolveProxyIPViaHttpProxy(
+    proxy,
+    target,
+    signal,
+    timeoutMs = DEFAULT_PROBE_RESPONSE_TIMEOUT_MS,
+) {
+    const response = await fetchHttpViaHttpProxy(
+        proxy,
+        target,
+        signal,
+        timeoutMs,
+    );
     return extractIPv4FromHttpResponse(response);
 }
 
-export async function fetchHttpViaSocksProxy(proxy, target, signal) {
+export async function fetchHttpViaSocksProxy(
+    proxy,
+    target,
+    signal,
+    timeoutMs = DEFAULT_PROBE_RESPONSE_TIMEOUT_MS,
+) {
+    const connectTimeoutMs = Math.min(
+        DEFAULT_PROBE_CONNECT_TIMEOUT_MS,
+        timeoutMs,
+    );
     const socket = await connectPlainSocket(
         proxy.host,
         proxy.port,
-        3500,
+        connectTimeoutMs,
         signal,
     );
     const onAbort = () => socket.destroy();
@@ -367,7 +408,7 @@ export async function fetchHttpViaSocksProxy(proxy, target, signal) {
             : Buffer.from([0x05, 0x01, 0x00]);
         socket.write(hello);
 
-        const helloResp = await reader.read(2, 3500);
+        const helloResp = await reader.read(2, connectTimeoutMs);
         if (helloResp[0] !== 0x05 || helloResp[1] === 0xff) {
             throw new Error('socks5 handshake rejected');
         }
@@ -383,7 +424,7 @@ export async function fetchHttpViaSocksProxy(proxy, target, signal) {
             ]);
             socket.write(authReq);
 
-            const authResp = await reader.read(2, 3500);
+            const authResp = await reader.read(2, connectTimeoutMs);
             if (authResp[1] !== 0x00) {
                 throw new Error('socks5 auth failed');
             }
@@ -397,7 +438,7 @@ export async function fetchHttpViaSocksProxy(proxy, target, signal) {
         ]);
         socket.write(connectReq);
 
-        const connectRespHead = await reader.read(4, 3500);
+        const connectRespHead = await reader.read(4, timeoutMs);
         if (connectRespHead[0] !== 0x05 || connectRespHead[1] !== 0x00) {
             throw new Error('socks5 connect failed');
         }
@@ -406,14 +447,14 @@ export async function fetchHttpViaSocksProxy(proxy, target, signal) {
         if (connectRespHead[3] === 0x01) {
             remaining = 4 + 2;
         } else if (connectRespHead[3] === 0x03) {
-            const hostLen = (await reader.read(1, 3500))[0];
+            const hostLen = (await reader.read(1, timeoutMs))[0];
             remaining = hostLen + 2;
         } else if (connectRespHead[3] === 0x04) {
             remaining = 16 + 2;
         } else {
             throw new Error('socks5 unknown address type');
         }
-        await reader.read(remaining, 3500);
+        await reader.read(remaining, timeoutMs);
 
         const request = [
             `GET ${target.path} HTTP/1.1`,
@@ -425,7 +466,7 @@ export async function fetchHttpViaSocksProxy(proxy, target, signal) {
         ].join('\r\n');
         socket.write(request);
 
-        return await reader.readAll(3500);
+        return await reader.readAll(timeoutMs);
     } finally {
         signal?.removeEventListener('abort', onAbort);
         socket.destroy();
@@ -466,6 +507,9 @@ function raceFirstSuccess(promises) {
  *   bypassCache?: boolean;
  *   cache?: Map<string, { info: any; expiresAt: number }>;
  *   cacheTtlMs?: number;
+ *   timeoutMs?: number;
+ *   geoTargets?: Array<{ host: string; path: string }>;
+ *   ipTargets?: Array<{ host: string; path: string }>;
  *   logger?: { info?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void };
  * }} [options]
  */
@@ -476,6 +520,9 @@ export async function probeProxyExitInfo(
         bypassCache = false,
         cache = undefined,
         cacheTtlMs = 20000,
+        timeoutMs = DEFAULT_PROBE_RESPONSE_TIMEOUT_MS,
+        geoTargets = GEO_PROBE_TARGETS,
+        ipTargets = IP_ONLY_PROBE_TARGETS,
         logger = undefined,
     } = {},
 ) {
@@ -502,13 +549,11 @@ export async function probeProxyExitInfo(
 
     const fetchBuffer = (target, signal) =>
         proxy.protocol === 'socks:' || proxy.protocol === 'socks5:'
-            ? fetchHttpViaSocksProxy(proxy, target, signal)
-            : fetchHttpViaHttpProxy(proxy, target, signal);
+            ? fetchHttpViaSocksProxy(proxy, target, signal, timeoutMs)
+            : fetchHttpViaHttpProxy(proxy, target, signal, timeoutMs);
 
-    const controller = new AbortController();
-
-    const probeGeoTarget = async (target) => {
-        const buffer = await fetchBuffer(target, controller.signal);
+    const probeGeoTarget = async (target, signal) => {
+        const buffer = await fetchBuffer(target, signal);
         const parsed = parseGeoProbeResponse(buffer);
         if (!parsed || !parsed.ip) {
             throw new Error(`invalid geo response from ${target.host}`);
@@ -516,8 +561,8 @@ export async function probeProxyExitInfo(
         return parsed;
     };
 
-    const probeIpTarget = async (target) => {
-        const buffer = await fetchBuffer(target, controller.signal);
+    const probeIpTarget = async (target, signal) => {
+        const buffer = await fetchBuffer(target, signal);
         const ip = extractIPv4FromHttpResponse(buffer);
         if (!ip) {
             throw new Error(`empty ip from ${target.host}`);
@@ -525,13 +570,21 @@ export async function probeProxyExitInfo(
         return { ip };
     };
 
+    const primaryController = new AbortController();
+    let fallbackController = null;
+
     try {
         let result;
         if (needTimezone) {
+            // Race only the 3 geo endpoints first (instead of blasting 8 sockets at once),
+            // reducing connection burst & RST churn on residential/chained proxies.
             let fallbackIpInfo = null;
             const geoWithTzPromise = raceFirstSuccess(
-                GEO_PROBE_TARGETS.map(async (target) => {
-                    const info = await probeGeoTarget(target);
+                geoTargets.map(async (target) => {
+                    const info = await probeGeoTarget(
+                        target,
+                        primaryController.signal,
+                    );
                     if (!fallbackIpInfo) fallbackIpInfo = info;
                     if (!info.timezone) {
                         throw new Error(`missing timezone from ${target.host}`);
@@ -540,26 +593,35 @@ export async function probeProxyExitInfo(
                 }),
             );
 
-            const ipOnlyPromise = raceFirstSuccess(
-                IP_ONLY_PROBE_TARGETS.map((target) => probeIpTarget(target)),
-            ).catch(() => null);
-
             try {
                 result = await geoWithTzPromise;
             } catch {
-                const ipFallback = fallbackIpInfo || (await ipOnlyPromise);
-                if (!ipFallback) {
-                    throw new Error('all geo and ip targets failed');
+                primaryController.abort();
+                if (fallbackIpInfo) {
+                    result = fallbackIpInfo;
+                } else {
+                    fallbackController = new AbortController();
+                    const ipFallback = await raceFirstSuccess(
+                        ipTargets.map((target) =>
+                            probeIpTarget(target, fallbackController.signal),
+                        ),
+                    ).catch(() => null);
+                    if (!ipFallback) {
+                        throw new Error('all geo and ip targets failed');
+                    }
+                    result = ipFallback;
                 }
-                result = ipFallback;
             }
         } else {
             result = await raceFirstSuccess(
-                PROXY_IP_PROBE_TARGETS.map((target) => probeIpTarget(target)),
+                ipTargets.map((target) =>
+                    probeIpTarget(target, primaryController.signal),
+                ),
             );
         }
 
-        controller.abort();
+        primaryController.abort();
+        fallbackController?.abort();
         if (cache) {
             cache.set(cacheKey, {
                 info: result,
@@ -568,7 +630,8 @@ export async function probeProxyExitInfo(
         }
         return result;
     } catch {
-        controller.abort();
+        primaryController.abort();
+        fallbackController?.abort();
         logger?.warn?.('[代理预解析] 全部探测节点均未返回有效出口信息');
         return null;
     }
