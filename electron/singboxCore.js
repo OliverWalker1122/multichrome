@@ -23,44 +23,71 @@ function configPayload(config) {
     return payload;
 }
 
+const ANSI_ESC = String.fromCharCode(27);
+const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESC}\\[[0-9;]*[A-Za-z]`, 'g');
+
+export function stripAnsi(text) {
+    return typeof text === 'string'
+        ? text.replace(ANSI_ESCAPE_REGEX, '')
+        : '';
+}
+
 function checkFailure(text) {
-    if (/unknown outbound type|unknown endpoint type/i.test(text))
+    const clean = stripAnsi(text);
+    if (/unknown outbound type|unknown endpoint type/i.test(clean))
         return '此出口类型不受内置 sing-box 核心支持';
-    if (/unknown field|unmarshal|decode config|invalid character/i.test(text))
+    if (/unknown field|unmarshal|decode config|invalid character/i.test(clean))
         return 'sing-box 配置字段或语法无效，请检查当前核心版本的配置格式';
-    if (/deprecated|removed in/i.test(text))
+    if (/deprecated|removed in/i.test(clean))
         return '配置使用了已移除的 sing-box 字段，请按当前核心版本迁移';
-    if (/uuid/i.test(text)) return 'sing-box UUID 配置无效';
-    if (/certificate|private key|public key|tls/i.test(text))
+    if (/uuid/i.test(clean)) return 'sing-box UUID 配置无效';
+    if (/certificate|private key|public key|tls/i.test(clean))
         return 'sing-box TLS 或密钥配置无效';
-    if (/outbound.*not found|detour.*not found/i.test(text))
+    if (/outbound.*not found|detour.*not found/i.test(clean))
         return 'sing-box 引用了不存在的出口';
     return 'sing-box 配置校验失败，请检查协议参数及依赖配置';
 }
 
-function safeLog(line) {
-    if (/\b(FATAL|ERROR|WARN)\b/i.test(line)) {
-        if (/authentication|authenticate|407|401/i.test(line))
+export function safeLog(line) {
+    const clean = stripAnsi(line);
+    if (!clean) return null;
+    if (/\b(FATAL|ERROR|WARN)\b/i.test(clean)) {
+        // Local browser/client closing an idle HTTP keep-alive socket to 127.0.0.1 is benign.
+        if (/read http request:.*use of closed network connection/i.test(clean)) {
+            return null;
+        }
+        if (/reality verification failed/i.test(clean))
+            return {
+                level: 'error',
+                message:
+                    'REALITY 握手校验失败，请检查公钥/Short ID/SNI，或排查透明代理的 TLS 域名嗅探覆写',
+            };
+        if (/authentication|authenticate|407|401/i.test(clean))
             return {
                 level: 'error',
                 message: '上游代理认证失败，请检查认证配置',
             };
-        if (/address already in use|bind:/i.test(line))
+        if (/address already in use|bind:/i.test(clean))
             return { level: 'error', message: '本地代理端口被占用' };
-        if (/timeout|timed out|deadline exceeded/i.test(line))
+        if (/timeout|timed out|deadline exceeded/i.test(clean))
             return { level: 'error', message: '代理连接超时' };
-        if (/refused|reset|closed|eof|broken pipe/i.test(line))
+        if (/\btls:|x509:|handshake/i.test(clean))
+            return {
+                level: 'error',
+                message: '上游 TLS 握手失败，请检查证书、SNI 或协议配置',
+            };
+        if (/refused|reset|closed|eof|broken pipe/i.test(clean))
             return { level: 'error', message: '代理连接中断或上游不可达' };
         return {
             level: 'error',
             message: 'sing-box 连接或配置发生错误，请检查上游配置',
         };
     }
-    const target = line.match(
+    const target = clean.match(
         /(?:inbound connection to|outbound connection to) ([a-z0-9.[\]:_-]{1,260})(?:\s|$)/i,
     )?.[1];
     if (target) return { level: 'info', message: `连接目标 ${target}` };
-    if (line.includes('sing-box started'))
+    if (clean.includes('sing-box started'))
         return { level: 'info', message: 'sing-box 核心已就绪' };
     return null;
 }

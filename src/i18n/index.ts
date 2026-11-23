@@ -84,6 +84,10 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
     'sing-box 引用了不存在的出口': 'sing-box references a non-existent outbound',
     'sing-box 配置校验失败，请检查协议参数及依赖配置':
         'sing-box configuration validation failed. Check protocol parameters and dependencies.',
+    'REALITY 握手校验失败，请检查公钥/Short ID/SNI，或排查透明代理的 TLS 域名嗅探覆写':
+        'REALITY verification failed. Check public key / short ID / SNI, or bypass TLS domain sniffing on your local TUN/transparent proxy.',
+    '上游 TLS 握手失败，请检查证书、SNI 或协议配置':
+        'Upstream TLS handshake failed. Check certificate, SNI, or protocol settings.',
     '上游代理认证失败，请检查认证配置':
         'Upstream proxy authentication failed. Check credentials.',
     '本地代理端口被占用': 'Local proxy port is already in use',

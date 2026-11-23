@@ -6,7 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
-import { SingboxCore } from '../electron/singboxCore.js';
+import { SingboxCore, safeLog, stripAnsi } from '../electron/singboxCore.js';
 import {
     buildSingboxConfig,
     simpleProxyToConfig,
@@ -330,3 +330,30 @@ test(
         await runtime.stop();
     },
 );
+
+test('safeLog 剥离 ANSI 颜色码并准确诊断 REALITY/TLS 错误且忽略本地保活断开噪音', () => {
+    const realityLine =
+        '+0800 2026-11-24 00:08:39 \u001b[31mERROR\u001b[0m [\u001b[38;5;115m1866514531\u001b[0m 258ms] connection: open connection to api.example.com:80 using outbound/vless[proxy]: reality verification failed';
+    assert.equal(stripAnsi(realityLine).includes('\u001b['), false);
+    const realityEntry = safeLog(realityLine);
+    assert.equal(realityEntry?.level, 'error');
+    assert.match(realityEntry?.message || '', /REALITY 握手校验失败/);
+    assert.equal(realityEntry?.message.includes('api.example.com'), false);
+
+    const tlsLine =
+        '+0800 2026-11-24 00:08:40 \u001b[31mERROR\u001b[0m connection: tls: failed to verify certificate: x509: certificate signed by unknown authority';
+    const tlsEntry = safeLog(tlsLine);
+    assert.equal(tlsEntry?.level, 'error');
+    assert.match(tlsEntry?.message || '', /TLS 握手失败/);
+
+    const benignKeepAlive =
+        '+0800 2026-11-24 01:46:52 \u001b[31mERROR\u001b[0m [3130443072 1.42s] inbound/http[multichrome-in]: process connection from 127.0.0.1:58341: read http request: read tcp 127.0.0.1:58339->127.0.0.1:58341: use of closed network connection';
+    assert.equal(safeLog(benignKeepAlive), null);
+
+    const coloredTarget =
+        '+0800 2026-11-24 01:46:51 \u001b[36mINFO\u001b[0m [12345 0ms] outbound/vless[proxy]: outbound connection to example.com:443';
+    assert.deepEqual(safeLog(coloredTarget), {
+        level: 'info',
+        message: '连接目标 example.com:443',
+    });
+});
