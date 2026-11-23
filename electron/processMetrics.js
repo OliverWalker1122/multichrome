@@ -1,6 +1,59 @@
 /**
- * Per-environment memory attribution and safe Chromium memory-saver flags.
+ * Per-environment memory attribution, cross-platform browser process matching,
+ * and safe Chromium memory-saver flags.
  */
+
+const ENV_SHORT_ID_RE = /^[a-f0-9]{8}$/i;
+
+export function filterBrowserProcessLines(stdout, platform = process.platform) {
+    if (typeof stdout !== 'string' || !stdout) return '';
+    if (platform === 'win32') return stdout;
+    return stdout
+        .split(/\r?\n/)
+        .filter((line) => {
+            if (!line) return false;
+            if (platform === 'darwin') {
+                // Match both Official Google Chrome and fingerprint-chromium (Chromium.app)
+                return /google chrome|chromium/i.test(line);
+            }
+            // Linux: match google-chrome, chrome, chromium, chromium-browser
+            return /chrom(?:e|ium)/i.test(line);
+        })
+        .join('\n');
+}
+
+export function buildForceKillProcessSpec(
+    envIdShort,
+    platform = process.platform,
+) {
+    const normalized =
+        typeof envIdShort === 'string' ? envIdShort.trim().toLowerCase() : '';
+    if (!ENV_SHORT_ID_RE.test(normalized)) {
+        return null;
+    }
+
+    if (platform === 'win32') {
+        // Match only browser processes whose command line targets this exact profile dir
+        return {
+            executable: 'powershell.exe',
+            args: [
+                '-NoProfile',
+                '-NonInteractive',
+                '-Command',
+                `Get-CimInstance -ClassName Win32_Process -Filter "Name like '%chrome%'" | Where-Object { $_.CommandLine -match 'environments[/\\\\]${normalized}\\b' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+            ],
+        };
+    }
+
+    if (platform === 'darwin' || platform === 'linux') {
+        return {
+            executable: 'pkill',
+            args: ['-f', `environments/${normalized}`],
+        };
+    }
+
+    return null;
+}
 
 export function extractEnvIdShortFromCommandLine(commandLine) {
     if (typeof commandLine !== 'string' || !commandLine) return null;

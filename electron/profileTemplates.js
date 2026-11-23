@@ -81,6 +81,33 @@ export function normalizeGroupStartupUrls(raw) {
     return result;
 }
 
+export function renameGroupStartupUrl(rawMap, oldName, newName) {
+    const normalized = normalizeGroupStartupUrls(rawMap);
+    const from = typeof oldName === 'string' ? oldName.trim() : '';
+    const to = typeof newName === 'string' ? newName.trim() : '';
+    if (!from || !to || from === to || !(from in normalized)) {
+        return { changed: false, next: normalized };
+    }
+    const next = { ...normalized };
+    const existingUrl = next[from];
+    delete next[from];
+    if (!(to in next) && existingUrl) {
+        next[to] = existingUrl;
+    }
+    return { changed: true, next };
+}
+
+export function removeGroupStartupUrl(rawMap, groupName) {
+    const normalized = normalizeGroupStartupUrls(rawMap);
+    const target = typeof groupName === 'string' ? groupName.trim() : '';
+    if (!target || !(target in normalized)) {
+        return { changed: false, next: normalized };
+    }
+    const next = { ...normalized };
+    delete next[target];
+    return { changed: true, next };
+}
+
 /**
  * Startup URL precedence: per-environment > per-group > global.
  */

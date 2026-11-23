@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MultiChrome Full UI + 11-Feature End-to-End Verification Suite
+ * MultiChrome Full UI + 12-Feature End-to-End Verification Suite
  *
  * Launches the REAL compiled Electron app against a completely isolated temporary
  * userData directory, connects to the live renderer over CDP, verifies zero uncaught
@@ -68,6 +68,55 @@ function httpGetJson(url) {
             req.destroy();
             reject(new Error('timeout'));
         });
+    });
+}
+
+function httpRequest({
+    port,
+    method = 'GET',
+    path: reqPath = '/',
+    headers = {},
+    body = null,
+    timeoutMs = 20000,
+}) {
+    return new Promise((resolve, reject) => {
+        const req = http.request(
+            {
+                host: '127.0.0.1',
+                port,
+                method,
+                path: reqPath,
+                headers,
+            },
+            (res) => {
+                const chunks = [];
+                res.on('data', (c) => chunks.push(Buffer.from(c)));
+                res.on('end', () => {
+                    const text = Buffer.concat(chunks).toString('utf8');
+                    let json = null;
+                    try {
+                        json = text ? JSON.parse(text) : null;
+                    } catch {
+                        json = null;
+                    }
+                    resolve({
+                        status: res.statusCode,
+                        headers: res.headers,
+                        text,
+                        json,
+                    });
+                });
+            },
+        );
+        req.on('error', reject);
+        req.setTimeout(timeoutMs, () => {
+            req.destroy();
+            reject(new Error('timeout'));
+        });
+        if (body !== null) {
+            req.write(body);
+        }
+        req.end();
     });
 }
 
@@ -199,6 +248,124 @@ async function waitUntil(fn, timeoutMs = 8000, intervalMs = 150) {
 function startLocalTestServer() {
     let hits = 0;
     const server = http.createServer((req, res) => {
+        const urlPath = (req.url || '/').split('?')[0];
+
+        if (urlPath === '/inbox') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!doctype html><html><head><title>Verification Inbox</title></head><body>
+                <h1>Verification Mail</h1>
+                <p id="otp-banner">OTP Code: <strong id="otp-code">739184</strong></p>
+                <table id="quota-table">
+                    <thead><tr><th>Region</th><th>Status</th></tr></thead>
+                    <tbody><tr><td>Tokyo</td><td>Available</td></tr><tr><td>Osaka</td><td>Full</td></tr></tbody>
+                </table>
+            </body></html>`);
+            return;
+        }
+
+        if (urlPath === '/signup') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!doctype html><html><head><title>Cloud Registration</title></head><body>
+                <h1>Create Cloud Account</h1>
+                <label for="reg-email">Work Email</label>
+                <input id="reg-email" name="email" placeholder="Work Email" />
+                <label for="reg-region">Home Region</label>
+                <select id="reg-region" name="region">
+                    <option value="">Select</option>
+                    <option value="ap-tokyo-1">Japan East (Tokyo)</option>
+                    <option value="us-ashburn-1">US East (Ashburn)</option>
+                </select>
+                <div id="shadow-host"></div>
+                <label for="reg-otp">Verification Code</label>
+                <input id="reg-otp" name="otp" placeholder="6-digit OTP" />
+                <button id="submit-reg" type="button">Complete Registration</button>
+                <div id="reg-result"></div>
+                <script>
+                    const host = document.getElementById('shadow-host');
+                    const root = host.attachShadow({ mode: 'open' });
+                    const btn = document.createElement('button');
+                    btn.id = 'agree-terms-btn';
+                    btn.textContent = 'Accept Terms';
+                    window.__termsAccepted = false;
+                    btn.addEventListener('click', (ev) => {
+                        window.__termsAccepted = true;
+                        window.__lastClickTrusted = ev.isTrusted;
+                        btn.textContent = 'Terms Accepted';
+                    });
+                    root.appendChild(btn);
+                    document.getElementById('submit-reg').addEventListener('click', () => {
+                        const email = document.getElementById('reg-email').value;
+                        const region = document.getElementById('reg-region').value;
+                        const otp = document.getElementById('reg-otp').value;
+                        if (email && region === 'ap-tokyo-1' && window.__termsAccepted && otp === '739184') {
+                            document.getElementById('reg-result').textContent = 'Registration Complete: ' + email + ' @ ' + region + ' #' + otp;
+                        } else {
+                            document.getElementById('reg-result').textContent = 'Incomplete: ' + JSON.stringify({ email, region, terms: window.__termsAccepted, otp });
+                        }
+                    });
+                </script>
+            </body></html>`);
+            return;
+        }
+
+        if (urlPath === '/flash-sale') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!doctype html><html><head><title>Instance Provisioning</title></head><body>
+                <h1>Provision Compute</h1>
+                <button id="buy-now" type="button">Create Instance</button>
+                <div id="sale-status">Ready</div>
+                <script>
+                    let count = 0;
+                    document.getElementById('buy-now').addEventListener('click', () => {
+                        count += 1;
+                        if (count < 4) {
+                            document.getElementById('sale-status').textContent = 'Out of host capacity (attempt ' + count + ')';
+                        } else {
+                            document.getElementById('sale-status').textContent = 'Order Confirmed #9001 (attempt ' + count + ')';
+                        }
+                    });
+                </script>
+            </body></html>`);
+            return;
+        }
+
+        if (urlPath === '/captcha-gate') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!doctype html><html><head><title>Just a moment...</title></head><body>
+                <div class="cf-turnstile">Verify you are human</div>
+                <button id="gated-btn" type="button">Continue</button>
+            </body></html>`);
+            return;
+        }
+
+        if (urlPath === '/rpa-form') {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!doctype html><html><head><title>RPA Task Form</title></head><body>
+                <label for="rpa-project">Project Name</label>
+                <input id="rpa-project" name="project" placeholder="Project Name" />
+                <button id="rpa-save" type="button">Save Project</button>
+                <div id="rpa-output"></div>
+                <script>
+                    document.getElementById('rpa-save').addEventListener('click', () => {
+                        document.getElementById('rpa-output').textContent = 'Saved: ' + document.getElementById('rpa-project').value;
+                    });
+                </script>
+            </body></html>`);
+            return;
+        }
+
+        if (urlPath === '/account-check') {
+            const cookieHeader = req.headers.cookie || '';
+            const loggedIn = cookieHeader.includes('mc_session=active');
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(
+                loggedIn
+                    ? `<!doctype html><html><head><title>Dashboard</title></head><body><div id="welcome-user">Account Active</div></body></html>`
+                    : `<!doctype html><html><head><title>Sign In</title></head><body><input type="password" placeholder="Password" /><p>Please sign in</p></body></html>`,
+            );
+            return;
+        }
+
         hits += 1;
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(
@@ -812,6 +979,528 @@ async function main() {
         );
 
         // ---------------------------------------------------------------
+        // E2E-11 & E2E-12: Streamlined CDP Guard + 4-Tool MCP + Real-Browser Anti-Clobber Verification
+        // ---------------------------------------------------------------
+        const isPort18922Free = await new Promise((resolve) => {
+            const s = net.createServer();
+            s.once('error', () => resolve(false));
+            s.listen({ host: '127.0.0.1', port: 18922, exclusive: true }, () => {
+                s.close(() => resolve(true));
+            });
+        });
+
+        const automationPort = await findFreePort();
+        await cdp.eval(`window.__e2e.clickByText('设置', 'nav button, aside button, button')`);
+        const autoTabReady = await waitUntil(
+            () => cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-automation"]'))`),
+            8000,
+        );
+        await cdp.eval(`document.querySelector('[data-testid="settings-tab-automation"]')?.click()`);
+        const autoPanelReady = await waitUntil(
+            () =>
+                cdp.eval(`(() => {
+                    const panel = document.querySelector('[data-testid="automation-settings-panel"]');
+                    const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+                    const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+                    const portWrap = document.querySelector('[data-testid="automation-port-input"]');
+                    const portInput = portWrap ? (portWrap.matches('input') ? portWrap : portWrap.querySelector('input')) : null;
+                    return Boolean(panel && enableSw && !enableSw.disabled && portInput && !portInput.disabled);
+                })()`),
+            8000,
+        );
+
+        // Verify untouched default port (18922) binds out-of-the-box on Windows when free
+        let defaultPortBootOk = true;
+        if (isPort18922Free) {
+            await cdp.eval(`(() => {
+                const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+                const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+                if (enableSw && !enableSw.checked) enableSw.click();
+            })()`);
+            defaultPortBootOk = Boolean(
+                await waitUntil(
+                    () =>
+                        cdp.eval(`(() => {
+                            const badge = (document.querySelector('[data-testid="automation-running-badge"]')?.textContent || '').trim();
+                            const url = (document.querySelector('[data-testid="automation-base-url"]')?.textContent || '').trim();
+                            return (badge === '运行中' || badge === 'Running') && url.includes(':18922');
+                        })()`),
+                    5000,
+                ),
+            );
+        }
+
+        await cdp.eval(`(() => {
+            const portWrap = document.querySelector('[data-testid="automation-port-input"]');
+            const portInput = portWrap ? (portWrap.matches('input') ? portWrap : portWrap.querySelector('input')) : null;
+            if (portInput) window.__e2e.setReactValue(portInput, ${JSON.stringify(String(automationPort))});
+        })()`);
+        await sleep(150);
+        await cdp.eval(`document.querySelector('[data-testid="automation-apply-port"]')?.click()`);
+        const portApplied = await waitUntil(
+            () =>
+                cdp.eval(`(() => {
+                    const urlEl = document.querySelector('[data-testid="automation-base-url"]');
+                    const applyBtn = document.querySelector('[data-testid="automation-apply-port"]');
+                    return Boolean(urlEl && (urlEl.textContent || '').includes(${JSON.stringify(`:${automationPort}`)}) && applyBtn && applyBtn.disabled);
+                })()`),
+            5000,
+        );
+
+        await cdp.eval(`(() => {
+            const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+            const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+            if (enableSw && !enableSw.checked) enableSw.click();
+        })()`);
+        const serverReady = await waitUntil(
+            () =>
+                cdp.eval(`(() => {
+                    const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+                    const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+                    const badge = document.querySelector('[data-testid="automation-running-badge"]');
+                    const badgeText = (badge?.textContent || '').trim();
+                    return Boolean(enableSw && enableSw.checked && !enableSw.disabled && (badgeText === '运行中' || badgeText === 'Running'));
+                })()`),
+            5000,
+        );
+
+        // Expand Quick Connect snippets and verify 2-in-1 multichrome (/mcp) + @playwright/mcp config
+        await cdp.eval(`document.querySelector('[data-testid="automation-snippets-toggle"]')?.click()`);
+        const standardSnippetsOk = Boolean(
+            await waitUntil(
+                () =>
+                    cdp.eval(`(() => {
+                        const code = document.querySelector('[data-testid="automation-snippet-code"]')?.textContent || '';
+                        return code.includes('/mcp') && code.includes('@playwright/mcp@latest') && code.includes('--cdp-endpoint');
+                    })()`),
+                3000,
+            ),
+        );
+
+        let restStatusOk = false;
+        let mcpInitOk = false;
+        let mcpToolsOk = false;
+        let origin403Ok = false;
+        let portConflictUiOk = false;
+        let disabledCleanlyOk = false;
+        let e2e11Error = '';
+        let conflictBlocker = null;
+
+        // E2E-12 real-browser CDP Guard flags
+        let realPrivatePortIsolationOk = false;
+        let realDiscoveryAndPassThroughOk = false;
+        let realOverrideShieldOk = false;
+        let realIncognitoBlockOk = false;
+        let realActiveSwitchAndParallelOk = false;
+        let e2e12Error = '';
+
+        try {
+            if (serverReady) {
+                const reqHeaders = {
+                    Host: `127.0.0.1:${automationPort}`,
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json, text/event-stream',
+                };
+
+                let rpcId = 10;
+                const callMcpTool = async (name, args = {}) => {
+                    const res = await httpRequest({
+                        port: automationPort,
+                        method: 'POST',
+                        path: '/mcp',
+                        headers: reqHeaders,
+                        timeoutMs: 30000,
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: rpcId++,
+                            method: 'tools/call',
+                            params: { name, arguments: args },
+                        }),
+                    });
+                    if (res.status !== 200 || res.json?.error || res.json?.result?.isError) {
+                        throw new Error(
+                            `MCP ${name} failed: ${res.json?.error?.message || res.json?.result?.content?.[0]?.text || res.text}`,
+                        );
+                    }
+                    return {
+                        data: res.json.result.structuredContent,
+                        content: res.json.result.content,
+                    };
+                };
+
+                const statusRes = await httpRequest({
+                    port: automationPort,
+                    method: 'GET',
+                    path: '/api/v1/status',
+                    headers: { Host: `127.0.0.1:${automationPort}` },
+                });
+                restStatusOk =
+                    statusRes.status === 200 &&
+                    statusRes.json?.ok === true &&
+                    typeof statusRes.json?.data?.profiles?.total === 'number';
+
+                const initRes = await httpRequest({
+                    port: automationPort,
+                    method: 'POST',
+                    path: '/mcp',
+                    headers: reqHeaders,
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method: 'initialize',
+                        params: {
+                            protocolVersion: '2025-06-18',
+                            capabilities: {},
+                            clientInfo: { name: 'e2e-ui-suite', version: '1.0.0' },
+                        },
+                    }),
+                });
+                mcpInitOk =
+                    initRes.status === 200 &&
+                    initRes.json?.result?.serverInfo?.name === 'multichrome-mcp';
+
+                const toolsRes = await httpRequest({
+                    port: automationPort,
+                    method: 'POST',
+                    path: '/mcp',
+                    headers: reqHeaders,
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 2,
+                        method: 'tools/list',
+                        params: {},
+                    }),
+                });
+                mcpToolsOk =
+                    toolsRes.status === 200 &&
+                    Array.isArray(toolsRes.json?.result?.tools) &&
+                    toolsRes.json.result.tools.length === 4;
+
+                const originRes = await httpRequest({
+                    port: automationPort,
+                    method: 'GET',
+                    path: '/json/version',
+                    headers: {
+                        Host: `127.0.0.1:${automationPort}`,
+                        Origin: 'https://evil.example.com',
+                    },
+                });
+                origin403Ok = originRes.status === 403;
+
+                // -----------------------------------------------------------
+                // E2E-12: Real-Browser Standard CDP Guard Suite
+                // -----------------------------------------------------------
+                const openGuardSockets = [];
+                try {
+                    const baseTestUrl = `http://127.0.0.1:${localServer.port}`;
+                    await cdp.eval(
+                        `window.electronAPI.chromeEnvironments.update(${JSON.stringify(envA.id)}, {
+                            timezone: 'Asia/Tokyo',
+                            startupUrl: ${JSON.stringify(`${baseTestUrl}/inbox`)},
+                        })`,
+                    );
+
+                    // 1) Start profile by NAME via simplified 4-tool MCP
+                    const startedA = await callMcpTool('start_profile', {
+                        name: '测试环境Alpha',
+                    });
+                    const internalPortA = await cdp.eval(`(async () => {
+                        const logs = await window.electronAPI.appLogs.getLogs();
+                        for (let i = logs.length - 1; i >= 0; i--) {
+                            const m = String(logs[i]?.message || '').match(/\\[测试环境Alpha\\] 分配端口:\\s*(\\d+)/);
+                            if (m) return Number(m[1]);
+                        }
+                        return 0;
+                    })()`);
+                    // Verify internal Chrome port is randomized away from 9222 and never leaked in responses
+                    realPrivatePortIsolationOk =
+                        internalPortA >= 10000 &&
+                        internalPortA !== 9222 &&
+                        internalPortA !== automationPort &&
+                        startedA.data?.wsEndpoint === `ws://127.0.0.1:${automationPort}/devtools/browser/${envA.id}` &&
+                        !JSON.stringify(startedA.data).includes(String(internalPortA));
+
+                    // 2) Standard CDP discovery (/json/version) just like @playwright/mcp & chrome-devtools-mcp
+                    const verRes = await httpRequest({
+                        port: automationPort,
+                        method: 'GET',
+                        path: '/json/version',
+                        headers: { Host: `127.0.0.1:${automationPort}` },
+                    });
+                    const browserWsUrl = verRes.json?.webSocketDebuggerUrl || '';
+
+                    const sendGuardCdp = (ws, msg) =>
+                        new Promise((resolve, reject) => {
+                            const timer = setTimeout(() => {
+                                ws.off('message', onMsg);
+                                reject(new Error(`CDP timeout on ${msg.method}`));
+                            }, 8000);
+                            const onMsg = (raw) => {
+                                const parsed = JSON.parse(raw.toString('utf8'));
+                                if (parsed.id === msg.id) {
+                                    clearTimeout(timer);
+                                    ws.off('message', onMsg);
+                                    resolve(parsed);
+                                }
+                            };
+                            ws.on('message', onMsg);
+                            ws.send(JSON.stringify(msg));
+                        });
+
+                    const guardWs = new WebSocket(browserWsUrl);
+                    openGuardSockets.push(guardWs);
+                    await new Promise((resolve, reject) => {
+                        guardWs.once('open', resolve);
+                        guardWs.once('error', reject);
+                    });
+
+                    let cid = 1;
+                    // Verify Target.createBrowserContext is blocked with foolproof hint
+                    const ctxAttempt = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        method: 'Target.createBrowserContext',
+                        params: {},
+                    });
+                    realIncognitoBlockOk = Boolean(
+                        ctxAttempt.error &&
+                            String(ctxAttempt.error.message).includes('browser.contexts()[0]'),
+                    );
+
+                    // Attach to page target in flattened mode (exactly how Playwright / Puppeteer work)
+                    const targetsRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        method: 'Target.getTargets',
+                        params: {},
+                    });
+                    const pageTarget = (targetsRes.result?.targetInfos || []).find(
+                        (t) => t.type === 'page',
+                    );
+                    const attachRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        method: 'Target.attachToTarget',
+                        params: { targetId: pageTarget.targetId, flatten: true },
+                    });
+                    const pageSessionId = attachRes.result.sessionId;
+
+                    // Navigate to test page over guarded standard CDP
+                    await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        sessionId: pageSessionId,
+                        method: 'Page.navigate',
+                        params: { url: `${baseTestUrl}/inbox` },
+                    });
+                    await sleep(600);
+
+                    // Fire external override commands that Puppeteer / Playwright typically send automatically
+                    const uaOverrideRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        sessionId: pageSessionId,
+                        method: 'Emulation.setUserAgentOverride',
+                        params: { userAgent: 'ClobberedBotUA/9.9' },
+                    });
+                    const tzOverrideRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        sessionId: pageSessionId,
+                        method: 'Emulation.setTimezoneOverride',
+                        params: { timezoneId: 'UTC' },
+                    });
+                    const metricsOverrideRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        sessionId: pageSessionId,
+                        method: 'Emulation.setDeviceMetricsOverride',
+                        params: {
+                            width: 612,
+                            height: 412,
+                            deviceScaleFactor: 1,
+                            mobile: false,
+                        },
+                    });
+
+                    // Inspect live Chrome browser state — environment must be 100% uncorrupted!
+                    const evalRes = await sendGuardCdp(guardWs, {
+                        id: cid++,
+                        sessionId: pageSessionId,
+                        method: 'Runtime.evaluate',
+                        params: {
+                            expression: `({
+                                otp: document.querySelector('#otp-code')?.textContent?.trim() || '',
+                                ua: navigator.userAgent,
+                                tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                                innerW: window.innerWidth,
+                                webdriver: navigator.webdriver,
+                            })`,
+                            returnByValue: true,
+                        },
+                    });
+                    const liveState = evalRes.result?.result?.value || {};
+                    realDiscoveryAndPassThroughOk =
+                        verRes.status === 200 &&
+                        browserWsUrl.startsWith(`ws://127.0.0.1:${automationPort}/devtools/browser/active/`) &&
+                        liveState.otp === '739184';
+
+                    realOverrideShieldOk =
+                        Boolean(uaOverrideRes.result) &&
+                        Boolean(tzOverrideRes.result) &&
+                        Boolean(metricsOverrideRes.result) &&
+                        !String(liveState.ua || '').includes('ClobberedBotUA') &&
+                        liveState.tz === 'Asia/Tokyo' &&
+                        liveState.innerW !== 612 &&
+                        liveState.webdriver === false;
+
+                    // 3) Launch second profile (setActive: false), then switch_active_profile & verify active disconnect + parallel explicit WS
+                    const startedClone = await callMcpTool('start_profile', {
+                        profileId: cloned.id,
+                        setActive: false,
+                    });
+                    const parallelWs = new WebSocket(startedClone.data.wsEndpoint);
+                    openGuardSockets.push(parallelWs);
+                    await new Promise((resolve, reject) => {
+                        parallelWs.once('open', resolve);
+                        parallelWs.once('error', reject);
+                    });
+
+                    const activeClosedOnSwitch = new Promise((resolve) =>
+                        guardWs.once('close', () => resolve(true)),
+                    );
+                    const switched = await callMcpTool('switch_active_profile', {
+                        profileId: cloned.id,
+                    });
+                    await Promise.race([activeClosedOnSwitch, sleep(3000)]);
+
+                    const verAfterSwitch = await httpRequest({
+                        port: automationPort,
+                        method: 'GET',
+                        path: '/json/version',
+                        headers: { Host: `127.0.0.1:${automationPort}` },
+                    });
+                    realActiveSwitchAndParallelOk =
+                        switched.data?.activeProfileId === cloned.id &&
+                        verAfterSwitch.json?.webSocketDebuggerUrl?.endsWith(`/${cloned.id}`) &&
+                        parallelWs.readyState === WebSocket.OPEN;
+
+                    await callMcpTool('stop_profile', { profileId: cloned.id });
+                    await callMcpTool('stop_profile', { profileId: envA.id });
+                } catch (err12) {
+                    e2e12Error = err12 instanceof Error ? err12.message : String(err12);
+                } finally {
+                    for (const s of openGuardSockets) {
+                        try {
+                            s.terminate();
+                        } catch {
+                            // ignore
+                        }
+                    }
+                    await cdp.eval(`window.electronAPI.chromeEnvironments.closeAll()`).catch(() => {});
+                }
+
+                // Port conflict UI regression check:
+                conflictBlocker = net.createServer();
+                await new Promise((resolve, reject) => {
+                    conflictBlocker.once('error', reject);
+                    conflictBlocker.listen({ host: '127.0.0.1', port: 0, exclusive: true }, resolve);
+                });
+                const blockedPort = conflictBlocker.address().port;
+
+                await cdp.eval(`(() => {
+                    const portWrap = document.querySelector('[data-testid="automation-port-input"]');
+                    const portInput = portWrap ? (portWrap.matches('input') ? portWrap : portWrap.querySelector('input')) : null;
+                    if (portInput) window.__e2e.setReactValue(portInput, ${JSON.stringify(String(blockedPort))});
+                })()`);
+                await sleep(150);
+                await cdp.eval(`document.querySelector('[data-testid="automation-apply-port"]')?.click()`);
+
+                const conflictShown = await waitUntil(
+                    () =>
+                        cdp.eval(`(() => {
+                            const badge = (document.querySelector('[data-testid="automation-running-badge"]')?.textContent || '').trim();
+                            const errBanner = (document.querySelector('[data-testid="automation-last-error"]')?.textContent || '').trim();
+                            const autoPickBannerBtn = document.querySelector('[data-testid="automation-auto-pick-port-banner"]');
+                            return Boolean(
+                                (badge === '启动失败' || badge === 'Start Failed') &&
+                                errBanner.includes(${JSON.stringify(String(blockedPort))}) &&
+                                autoPickBannerBtn
+                            );
+                        })()`),
+                    5000,
+                );
+
+                const noFakeSuccessToast = await cdp.eval(`(() => {
+                    const region = document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]');
+                    const txt = region ? region.innerText : '';
+                    return !txt.includes(${JSON.stringify(`监听端口已更新为 ${blockedPort}`)}) && !txt.includes(${JSON.stringify(`Listening port updated to ${blockedPort}`)});
+                })()`);
+
+                await cdp.eval(`document.querySelector('[data-testid="automation-auto-pick-port-banner"]')?.click()`);
+                const recoveredViaBanner = await waitUntil(
+                    () =>
+                        cdp.eval(`(() => {
+                            const badge = (document.querySelector('[data-testid="automation-running-badge"]')?.textContent || '').trim();
+                            const errBanner = document.querySelector('[data-testid="automation-last-error"]');
+                            const baseUrl = (document.querySelector('[data-testid="automation-base-url"]')?.textContent || '').trim();
+                            return Boolean(
+                                (badge === '运行中' || badge === 'Running') &&
+                                !errBanner &&
+                                baseUrl &&
+                                !baseUrl.includes(${JSON.stringify(`:${blockedPort}`)})
+                            );
+                        })()`),
+                    5000,
+                );
+                portConflictUiOk = Boolean(conflictShown && noFakeSuccessToast && recoveredViaBanner);
+            }
+        } catch (err) {
+            e2e11Error = err instanceof Error ? err.message : String(err);
+        } finally {
+            if (conflictBlocker) {
+                try {
+                    await new Promise((resolve) => conflictBlocker.close(() => resolve()));
+                } catch {
+                    // ignore
+                }
+            }
+            const activeStatusBeforeDisable = await cdp.eval(`window.electronAPI?.automation?.getStatus?.()`);
+            const activeAutomationPort =
+                Number.isInteger(activeStatusBeforeDisable?.port) && activeStatusBeforeDisable.port > 0
+                    ? activeStatusBeforeDisable.port
+                    : automationPort;
+            await cdp.eval(`(() => {
+                const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+                const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+                if (enableSw && enableSw.checked) enableSw.click();
+            })()`);
+            const uiStopped = await waitUntil(
+                () =>
+                    cdp.eval(`(() => {
+                        const enableWrap = document.querySelector('[data-testid="automation-enable-switch"]');
+                        const enableSw = enableWrap ? (enableWrap.matches('input[type="checkbox"]') ? enableWrap : enableWrap.querySelector('input[type="checkbox"]')) : null;
+                        const badge = document.querySelector('[data-testid="automation-running-badge"]');
+                        const badgeText = (badge?.textContent || '').trim();
+                        return Boolean(enableSw && !enableSw.checked && !enableSw.disabled && (badgeText === '已停止' || badgeText === 'Stopped'));
+                    })()`),
+                5000,
+            );
+            const statusAfterDisable = await cdp.eval(`window.electronAPI?.automation?.getStatus?.()`);
+            let portClosed = false;
+            try {
+                await httpRequest({
+                    port: activeAutomationPort,
+                    method: 'GET',
+                    path: '/json/version',
+                    headers: { Host: `127.0.0.1:${activeAutomationPort}` },
+                });
+            } catch {
+                portClosed = true;
+            }
+            disabledCleanlyOk = Boolean(
+                uiStopped &&
+                statusAfterDisable &&
+                statusAfterDisable.running === false &&
+                !statusAfterDisable.enabled &&
+                portClosed,
+            );
+        }
+
+        // ---------------------------------------------------------------
         // E2E-10: Zero uncaught page exceptions
         // ---------------------------------------------------------------
         record(
@@ -821,6 +1510,39 @@ async function main() {
             pageExceptions.length === 0
                 ? `0 uncaught exceptions (consoleErrors=${consoleErrors.length})`
                 : pageExceptions.join(' | '),
+        );
+
+        record(
+            'E2E-11',
+            '极简本地 CDP 守卫与 MCP 面板（默认端口 18922 / 标准接入命令 / 4 项环境工具 / Origin 403 / 端口冲突一键恢复 / 干净停机）',
+            Boolean(
+                defaultPortBootOk &&
+                    autoTabReady &&
+                    autoPanelReady &&
+                    portApplied &&
+                    serverReady &&
+                    standardSnippetsOk &&
+                    restStatusOk &&
+                    mcpInitOk &&
+                    mcpToolsOk &&
+                    origin403Ok &&
+                    portConflictUiOk &&
+                    disabledCleanlyOk,
+            ),
+            `defaultPort=${defaultPortBootOk}, ui=${Boolean(autoTabReady && autoPanelReady)}, snippets=${standardSnippetsOk}, rest=${restStatusOk}, mcpInit=${mcpInitOk}, mcpTools4=${mcpToolsOk}, 403=${origin403Ok}, portConflictUi=${portConflictUiOk}, stopped=${disabledCleanlyOk}${e2e11Error ? `, err=${e2e11Error}` : ''}`,
+        );
+
+        record(
+            'E2E-12',
+            '真机标准 CDP 透传守卫（私有高端口隔离 / 标准 /json/version 直连 / 拦截 UA·时区·窗口尺寸篡改与无痕 Context / 多环境无缝切号）',
+            Boolean(
+                realPrivatePortIsolationOk &&
+                    realDiscoveryAndPassThroughOk &&
+                    realOverrideShieldOk &&
+                    realIncognitoBlockOk &&
+                    realActiveSwitchAndParallelOk,
+            ),
+            `privatePort=${realPrivatePortIsolationOk}, passThrough=${realDiscoveryAndPassThroughOk}, overrideShield=${realOverrideShieldOk}, incognitoBlock=${realIncognitoBlockOk}, activeSwitch=${realActiveSwitchAndParallelOk}${e2e12Error ? `, err=${e2e12Error}` : ''}`,
         );
     } finally {
         cdp?.close();

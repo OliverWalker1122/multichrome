@@ -29,6 +29,7 @@ MultiChrome is a desktop application built with Electron and Fluent UI for isola
 - **Isolated Proxy Management**: Managed `sing-box` proxy routing with multi-protocol support, batch import, exit probing, reuse warnings, and fail-closed leak protection.
 - **Environment Consistency**: Optional automatic alignment for timezone, language, and geolocation based on proxy exit region, with pre-launch consistency checks and a health inspection dialog.
 - **Profile Lifecycle & Resource Tools**: Group management, profile cloning, 30-day trash recovery, live memory monitoring, cache cleanup, and bookmark/extension templates.
+- **Standard CDP Guard & MCP Integration**: Optional `127.0.0.1` guarded CDP endpoint and minimal profile MCP compatible with `@playwright/mcp`, `chrome-devtools-mcp`, and Playwright while preventing external UA, timezone, or viewport clobbering.
 - **Local-First & Bilingual**: Credentials encrypted via OS secure storage, live outbound host audit logs, instant English / Chinese switching, and Windows / macOS / Linux support.
 
 ## Installation

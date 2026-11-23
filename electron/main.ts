@@ -13,7 +13,6 @@ import {
 } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import https from 'https';
 import log from 'electron-log';
 import {
     ChromeManager,
@@ -39,6 +38,18 @@ import {
 } from './fingerprintProfile.js';
 import { normalizeEnvironmentTags } from './environmentTags.js';
 import { compareDotVersions } from './kernelPolicy.js';
+import {
+    fetchOfficialGitHubJson,
+    parseSafeExternalUrl,
+} from './githubProxyTransport.js';
+import { AutomationConfigManager } from './automationConfig.js';
+import { AutomationServer } from './automationServer.js';
+import {
+    AutomationIntegration,
+    createAutomationBackend,
+    registerAutomationIpc,
+    resolveStdioBridgePath,
+} from './automationIntegration.js';
 
 const APP_REPO_URL = 'https://github.com/OliverWalker1122/multichrome';
 const APP_RELEASES_API_URL =
@@ -156,11 +167,7 @@ function destroyAppTray(): void {
     appTray = null;
 }
 app.on('second-instance', () => {
-    if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-    }
+    showOrRestoreMainWindow();
 });
 
 // 输入验证函数
@@ -216,13 +223,81 @@ const proxyManager = new ProxyManager({
         process.platform === 'win32' ? 'sing-box.exe' : 'sing-box',
     ),
     configDirectory: app.getPath('userData'),
+    getLocale: () => settingsManager.getSettings().locale || 'zh-CN',
 });
+
+let proxyNotifyTimer: NodeJS.Timeout | null = null;
+let pendingProxyNotifyState = false;
+let pendingProxyNotifyLog = false;
+
+const unsubscribeProxyChanges = proxyManager.subscribe(
+    (event: { kind?: string }) => {
+        if (event?.kind === 'log') {
+            pendingProxyNotifyLog = true;
+        } else {
+            pendingProxyNotifyState = true;
+        }
+        if (proxyNotifyTimer) return;
+        proxyNotifyTimer = setTimeout(() => {
+            proxyNotifyTimer = null;
+            const payload = {
+                state: pendingProxyNotifyState,
+                log: pendingProxyNotifyLog,
+            };
+            pendingProxyNotifyState = false;
+            pendingProxyNotifyLog = false;
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('proxy-state-changed', payload);
+            }
+        }, 150);
+    },
+);
 const chromeManager = new ChromeManager(
     proxyManager,
     settingsManager,
     kernelManager,
 );
 const proxyIntegration = new ProxyIntegration({ proxyManager, chromeManager });
+const automationConfigManager = new AutomationConfigManager({
+    store: new Store({ name: 'automation-settings' }),
+    secretStorage: safeStorage,
+    getLocale: () => settingsManager.getSettings().locale || 'zh-CN',
+});
+const automationAppVersion = app.getVersion();
+const buildAutomationBackend = createAutomationBackend as unknown as (options: {
+    chromeManager: ChromeManager;
+    proxyManager: ProxyManager;
+    proxyIntegration: ProxyIntegration;
+    kernelManager: KernelManager;
+    appVersion: string;
+}) => ReturnType<typeof createAutomationBackend>;
+const automationBackend = buildAutomationBackend({
+    chromeManager,
+    proxyManager,
+    proxyIntegration,
+    kernelManager,
+    appVersion: automationAppVersion,
+});
+const automationServer = new AutomationServer({
+    backend: automationBackend,
+    serverVersion: automationAppVersion,
+    logger: log,
+});
+const automationIntegration = new AutomationIntegration({
+    configManager: automationConfigManager,
+    server: automationServer,
+    stdioBridgePath: resolveStdioBridgePath(
+        app.isPackaged
+            ? path.join(process.resourcesPath, 'app.asar.unpacked')
+            : app.getAppPath(),
+    ),
+    onStateChange: (status: unknown) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('automation-state-changed', status);
+        }
+    },
+    logger: log,
+});
 
 function getTitleBarOverlay(isDark: boolean) {
     return {
@@ -304,8 +379,8 @@ function createWindow() {
                     ...details.responseHeaders,
                     'Content-Security-Policy': [
                         isDev
-                            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 ws://localhost:5173; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173; style-src 'self' 'unsafe-inline' http://localhost:5173;"
-                            : "default-src 'self' 'unsafe-inline'; script-src 'self'; style-src 'self' 'unsafe-inline';",
+                            ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173 ws://localhost:5173; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5173; style-src 'self' 'unsafe-inline' http://localhost:5173; img-src 'self' data: http://localhost:5173;"
+                            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
                     ],
                 },
             });
@@ -361,9 +436,14 @@ function createWindow() {
         }
     });
 
-    // 处理外部链接
+    // 处理外部链接：严格仅放行 HTTPS 外链，阻断 file:// 等危险系统协议
     mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        shell.openExternal(url);
+        const safeUrl = parseSafeExternalUrl(url);
+        if (safeUrl) {
+            void shell.openExternal(safeUrl);
+        } else {
+            log.warn('已拦截非安全外部链接打开请求');
+        }
         return { action: 'deny' };
     });
 
@@ -472,6 +552,19 @@ app.whenReady().then(() => {
     // 设置IPC处理程序
     setupIpcHandlers();
 
+    // 若已启用本地自动化控制面，则在应用就绪后按需启动（端口绑定失败仅记录在 lastError，绝不阻断应用启动）
+    const automationCfg = automationConfigManager.getConfig();
+    if (automationCfg.localApiEnabled || automationCfg.mcpEnabled) {
+        void automationIntegration
+            .init()
+            .then(() => {
+                automationIntegration.emitStateChange();
+            })
+            .catch((err) => {
+                log.warn('[Automation] 本地自动化控制面初始化异常:', err);
+            });
+    }
+
     // macOS下点击dock图标时重新创建窗口
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -551,17 +644,27 @@ async function performGracefulQuit(closeAllEnvironmentsFirst = false): Promise<v
             }
         }
 
+        await automationIntegration.shutdown();
         await proxyIntegration.shutdown();
+        unsubscribeProxyChanges();
+        if (proxyNotifyTimer) {
+            clearTimeout(proxyNotifyTimer);
+            proxyNotifyTimer = null;
+        }
         chromeManager.stopStatusMonitoring();
+        chromeManager.closeDatabase();
         destroyAppTray();
         quitReady = true;
         app.quit();
     } catch {
         log.error('关闭内置代理失败，请重试退出');
         showOrRestoreMainWindow();
+        const isEn = isEnglishLocale();
         dialog.showErrorBox(
-            '暂时无法退出',
-            '无法确认浏览器状态或关闭内置代理，程序已继续运行，请重试。',
+            isEn ? 'Unable to Quit Right Now' : '暂时无法退出',
+            isEn
+                ? 'Unable to verify browser state or stop the built-in proxy. MultiChrome will keep running; please try quitting again.'
+                : '无法确认浏览器状态或关闭内置代理，程序已继续运行，请重试。',
         );
     } finally {
         checkingQuit = false;
@@ -575,9 +678,17 @@ app.on('before-quit', (event) => {
     void performGracefulQuit(false);
 });
 
+function getKernelStatusPayload() {
+    return kernelManager.getStatus(
+        chromeManager.getSystemChromePath(),
+        settingsManager.getSettings().locale || 'zh-CN',
+    );
+}
+
 // 设置IPC处理程序
 function setupIpcHandlers() {
     registerProxyIpc({ ipcMain, integration: proxyIntegration, validateId });
+    registerAutomationIpc({ ipcMain, integration: automationIntegration });
 
     ipcMain.handle('app:logs', () => applicationLogs.getLogs());
     ipcMain.handle('app:clear-logs', () => applicationLogs.clearLogs());
@@ -1175,9 +1286,7 @@ function setupIpcHandlers() {
     });
 
     // 浏览器内核管理 IPC（存放在数据目录 <dataPath>/kernels）
-    ipcMain.handle('kernels:status', () =>
-        kernelManager.getStatus(chromeManager.getSystemChromePath()),
-    );
+    ipcMain.handle('kernels:status', () => getKernelStatusPayload());
 
     ipcMain.handle(
         'kernels:refresh-releases',
@@ -1198,7 +1307,7 @@ function setupIpcHandlers() {
                 if (gp?.enabled && gp.address) proxyAddress = gp.address;
             }
             await kernelManager.fetchAvailableReleases(proxyAddress);
-            return kernelManager.getStatus(chromeManager.getSystemChromePath());
+            return getKernelStatusPayload();
         },
     );
 
@@ -1234,9 +1343,7 @@ function setupIpcHandlers() {
             );
             return {
                 installed,
-                status: kernelManager.getStatus(
-                    chromeManager.getSystemChromePath(),
-                ),
+                status: getKernelStatusPayload(),
             };
         },
     );
@@ -1260,7 +1367,7 @@ function setupIpcHandlers() {
                 }
             }
             await kernelManager.fetchAvailableSingboxReleases(proxyAddress);
-            return kernelManager.getStatus(chromeManager.getSystemChromePath());
+            return getKernelStatusPayload();
         },
     );
 
@@ -1292,9 +1399,7 @@ function setupIpcHandlers() {
             );
             return {
                 installed,
-                status: kernelManager.getStatus(
-                    chromeManager.getSystemChromePath(),
-                ),
+                status: getKernelStatusPayload(),
             };
         },
     );
@@ -1303,23 +1408,24 @@ function setupIpcHandlers() {
         if (!mainWindow) {
             throw new Error('主窗口未初始化');
         }
+        const isEn = isEnglishLocale();
         const result = await dialog.showOpenDialog(mainWindow, {
-            title: '选择 sing-box 官方压缩包 (.zip / .tar.gz) 或 sing-box.exe',
+            title: isEn
+                ? 'Select official sing-box archive (.zip / .tar.gz) or sing-box executable'
+                : '选择 sing-box 官方压缩包 (.zip / .tar.gz) 或 sing-box.exe',
             properties: ['openFile'],
             filters: [
                 {
-                    name: 'sing-box 核心文件',
+                    name: isEn ? 'sing-box Core Files' : 'sing-box 核心文件',
                     extensions: ['zip', 'gz', 'exe'],
                 },
-                { name: '所有文件', extensions: ['*'] },
+                { name: isEn ? 'All Files' : '所有文件', extensions: ['*'] },
             ],
         });
         if (result.canceled || result.filePaths.length === 0) {
             return {
                 canceled: true,
-                status: kernelManager.getStatus(
-                    chromeManager.getSystemChromePath(),
-                ),
+                status: getKernelStatusPayload(),
             };
         }
         const imported = await kernelManager.importLocalSingbox(
@@ -1328,20 +1434,20 @@ function setupIpcHandlers() {
         return {
             canceled: false,
             installed: imported,
-            status: kernelManager.getStatus(chromeManager.getSystemChromePath()),
+            status: getKernelStatusPayload(),
         };
     });
 
     ipcMain.handle('kernels:set-active-singbox', (_, kernelId: unknown) => {
         const validKernelId = validateString(kernelId, 'sing-box 核心ID');
         kernelManager.setActiveSingbox(validKernelId);
-        return kernelManager.getStatus(chromeManager.getSystemChromePath());
+        return getKernelStatusPayload();
     });
 
     ipcMain.handle('kernels:remove-singbox', (_, kernelId: unknown) => {
         const validKernelId = validateString(kernelId, 'sing-box 核心ID');
         kernelManager.removeSingbox(validKernelId);
-        return kernelManager.getStatus(chromeManager.getSystemChromePath());
+        return getKernelStatusPayload();
     });
 
     ipcMain.handle(
@@ -1350,48 +1456,72 @@ function setupIpcHandlers() {
             if (!mainWindow) {
                 throw new Error('主窗口未初始化');
             }
+            const isEn = isEnglishLocale();
             const isFolder = mode === 'folder';
             const platformTitle =
                 process.platform === 'darwin'
-                    ? '选择指纹内核镜像 (.dmg / .zip) 或 Chromium.app'
+                    ? isEn
+                        ? 'Select privacy browser image (.dmg / .zip) or Chromium.app'
+                        : '选择指纹内核镜像 (.dmg / .zip) 或 Chromium.app'
                     : process.platform === 'linux'
-                      ? '选择指纹内核压缩包 (.tar.xz / .zip) 或 chrome 可执行文件'
-                      : '选择指纹内核压缩包 (.zip) 或 chrome.exe';
+                      ? isEn
+                          ? 'Select privacy browser archive (.tar.xz / .zip) or chrome executable'
+                          : '选择指纹内核压缩包 (.tar.xz / .zip) 或 chrome 可执行文件'
+                      : isEn
+                        ? 'Select privacy browser archive (.zip) or chrome.exe'
+                        : '选择指纹内核压缩包 (.zip) 或 chrome.exe';
             const platformFilters =
                 process.platform === 'darwin'
                     ? [
                           {
-                              name: 'macOS Chromium 内核',
+                              name: isEn
+                                  ? 'macOS Chromium Kernel'
+                                  : 'macOS Chromium 内核',
                               extensions: ['dmg', 'zip', 'app'],
                           },
-                          { name: '所有文件', extensions: ['*'] },
+                          {
+                              name: isEn ? 'All Files' : '所有文件',
+                              extensions: ['*'],
+                          },
                       ]
                     : process.platform === 'linux'
                       ? [
                             {
-                                name: 'Linux Chromium 内核',
+                                name: isEn
+                                    ? 'Linux Chromium Kernel'
+                                    : 'Linux Chromium 内核',
                                 extensions: ['xz', 'gz', 'zip'],
                             },
-                            { name: '所有文件', extensions: ['*'] },
+                            {
+                                name: isEn ? 'All Files' : '所有文件',
+                                extensions: ['*'],
+                            },
                         ]
                       : [
                             {
-                                name: 'Windows Chromium 内核',
+                                name: isEn
+                                    ? 'Windows Chromium Kernel'
+                                    : 'Windows Chromium 内核',
                                 extensions: ['zip', 'exe'],
                             },
-                            { name: '所有文件', extensions: ['*'] },
+                            {
+                                name: isEn ? 'All Files' : '所有文件',
+                                extensions: ['*'],
+                            },
                         ];
             const result = await dialog.showOpenDialog(mainWindow, {
-                title: isFolder ? '选择指纹内核所在目录' : platformTitle,
+                title: isFolder
+                    ? isEn
+                        ? 'Select Privacy Browser Folder'
+                        : '选择指纹内核所在目录'
+                    : platformTitle,
                 properties: isFolder ? ['openDirectory'] : ['openFile'],
                 filters: isFolder ? undefined : platformFilters,
             });
             if (result.canceled || result.filePaths.length === 0) {
                 return {
                     canceled: true,
-                    status: kernelManager.getStatus(
-                        chromeManager.getSystemChromePath(),
-                    ),
+                    status: getKernelStatusPayload(),
                 };
             }
             const imported = await kernelManager.importLocalKernel(
@@ -1400,9 +1530,7 @@ function setupIpcHandlers() {
             return {
                 canceled: false,
                 installed: imported,
-                status: kernelManager.getStatus(
-                    chromeManager.getSystemChromePath(),
-                ),
+                status: getKernelStatusPayload(),
             };
         },
     );
@@ -1410,13 +1538,13 @@ function setupIpcHandlers() {
     ipcMain.handle('kernels:set-active', (_, kernelId: unknown) => {
         const validKernelId = validateString(kernelId, '内核ID');
         kernelManager.setActiveKernel(validKernelId);
-        return kernelManager.getStatus(chromeManager.getSystemChromePath());
+        return getKernelStatusPayload();
     });
 
     ipcMain.handle('kernels:remove', (_, kernelId: unknown) => {
         const validKernelId = validateString(kernelId, '内核ID');
         kernelManager.removeKernel(validKernelId);
-        return kernelManager.getStatus(chromeManager.getSystemChromePath());
+        return getKernelStatusPayload();
     });
 
     ipcMain.handle('kernels:open-dir', async () => {
@@ -1455,56 +1583,29 @@ function setupIpcHandlers() {
 
     ipcMain.handle('app:check-update', async () => {
         const currentVersion = app.getVersion();
-        const payload = await new Promise<Record<string, unknown>>(
-            (resolve, reject) => {
-                const req = https.get(
-                    APP_RELEASES_API_URL,
-                    {
-                        headers: {
-                            Accept: 'application/vnd.github+json',
-                            'User-Agent': `MultiChrome/${currentVersion}`,
-                        },
-                        timeout: 10000,
-                    },
-                    (res) => {
-                        const chunks: Buffer[] = [];
-                        res.on('data', (chunk) =>
-                            chunks.push(Buffer.from(chunk)),
-                        );
-                        res.on('end', () => {
-                            if (
-                                res.statusCode &&
-                                (res.statusCode < 200 || res.statusCode >= 300)
-                            ) {
-                                reject(
-                                    new Error(
-                                        `检查更新失败（HTTP ${res.statusCode}）`,
-                                    ),
-                                );
-                                return;
-                            }
-                            try {
-                                resolve(
-                                    JSON.parse(
-                                        Buffer.concat(chunks).toString('utf8'),
-                                    ),
-                                );
-                            } catch {
-                                reject(new Error('解析版本信息失败'));
-                            }
-                        });
-                        res.on('error', reject);
-                    },
-                );
-                req.on('timeout', () => {
-                    req.destroy();
-                    reject(new Error('检查更新超时，请稍后重试'));
-                });
-                req.on('error', () => {
-                    reject(new Error('网络不可达，无法检查更新'));
-                });
-            },
-        );
+        const globalProxy = settingsManager.getSettings().globalProxy;
+        const proxyAddress =
+            globalProxy?.enabled && globalProxy.address?.trim()
+                ? globalProxy.address.trim()
+                : undefined;
+
+        let payload: Record<string, unknown>;
+        try {
+            payload = (await fetchOfficialGitHubJson(APP_RELEASES_API_URL, {
+                proxyAddress,
+                timeoutMs: 10000,
+                userAgent: `MultiChrome/${currentVersion}`,
+            })) as Record<string, unknown>;
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : '';
+            if (msg.includes('超时')) {
+                throw new Error('检查更新超时，请稍后重试');
+            }
+            if (msg.startsWith('HTTP ') || msg.includes('解析版本信息') || msg.includes('代理')) {
+                throw new Error(msg);
+            }
+            throw new Error('网络不可达，无法检查更新');
+        }
 
         const rawTag = String(payload.tag_name || '').trim();
         const latestVersion = rawTag.replace(/^v/i, '');
@@ -1554,9 +1655,10 @@ function setupIpcHandlers() {
                 throw new Error('主窗口未初始化');
             }
 
+            const isEn = isEnglishLocale();
             const result = await dialog.showOpenDialog(mainWindow, {
                 properties: ['openDirectory', 'createDirectory'],
-                title: '选择数据存储位置',
+                title: isEn ? 'Select Data Storage Folder' : '选择数据存储位置',
             });
 
             return result;
@@ -1567,7 +1669,11 @@ function setupIpcHandlers() {
     });
 }
 
-// 处理未捕获的异常
+// 处理未捕获的异常与未处理的 Promise 拒绝
 process.on('uncaughtException', (error) => {
     log.error('未捕获的异常:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+    log.error('未处理的 Promise 拒绝:', reason);
 });

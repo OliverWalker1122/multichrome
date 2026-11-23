@@ -249,8 +249,8 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                         {t('代理地址', 'Proxy Line')}
                                         <InfoTip
                                             content={t(
-                                                '支持 http://、https://、socks5://，以及 服务器:端口 或 服务器:端口:用户名:密码（无协议默认 HTTP）',
-                                                'Supports http://, https://, socks5://, host:port, and host:port:user:pass (defaults to HTTP).',
+                                                '支持 http://、https://、socks5://、服务器:端口(:用户名:密码)，以及 vless://、vmess://、trojan://、ss://、hy2://、tuic:// 分享链接（高级协议自动转为 sing-box 配置并加密保存）',
+                                                'Supports http://, https://, socks5://, host:port(:user:pass), and vless://, vmess://, trojan://, ss://, hy2://, tuic:// share URIs (auto-converted to encrypted sing-box config).',
                                             )}
                                         />
                                     </span>
@@ -261,8 +261,8 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                     required
                                     value={editor.line}
                                     placeholder={t(
-                                        'http://用户名:密码@服务器:端口',
-                                        'http://user:pass@host:port',
+                                        'http://用户名:密码@服务器:端口 或 vless:// / vmess:// / trojan:// / ss:// / hy2:// / tuic://',
+                                        'http://user:pass@host:port or vless:// / vmess:// / trojan:// / ss:// / hy2:// / tuic://',
                                     )}
                                     autoComplete="off"
                                     spellCheck={false}

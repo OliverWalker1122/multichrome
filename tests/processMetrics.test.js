@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     aggregateProcessMemory,
+    buildForceKillProcessSpec,
     buildMemorySaverChromiumArgs,
     extractEnvIdShortFromCommandLine,
+    filterBrowserProcessLines,
     parseUnixPsOutput,
     parseWindowsCimProcessJson,
 } from '../electron/processMetrics.js';
@@ -73,4 +75,44 @@ test('buildMemorySaverChromiumArgs avoids fingerprint-altering low-end-device-mo
     const args = buildMemorySaverChromiumArgs();
     assert.ok(args.some((a) => a.includes('MemorySaverModeAvailable')));
     assert.ok(!args.some((a) => a.includes('low-end-device-mode')));
+});
+
+test('filterBrowserProcessLines matches both Official Chrome and fingerprint-chromium on macOS and Linux', () => {
+    const psOutput = [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --user-data-dir=/tmp/environments/11223344',
+        '/Users/demo/kernels/Chromium.app/Contents/MacOS/Chromium --user-data-dir=/tmp/environments/55667788',
+        '/usr/bin/node /Users/demo/server.js --user-data-dir=/tmp/environments/99999999',
+        '/opt/kernels/chromium --user-data-dir=/tmp/environments/aabbccdd',
+    ].join('\n');
+
+    const macFiltered = filterBrowserProcessLines(psOutput, 'darwin');
+    assert.ok(macFiltered.includes('11223344'));
+    assert.ok(macFiltered.includes('55667788'));
+    assert.ok(macFiltered.includes('aabbccdd'));
+    assert.ok(!macFiltered.includes('99999999'));
+
+    const linuxFiltered = filterBrowserProcessLines(psOutput, 'linux');
+    assert.ok(linuxFiltered.includes('11223344'));
+    assert.ok(linuxFiltered.includes('55667788'));
+    assert.ok(linuxFiltered.includes('aabbccdd'));
+    assert.ok(!linuxFiltered.includes('99999999'));
+});
+
+test('buildForceKillProcessSpec validates 8-hex envIdShort and scopes kill targets precisely', () => {
+    assert.equal(buildForceKillProcessSpec('not-valid', 'win32'), null);
+    assert.equal(buildForceKillProcessSpec('11223344; rm -rf /', 'linux'), null);
+
+    const winSpec = buildForceKillProcessSpec('A1B2C3D4', 'win32');
+    assert.equal(winSpec.executable, 'powershell.exe');
+    assert.ok(
+        winSpec.args.some((arg) =>
+            arg.includes("environments[/\\\\]a1b2c3d4\\b"),
+        ),
+    );
+
+    const macSpec = buildForceKillProcessSpec('a1b2c3d4', 'darwin');
+    assert.deepEqual(macSpec, {
+        executable: 'pkill',
+        args: ['-f', 'environments/a1b2c3d4'],
+    });
 });

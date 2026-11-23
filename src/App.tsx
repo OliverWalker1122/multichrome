@@ -1,11 +1,17 @@
 import React, {
+    Suspense,
     useCallback,
     useEffect,
     useMemo,
     useRef,
     useState,
 } from 'react';
-import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
+import {
+    FluentProvider,
+    Spinner,
+    makeStyles,
+    tokens,
+} from '@fluentui/react-components';
 import {
     BrowserEngineType,
     ChromeEnvironment,
@@ -34,12 +40,15 @@ import LogDockPanel, {
     LogScope,
 } from './components/LogDockPanel';
 import StatusBar from './components/StatusBar';
-import ApplicationLogsPanel from './components/ApplicationLogsPanel';
 import EnvironmentsPage from './components/EnvironmentsPage';
-import ProxiesPage from './components/ProxiesPage';
-import TrashPage from './components/TrashPage';
-import SettingsPage from './components/SettingsPage';
 import CreateEnvironmentModal from './components/CreateEnvironmentModal';
+
+const ApplicationLogsPanel = React.lazy(
+    () => import('./components/ApplicationLogsPanel'),
+);
+const ProxiesPage = React.lazy(() => import('./components/ProxiesPage'));
+const TrashPage = React.lazy(() => import('./components/TrashPage'));
+const SettingsPage = React.lazy(() => import('./components/SettingsPage'));
 import DeleteGroupDialog from './components/DeleteGroupDialog';
 import RenameGroupDialog from './components/RenameGroupDialog';
 import LaunchGuardDialog from './components/LaunchGuardDialog';
@@ -91,6 +100,14 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         position: 'relative',
     },
+    lazyFallback: {
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 0,
+        minWidth: 0,
+    },
 });
 
 const AppShell: React.FC = () => {
@@ -139,8 +156,11 @@ const AppShell: React.FC = () => {
     const [coreInfo, setCoreInfo] = useState<ProxyCoreInfo | null>(null);
     const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null);
     const [trashCount, setTrashCount] = useState(0);
-    const [appVersion, setAppVersion] = useState('1.2.1');
+    const [appVersion, setAppVersion] = useState('1.3.0');
     const [proxyRefreshTick, setProxyRefreshTick] = useState(0);
+    const proxiesSigRef = useRef('');
+    const coreInfoSigRef = useRef('');
+    const logSigRef = useRef('');
 
     // 每个页面分别保留日志面板开关与高度，不把代理页布局带入其他页面。
     const [logDockPreferences, setLogDockPreferences] = useState(
@@ -208,7 +228,7 @@ const AppShell: React.FC = () => {
         return () => observer.disconnect();
     }, []);
 
-    // 读取应用版本与初始回收站计数
+    // 仅挂载时读取一次应用版本
     useEffect(() => {
         let cancelled = false;
         window.electronAPI?.app
@@ -218,6 +238,14 @@ const AppShell: React.FC = () => {
             })
             .catch(() => {});
 
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // 读取回收站计数与内核状态
+    useEffect(() => {
+        let cancelled = false;
         window.electronAPI?.trash
             ?.getDeletedEnvironments()
             .then((deleted) => {
@@ -291,7 +319,7 @@ const AppShell: React.FC = () => {
     const logError =
         logFailure?.key === logContextKey ? logFailure.message : '';
 
-    // 状态轮询独立于日志范围，切换对象不会中断或延迟代理列表更新。
+    // 代理状态：主进程事件推送 + 10s 低频兜底 + 隐藏暂停 + 签名防无谓重渲染。
     useEffect(() => {
         if (!window.electronAPI?.proxies) {
             setProxiesLoading(false);
@@ -300,8 +328,9 @@ const AppShell: React.FC = () => {
         let cancelled = false;
         let pending = false;
 
-        const poll = async () => {
+        const poll = async (force = false) => {
             if (pending) return;
+            if (!force && document.hidden) return;
             pending = true;
             try {
                 const [nextProxies, nextCore] = await Promise.all([
@@ -309,9 +338,17 @@ const AppShell: React.FC = () => {
                     window.electronAPI.proxies.getCoreInfo(),
                 ]);
                 if (!cancelled) {
-                    setManagedProxies(nextProxies);
-                    setCoreInfo(nextCore);
-                    setProxiesLoadError('');
+                    const nextProxiesSig = JSON.stringify(nextProxies);
+                    if (nextProxiesSig !== proxiesSigRef.current) {
+                        proxiesSigRef.current = nextProxiesSig;
+                        setManagedProxies(nextProxies);
+                    }
+                    const nextCoreSig = JSON.stringify(nextCore);
+                    if (nextCoreSig !== coreInfoSigRef.current) {
+                        coreInfoSigRef.current = nextCoreSig;
+                        setCoreInfo(nextCore);
+                    }
+                    setProxiesLoadError((prev) => (prev ? '' : prev));
                 }
             } catch {
                 if (!cancelled) {
@@ -328,14 +365,40 @@ const AppShell: React.FC = () => {
             }
         };
 
-        void poll();
+        const handleProxyStateEvent = (
+            _event: unknown,
+            payload?: unknown,
+        ) => {
+            const detail = payload as { state?: boolean } | undefined;
+            if (!detail || detail.state !== false) {
+                void poll(true);
+            }
+        };
+
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                void poll(true);
+            }
+        };
+
+        void poll(true);
         const timer = window.setInterval(() => {
-            void poll();
-        }, 2000);
+            void poll(false);
+        }, 10000);
+        window.electronAPI.on?.('proxy-state-changed', handleProxyStateEvent);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
             cancelled = true;
             window.clearInterval(timer);
+            window.electronAPI.removeListener?.(
+                'proxy-state-changed',
+                handleProxyStateEvent,
+            );
+            document.removeEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+            );
         };
     }, [proxyRefreshTick, t]);
 
@@ -349,8 +412,9 @@ const AppShell: React.FC = () => {
         let cancelled = false;
         let pending = false;
         const target = logTarget;
-        const poll = async () => {
+        const poll = async (force = false) => {
             if (pending) return;
+            if (!force && document.hidden) return;
             pending = true;
             const requestVersion = logRequestVersion.current;
             try {
@@ -362,8 +426,14 @@ const AppShell: React.FC = () => {
                     !cancelled &&
                     requestVersion === logRequestVersion.current
                 ) {
-                    setLogSnapshot({ key: logContextKey, entries });
-                    setLogFailure(null);
+                    const firstId = entries[0]?.id || '';
+                    const lastId = entries[entries.length - 1]?.id || '';
+                    const nextSig = `${logContextKey}|${entries.length}|${firstId}|${lastId}`;
+                    if (nextSig !== logSigRef.current) {
+                        logSigRef.current = nextSig;
+                        setLogSnapshot({ key: logContextKey, entries });
+                    }
+                    setLogFailure((prev) => (prev ? null : prev));
                 }
             } catch {
                 if (
@@ -382,16 +452,41 @@ const AppShell: React.FC = () => {
                 pending = false;
             }
         };
-        void poll();
-        const timer = window.setInterval(() => void poll(), 2000);
+
+        const handleProxyLogEvent = () => {
+            if (!document.hidden) {
+                void poll(true);
+            }
+        };
+
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                void poll(true);
+            }
+        };
+
+        void poll(true);
+        const intervalMs = logOpen ? 3000 : 8000;
+        const timer = window.setInterval(() => void poll(false), intervalMs);
+        window.electronAPI.on?.('proxy-state-changed', handleProxyLogEvent);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         return () => {
             cancelled = true;
             window.clearInterval(timer);
+            window.electronAPI.removeListener?.(
+                'proxy-state-changed',
+                handleProxyLogEvent,
+            );
+            document.removeEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+            );
         };
         // Identity and kind fully define an IPC log request; names and list
         // object identities can change on each background status poll.
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [logContextKey, logsPaused, proxyRefreshTick]);
+    }, [logContextKey, logsPaused, logOpen, proxyRefreshTick]);
 
     // 分组及各分组数量统计
     const { groups, groupCounts } = useMemo(() => {
@@ -447,6 +542,7 @@ const AppShell: React.FC = () => {
                 logTarget,
                 window.electronAPI.proxies.clearLogs,
             );
+            logSigRef.current = '';
             setLogSnapshot((snapshot) =>
                 snapshot.key === clearingKey
                     ? { key: clearingKey, entries: [] }
@@ -815,60 +911,74 @@ const AppShell: React.FC = () => {
                             />
                         )}
 
-                        {activeSection === 'proxies' && (
-                            <ProxiesPage
-                                proxies={managedProxies}
-                                environments={state.environments}
-                                coreInfo={coreInfo}
-                                loading={proxiesLoading}
-                                loadError={proxiesLoadError}
-                                selectedProxyId={selectedProxyId}
-                                onSelectProxy={setSelectedProxyId}
-                                detailsOpen={proxyDetailsOpen}
-                                onToggleDetails={(open) =>
-                                    setProxyDetailsOpen((prev) =>
-                                        typeof open === 'boolean'
-                                            ? open
-                                            : !prev,
-                                    )
+                        {(activeSection === 'proxies' ||
+                            activeSection === 'trash' ||
+                            activeSection === 'settings') && (
+                            <Suspense
+                                fallback={
+                                    <div className={styles.lazyFallback}>
+                                        <Spinner size="small" />
+                                    </div>
                                 }
-                                narrowWindow={contentWidth < 920}
-                                overlayDetails={overlayDetails}
-                                onRefreshProxies={() =>
-                                    setProxyRefreshTick((v) => v + 1)
-                                }
-                                onEnvironmentChanged={
-                                    actions.refreshEnvironments
-                                }
-                                onInspectLogs={handleInspectProxyLogs}
-                            />
-                        )}
+                            >
+                                {activeSection === 'proxies' && (
+                                    <ProxiesPage
+                                        proxies={managedProxies}
+                                        environments={state.environments}
+                                        coreInfo={coreInfo}
+                                        loading={proxiesLoading}
+                                        loadError={proxiesLoadError}
+                                        selectedProxyId={selectedProxyId}
+                                        onSelectProxy={setSelectedProxyId}
+                                        detailsOpen={proxyDetailsOpen}
+                                        onToggleDetails={(open) =>
+                                            setProxyDetailsOpen((prev) =>
+                                                typeof open === 'boolean'
+                                                    ? open
+                                                    : !prev,
+                                            )
+                                        }
+                                        narrowWindow={contentWidth < 920}
+                                        overlayDetails={overlayDetails}
+                                        onRefreshProxies={() =>
+                                            setProxyRefreshTick((v) => v + 1)
+                                        }
+                                        onEnvironmentChanged={
+                                            actions.refreshEnvironments
+                                        }
+                                        onInspectLogs={handleInspectProxyLogs}
+                                    />
+                                )}
 
-                        {activeSection === 'trash' && (
-                            <TrashPage
-                                onEnvironmentRestored={
-                                    actions.refreshEnvironments
-                                }
-                                onCountChange={setTrashCount}
-                                narrowWindow={narrowWindow}
-                            />
-                        )}
+                                {activeSection === 'trash' && (
+                                    <TrashPage
+                                        onEnvironmentRestored={
+                                            actions.refreshEnvironments
+                                        }
+                                        onCountChange={setTrashCount}
+                                        narrowWindow={narrowWindow}
+                                    />
+                                )}
 
-                        {activeSection === 'settings' && (
-                            <SettingsPage
-                                currentSettings={settings}
-                                onSave={settingsActions.saveSettings}
-                                onThemePreview={settingsActions.setThemeMode}
-                                coreInfo={coreInfo}
-                                appVersion={appVersion}
-                                managedProxies={managedProxies}
-                                groups={groupsForModal}
-                                kernelStatus={kernelStatus}
-                                onKernelStatusChange={(nextStatus) => {
-                                    setKernelStatus(nextStatus);
-                                    setProxyRefreshTick((v) => v + 1);
-                                }}
-                            />
+                                {activeSection === 'settings' && (
+                                    <SettingsPage
+                                        currentSettings={settings}
+                                        onSave={settingsActions.saveSettings}
+                                        onThemePreview={
+                                            settingsActions.setThemeMode
+                                        }
+                                        coreInfo={coreInfo}
+                                        appVersion={appVersion}
+                                        managedProxies={managedProxies}
+                                        groups={groupsForModal}
+                                        kernelStatus={kernelStatus}
+                                        onKernelStatusChange={(nextStatus) => {
+                                            setKernelStatus(nextStatus);
+                                            setProxyRefreshTick((v) => v + 1);
+                                        }}
+                                    />
+                                )}
+                            </Suspense>
                         )}
                     </div>
 
@@ -923,7 +1033,11 @@ const AppShell: React.FC = () => {
             </div>
 
             {appLogsOpen && (
-                <ApplicationLogsPanel onClose={() => setAppLogsOpen(false)} />
+                <Suspense fallback={null}>
+                    <ApplicationLogsPanel
+                        onClose={() => setAppLogsOpen(false)}
+                    />
+                </Suspense>
             )}
 
             <CreateEnvironmentModal

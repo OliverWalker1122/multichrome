@@ -14,9 +14,51 @@ import {
     buildProxyEndpointKey,
     parseBatchProxyText,
 } from './proxyBatch.js';
+import {
+    buildOutboundEndpointKey,
+    isAdvancedProxyUri,
+    parseProxyUriToOutbound,
+    redactProxyUri,
+} from './proxyUriParser.js';
 
 const MAX_LOGS = 1000;
 const EXIT_PROBE_COOLDOWN_MS = 15000;
+const BATCH_CHECK_CONCURRENCY = 4;
+const GENERIC_START_ERROR = 'sing-box 启动失败，请检查核心、配置和本地端口';
+
+const SAFE_START_ERROR_PATTERNS = [
+    /^尚未安装 sing-box 代理核心/,
+    /^无法解密代理配置/,
+    /^此出口类型不受内置 sing-box 核心支持$/,
+    /^sing-box 配置/,
+    /^配置使用了已移除的 sing-box 字段/,
+    /^sing-box UUID 配置无效$/,
+    /^sing-box TLS 或密钥配置无效$/,
+    /^sing-box 引用了不存在的出口$/,
+    /^无法分配本地代理端口$/,
+    /^无法启动内置 sing-box/,
+    /^无法启动 sing-box 核心/,
+];
+
+/**
+ * Keep startup error reporting strictly redacted: only known safe internal
+ * diagnostics are surfaced (always prefixed with "sing-box 启动失败"), while
+ * any unknown error that could contain upstream host/credentials/paths falls
+ * back to a fixed generic message.
+ */
+export function resolveSafeStartError(error) {
+    const message =
+        error && typeof error.message === 'string' ? error.message.trim() : '';
+    if (
+        message &&
+        SAFE_START_ERROR_PATTERNS.some((pattern) => pattern.test(message))
+    ) {
+        return message.includes('启动失败')
+            ? message
+            : `sing-box 启动失败：${message}`;
+    }
+    return GENERIC_START_ERROR;
+}
 
 function validateName(value) {
     if (
@@ -28,6 +70,32 @@ function validateName(value) {
         throw new Error('请填写不超过 80 个字符的代理名称');
     }
     return value.trim();
+}
+
+function buildRecordCacheToken(record) {
+    if (record.payload) return `v2:${record.payload}`;
+    return `v1:${record.protocol || ''}|${record.host || ''}|${record.port || 0}|${record.credentials || ''}`;
+}
+
+function extractSummaryMetadata(data) {
+    const config = data?.config;
+    const main = [
+        ...(config?.outbounds || []),
+        ...(config?.endpoints || []),
+    ].find((item) => item.tag === config?.route?.final);
+    const simple = data?.simple;
+    return {
+        mode: data?.mode || 'json',
+        protocol: simple?.protocol || main?.type || 'sing-box',
+        host: simple?.host || main?.server || '',
+        port: simple?.port || main?.server_port || 0,
+        username: simple?.username || '',
+        hasPassword:
+            data?.mode === 'json' ? true : Boolean(simple?.password),
+        endpointKey: simple
+            ? buildProxyEndpointKey(simple)
+            : buildOutboundEndpointKey(main),
+    };
 }
 
 async function reserveLocalPort() {
@@ -45,6 +113,21 @@ async function reserveLocalPort() {
     });
 }
 
+async function runWithConcurrency(items, concurrency, worker) {
+    const results = new Array(items.length);
+    let cursor = 0;
+    const workerCount = Math.min(Math.max(1, concurrency), items.length);
+    const runners = Array.from({ length: workerCount }, async () => {
+        while (cursor < items.length) {
+            const index = cursor;
+            cursor += 1;
+            results[index] = await worker(items[index], index);
+        }
+    });
+    await Promise.all(runners);
+    return results;
+}
+
 /** Proxy definitions stay encrypted; sing-box receives its runtime JSON via stdin. */
 export class ProxyManager {
     /**
@@ -58,6 +141,7 @@ export class ProxyManager {
      *   coreVersion?: string,
      *   exitProbe?: any,
      *   now?: () => number,
+     *   getLocale?: (() => string) | null,
      * }} options
      */
     constructor({
@@ -70,11 +154,13 @@ export class ProxyManager {
         coreVersion = '1.14.4',
         exitProbe = probeProxyExit,
         now = Date.now,
+        getLocale = null,
     }) {
         this.store = store;
         this.secretStorage = secretStorage;
         this.exitProbe = exitProbe;
         this.now = now;
+        this.getLocale = typeof getLocale === 'function' ? getLocale : null;
         this.core =
             core ||
             new SingboxCore({
@@ -95,11 +181,34 @@ export class ProxyManager {
         this.sourcePath =
             store.path || path.join(configDirectory, 'managed-proxies.json');
         this.runtimes = new Map();
+        // In-memory cache of redacted summary metadata only (never persisted,
+        // never stores passwords, UUIDs, or full sing-box JSON configs).
+        this.summaryCache = new Map();
+        this.listeners = new Set();
         this.logs = [];
         this.closed = false;
         const saved = store.get('proxies', []);
         if (!Array.isArray(saved)) throw new Error('代理配置格式无效');
         this.records = saved;
+    }
+
+    subscribe(listener) {
+        if (typeof listener !== 'function') return () => {};
+        this.listeners.add(listener);
+        return () => {
+            this.listeners.delete(listener);
+        };
+    }
+
+    notifyChange(kind = 'state', proxyId = undefined) {
+        if (this.listeners.size === 0) return;
+        for (const listener of this.listeners) {
+            try {
+                listener({ kind, proxyId });
+            } catch {
+                // ignore listener errors
+            }
+        }
     }
 
     encryptionAvailable() {
@@ -144,31 +253,47 @@ export class ProxyManager {
         return record;
     }
 
+    resolveSummaryMetadata(record) {
+        if (!this.encryptionAvailable()) {
+            this.summaryCache.clear();
+            return {
+                meta: null,
+                credentialError: '代理配置无法解密，请重新配置',
+            };
+        }
+
+        const token = buildRecordCacheToken(record);
+        const cached = this.summaryCache.get(record.id);
+        if (cached && cached.token === token) {
+            return { meta: cached.meta, credentialError: undefined };
+        }
+
+        try {
+            const data = this.payload(record);
+            const meta = extractSummaryMetadata(data);
+            this.summaryCache.set(record.id, { token, meta });
+            return { meta, credentialError: undefined };
+        } catch {
+            this.summaryCache.delete(record.id);
+            return {
+                meta: null,
+                credentialError: '代理配置无法解密，请重新配置',
+            };
+        }
+    }
+
     summary(record) {
         const runtime = this.runtimes.get(record.id);
-        let data;
-        let credentialError;
-        try {
-            data = this.payload(record);
-        } catch {
-            credentialError = '代理配置无法解密，请重新配置';
-        }
-        const config = data?.config;
-        const main = [
-            ...(config?.outbounds || []),
-            ...(config?.endpoints || []),
-        ].find((item) => item.tag === config?.route?.final);
-        const simple = data?.simple;
+        const { meta, credentialError } = this.resolveSummaryMetadata(record);
         return {
             id: record.id,
             name: record.name,
-            mode: data?.mode || 'json',
-            protocol: simple?.protocol || main?.type || 'sing-box',
-            host: simple?.host || main?.server || '',
-            port: simple?.port || main?.server_port || 0,
-            username: simple?.username || '',
-            hasPassword:
-                data?.mode === 'json' ? true : Boolean(simple?.password),
+            mode: meta?.mode || 'json',
+            protocol: meta?.protocol || 'sing-box',
+            host: meta?.host || '',
+            port: meta?.port || 0,
+            username: meta?.username || '',
+            hasPassword: Boolean(meta?.hasPassword),
             status: runtime?.handle
                 ? 'running'
                 : runtime?.lastError || credentialError
@@ -183,6 +308,7 @@ export class ProxyManager {
     list() {
         return this.records.map((record) => this.summary(record));
     }
+
     getCoreInfo() {
         return {
             ...this.core.getInfo(),
@@ -231,6 +357,12 @@ export class ProxyManager {
         try {
             this.store.set('proxies', records);
             this.records = records;
+            const validIds = new Set(records.map((item) => item.id));
+            for (const key of this.summaryCache.keys()) {
+                if (!validIds.has(key)) {
+                    this.summaryCache.delete(key);
+                }
+            }
         } catch {
             throw new Error('代理配置保存失败');
         }
@@ -246,6 +378,12 @@ export class ProxyManager {
         let data;
         if (input.mode === 'json') {
             data = { mode: 'json', config: normalizeProxyConfig(input.config) };
+        } else if (input.mode === 'line' && isAdvancedProxyUri(input.line)) {
+            const parsed = parseProxyUriToOutbound(input.line);
+            data = {
+                mode: 'json',
+                config: normalizeProxyConfig(parsed.config),
+            };
         } else {
             let simple;
             if (input.mode === 'line') {
@@ -297,8 +435,13 @@ export class ProxyManager {
                   )
                 : [...this.records, record],
         );
+        this.summaryCache.set(record.id, {
+            token: buildRecordCacheToken(record),
+            meta: extractSummaryMetadata(data),
+        });
         this.runtimes.delete(record.id);
         this.addLog(record.id, 'info', 'sing-box 配置校验通过，已加密保存');
+        this.notifyChange('state', record.id);
         return this.summary(record);
     }
 
@@ -306,13 +449,17 @@ export class ProxyManager {
         if (this.closed) throw new Error('代理服务正在退出');
         const existingKeys = [];
         for (const record of this.records) {
-            try {
-                const data = this.payload(record);
-                if (data?.simple) {
-                    existingKeys.push(buildProxyEndpointKey(data.simple));
-                }
-            } catch {
-                // ignore unreadable legacy entries
+            const { meta } = this.resolveSummaryMetadata(record);
+            if (meta && meta.host && meta.port) {
+                existingKeys.push(
+                    meta.endpointKey ||
+                        buildProxyEndpointKey({
+                            protocol: meta.protocol,
+                            host: meta.host,
+                            port: meta.port,
+                            username: meta.username,
+                        }),
+                );
             }
         }
         const parsed = parseBatchProxyText(text, {
@@ -322,33 +469,140 @@ export class ProxyManager {
         const imported = [];
         const skippedDuplicates = [];
         const errors = [...parsed.errors];
+        const candidates = [];
 
         for (const item of parsed.items) {
             if (item.duplicate && skipDuplicates) {
                 skippedDuplicates.push({
                     lineNumber: item.lineNumber,
                     name: item.name,
-                    host: item.simple.host,
-                    port: item.simple.port,
+                    host: item.host ?? item.simple?.host ?? '',
+                    port: item.port ?? item.simple?.port ?? 0,
                 });
                 continue;
             }
-            try {
-                const saved = await this.save({
-                    name: item.name,
-                    mode: 'line',
-                    line: item.line,
-                });
-                imported.push(saved);
-            } catch (error) {
-                errors.push({
-                    lineNumber: item.lineNumber,
-                    raw: item.line.slice(0, 120),
-                    error:
-                        error instanceof Error
-                            ? error.message
-                            : '代理保存失败',
-                });
+            candidates.push(item);
+        }
+
+        if (candidates.length > 0) {
+            const outcomes = await runWithConcurrency(
+                candidates,
+                BATCH_CHECK_CONCURRENCY,
+                async (item) => {
+                    if (this.closed) {
+                        return {
+                            ok: false,
+                            item,
+                            error: '代理服务正在退出',
+                        };
+                    }
+                    try {
+                        const name = validateName(item.name);
+                        let data;
+                        if (
+                            item.mode === 'json' ||
+                            isAdvancedProxyUri(item.line)
+                        ) {
+                            const parsedUri =
+                                item.parsed ||
+                                parseProxyUriToOutbound(item.line);
+                            data = {
+                                mode: 'json',
+                                config: normalizeProxyConfig(parsedUri.config),
+                            };
+                        } else {
+                            const simple =
+                                item.simple || parseProxyLine(item.line);
+                            data = {
+                                mode: 'simple',
+                                simple,
+                                config: simpleProxyToConfig(simple),
+                            };
+                        }
+                        if (!this.encryptionAvailable()) {
+                            throw new Error(
+                                '系统安全存储不可用，无法保存代理配置',
+                            );
+                        }
+                        await this.core.check(
+                            buildSingboxConfig(data.config, 0),
+                        );
+                        if (this.closed) {
+                            throw new Error('代理服务正在退出');
+                        }
+                        let encrypted;
+                        try {
+                            encrypted = this.secretStorage
+                                .encryptString(JSON.stringify(data))
+                                .toString('base64');
+                        } catch {
+                            throw new Error('代理配置加密失败');
+                        }
+                        const record = {
+                            id: randomUUID(),
+                            name,
+                            payload: encrypted,
+                            version: 2,
+                        };
+                        return {
+                            ok: true,
+                            item,
+                            record,
+                            meta: extractSummaryMetadata(data),
+                        };
+                    } catch (error) {
+                        return {
+                            ok: false,
+                            item,
+                            error:
+                                error instanceof Error
+                                    ? error.message
+                                    : '代理保存失败',
+                        };
+                    }
+                },
+            );
+
+            if (this.closed) {
+                throw new Error('代理服务正在退出');
+            }
+
+            const newRecords = [];
+            const newMetaEntries = [];
+            for (const outcome of outcomes) {
+                if (outcome.ok) {
+                    newRecords.push(outcome.record);
+                    newMetaEntries.push({
+                        id: outcome.record.id,
+                        token: buildRecordCacheToken(outcome.record),
+                        meta: outcome.meta,
+                    });
+                } else {
+                    errors.push({
+                        lineNumber: outcome.item.lineNumber,
+                        raw: redactProxyUri(outcome.item.line).slice(0, 120),
+                        error: outcome.error,
+                    });
+                }
+            }
+
+            if (newRecords.length > 0) {
+                this.persist([...this.records, ...newRecords]);
+                for (const entry of newMetaEntries) {
+                    this.summaryCache.set(entry.id, {
+                        token: entry.token,
+                        meta: entry.meta,
+                    });
+                }
+                for (const record of newRecords) {
+                    this.addLog(
+                        record.id,
+                        'info',
+                        'sing-box 配置校验通过，已加密保存',
+                    );
+                    imported.push(this.summary(record));
+                }
+                this.notifyChange('state');
             }
         }
 
@@ -363,8 +617,10 @@ export class ProxyManager {
         this.find(id);
         this.assertStopped(id);
         this.persist(this.records.filter((item) => item.id !== id));
+        this.summaryCache.delete(id);
         this.runtimes.delete(id);
         this.clearLogs(id);
+        this.notifyChange('state', id);
     }
 
     addLog(proxyId, level, message) {
@@ -377,14 +633,18 @@ export class ProxyManager {
         });
         if (this.logs.length > MAX_LOGS)
             this.logs.splice(0, this.logs.length - MAX_LOGS);
+        this.notifyChange('log', proxyId);
     }
+
     getLogs(id) {
         return this.logs
             .filter((item) => !id || item.proxyId === id)
             .map((item) => ({ ...item }));
     }
+
     clearLogs(id) {
         this.logs = id ? this.logs.filter((item) => item.proxyId !== id) : [];
+        this.notifyChange('log', id);
     }
 
     cancelExitProbe(runtime) {
@@ -413,6 +673,7 @@ export class ProxyManager {
         const startedAt = this.now();
         runtime.lastExitProbeAt = startedAt;
         runtime.exitInfo = { status: 'checking' };
+        this.notifyChange('state', id);
         const isCurrent = () =>
             this.runtimes.get(id) === runtime &&
             runtime.exitAbort === controller &&
@@ -420,12 +681,13 @@ export class ProxyManager {
             Boolean(runtime.handle) &&
             !runtime.stopping &&
             !this.closed;
+        const probeOptions = this.getLocale
+            ? { signal: controller.signal, locale: this.getLocale() }
+            : { signal: controller.signal };
         const pending = Promise.resolve()
             .then(() => {
                 if (!isCurrent()) return null;
-                return this.exitProbe(runtime.localAddress, {
-                    signal: controller.signal,
-                });
+                return this.exitProbe(runtime.localAddress, probeOptions);
             })
             .then((result) => {
                 if (isCurrent() && result) {
@@ -442,6 +704,7 @@ export class ProxyManager {
                         'info',
                         `出口检测完成：${result.ip} (${latencyMs}ms)`,
                     );
+                    this.notifyChange('state', id);
                 }
                 return { ...runtime.exitInfo };
             })
@@ -457,6 +720,7 @@ export class ProxyManager {
                         'error',
                         '出口检测失败，请稍后重试；代理服务仍在运行',
                     );
+                    this.notifyChange('state', id);
                 }
                 return { ...runtime.exitInfo };
             })
@@ -514,7 +778,10 @@ export class ProxyManager {
             const handle = await this.core.start(runtime.config, {
                 onLog: ({ level, message }) => {
                     this.addLog(record.id, level, message);
-                    if (level === 'error') runtime.lastError = message;
+                    if (level === 'error') {
+                        runtime.lastError = message;
+                        this.notifyChange('state', record.id);
+                    }
                 },
                 onExit: ({ unexpected }) => {
                     exited = true;
@@ -527,6 +794,7 @@ export class ProxyManager {
                             'sing-box 意外退出，浏览器代理连接已中断；请关闭环境后重新启动';
                         this.addLog(record.id, 'error', runtime.lastError);
                     }
+                    this.notifyChange('state', record.id);
                 },
             });
             if (exited || this.closed) {
@@ -540,13 +808,15 @@ export class ProxyManager {
                 'info',
                 `sing-box 已启动 ${runtime.localAddress}`,
             );
+            this.notifyChange('state', record.id);
             // Browser startup does not wait for the external geolocation service.
             void this.refreshExitInfo(record.id).catch(() => {});
             return runtime.localAddress;
-        } catch {
+        } catch (error) {
             runtime.config = null;
-            runtime.lastError = 'sing-box 启动失败，请检查核心、配置和本地端口';
+            runtime.lastError = resolveSafeStartError(error);
             this.addLog(record.id, 'error', runtime.lastError);
+            this.notifyChange('state', record.id);
             throw new Error(runtime.lastError);
         }
     }
@@ -568,6 +838,7 @@ export class ProxyManager {
                 this.addLog(id, 'info', 'sing-box 已停止');
             }
             runtime.lastError = undefined;
+            this.notifyChange('state', id);
         })();
         try {
             await runtime.stopping;
@@ -579,5 +850,6 @@ export class ProxyManager {
     async closeAll() {
         this.closed = true;
         await Promise.all(this.records.map((record) => this.stop(record.id)));
+        this.summaryCache.clear();
     }
 }

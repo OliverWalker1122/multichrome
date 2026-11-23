@@ -135,3 +135,111 @@ test('getKernelUpdateSummary suppresses badge when uninstalled and flags outdate
     assert.equal(newerThanRecommended.fingerprint.hasUpdate, false);
     assert.equal(newerThanRecommended.hasAnyUpdate, false);
 });
+
+test('getAllowedFingerprintReleases, getAllowedSingboxReleases, and getKernelUpdateSummary localize release names for en-US while keeping zh-CN default', () => {
+    const manifest = loadKernelManifest();
+
+    // Default zh-CN backward compatibility
+    const defaultFp = getAllowedFingerprintReleases('win32', manifest);
+    assert.equal(defaultFp[0].name, 'Chrome 148 (源码已公开 · 推荐)');
+    const defaultSb = getAllowedSingboxReleases('win32', 'x64', manifest);
+    assert.equal(defaultSb[0].name, 'sing-box v1.14.4 (官方稳定版 · 推荐)');
+
+    // en-US formatting on real manifest
+    const enFp = getAllowedFingerprintReleases('win32', manifest, 'en-US');
+    assert.equal(enFp[0].name, 'Chrome 148 (Source Auditable · Recommended)');
+    const enSb = getAllowedSingboxReleases('win32', 'x64', manifest, 'en-US');
+    assert.equal(enSb[0].name, 'sing-box v1.14.4 (Official Stable · Recommended)');
+
+    // Synthetic manifest covering non-recommended / delayed-source variants
+    const syntheticManifest = {
+        schemaVersion: 1,
+        fingerprintChromium: {
+            '150.0.0.1': {
+                chromeMajor: 150,
+                sourceAuditable: false,
+                recommended: false,
+                assets: { win32: { name: 'c150.zip', sha256: 'a'.repeat(64) } },
+            },
+            '149.0.0.1': {
+                chromeMajor: 149,
+                sourceAuditable: true,
+                recommended: false,
+                assets: { win32: { name: 'c149.zip', sha256: 'b'.repeat(64) } },
+            },
+            '148.0.0.1': {
+                chromeMajor: 148,
+                sourceAuditable: true,
+                recommended: true,
+                assets: { win32: { name: 'c148.zip', sha256: 'c'.repeat(64) } },
+            },
+        },
+        singBox: {
+            '1.14.4': {
+                recommended: true,
+                assets: { 'win32-x64': { name: 'sb144.zip', sha256: 'd'.repeat(64) } },
+            },
+            '1.14.3': {
+                recommended: false,
+                assets: { 'win32-x64': { name: 'sb143.zip', sha256: 'e'.repeat(64) } },
+            },
+        },
+    };
+
+    const syntheticFpEn = getAllowedFingerprintReleases(
+        'win32',
+        syntheticManifest,
+        'en-US',
+    );
+    assert.deepEqual(
+        syntheticFpEn.map((item) => item.name),
+        [
+            'Chrome 150 (Latest · Delayed Source)',
+            'Chrome 149 (Source Auditable)',
+            'Chrome 148 (Source Auditable · Recommended)',
+        ],
+    );
+
+    const syntheticSbEn = getAllowedSingboxReleases(
+        'win32',
+        'x64',
+        syntheticManifest,
+        'en-US',
+    );
+    assert.deepEqual(
+        syntheticSbEn.map((item) => item.name),
+        [
+            'sing-box v1.14.4 (Official Stable · Recommended)',
+            'sing-box v1.14.3 (Official Stable)',
+        ],
+    );
+
+    const summaryZh = getKernelUpdateSummary({
+        platform: 'win32',
+        arch: 'x64',
+        manifest,
+    });
+    assert.equal(
+        summaryZh.fingerprint.recommendedName,
+        'Chrome 148 (源码已公开 · 推荐)',
+    );
+    assert.equal(
+        summaryZh.singbox.recommendedName,
+        'sing-box v1.14.4 (官方稳定版 · 推荐)',
+    );
+
+    const summaryEn = getKernelUpdateSummary({
+        platform: 'win32',
+        arch: 'x64',
+        manifest,
+        locale: 'en-US',
+    });
+    assert.equal(
+        summaryEn.fingerprint.recommendedName,
+        'Chrome 148 (Source Auditable · Recommended)',
+    );
+    assert.equal(
+        summaryEn.singbox.recommendedName,
+        'sing-box v1.14.4 (Official Stable · Recommended)',
+    );
+});

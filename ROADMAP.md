@@ -23,8 +23,8 @@ MultiChrome 定位为 **开源、本地优先、Fail-Closed 代理防泄露、�
 ## 🧭 后续规划（Backlog）
 
 ### 自动化与 AI Agent 生态
-- [ ] **Local REST API（127.0.0.1 + 随机 Token）**：默认关闭，开放 `list / start / stop` 等接口并返回 CDP `wsEndpoint`，无缝接入 Playwright / Puppeteer / Selenium。
-- [ ] **原生 MCP Server（Model Context Protocol）**：让 Claude Code / Cursor 等 AI 编程与 Agent 工具直接调度本地隔离环境，同时外联全链路仍受 Fail-Closed 代理与日志审计保护。
+- [x] **标准 CDP 透传守卫（127.0.0.1 防呆保护）**：默认关闭，开启后仅监听 `127.0.0.1`（强制 `Host` 白名单并拒绝浏览器 `Origin` 请求防 DNS Rebinding），100% 原生兼容官方 `@playwright/mcp`、`chrome-devtools-mcp` 与 Playwright/Puppeteer；静默忽略外部 `Emulation` 指纹/时区/窗口尺寸覆盖指令、拦截误创建空白无痕 `BrowserContext`，并在绑定代理断开时同步断开 CDP 会话。
+- [x] **极简环境调度 MCP Server**：支持 Streamable HTTP（`/mcp`）与 `stdio` 桥接（`scripts/mcp-stdio.mjs`），聚焦提供 `list_profiles`、`start_profile`、`stop_profile`、`switch_active_profile` 四个环境编排工具及本地 HTTP 启停接口，配合官方页面 MCP 实现多环境防关联自动化。
 
 ### 批量效率与窗口控制
 - [ ] **环境多选批量操作 & 批量创建**：多选勾选批量启动、关闭、移分组、换代理、移入回收站；支持前缀编号批量新建环境并按序分配代理。

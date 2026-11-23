@@ -405,6 +405,25 @@ export interface AppLog {
     message: string;
 }
 
+export interface AutomationStatus {
+    localApiEnabled: boolean;
+    mcpEnabled: boolean;
+    port: number;
+    baseUrl: string;
+    running: boolean;
+    lastError?: string;
+    hasToken: boolean;
+    maskedToken: string;
+    encryptionAvailable: boolean;
+    stdioBridgePath: string;
+}
+
+export interface AutomationConfigPatch {
+    localApiEnabled?: boolean;
+    mcpEnabled?: boolean;
+    port?: number;
+}
+
 export interface ElectronAPI {
     proxies: {
         list: () => Promise<ManagedProxy[]>;
@@ -457,7 +476,7 @@ export interface ElectronAPI {
         inspectHealth?: (id: string) => Promise<EnvironmentHealthReport>;
         openUrl?: (id: string, url: string) => Promise<boolean>;
         close: (id: string) => Promise<boolean>;
-        closeAll?: () => Promise<number>;
+        closeAll?: () => Promise<{ closedCount: number; failedCount: number }>;
         getRunningResourceStats?: () => Promise<RunningResourceStats>;
         delete: (id: string) => Promise<boolean>; // 软删除（移到回收站）
         update: (
@@ -521,6 +540,15 @@ export interface ElectronAPI {
         getSettings: () => Promise<AppSettings>;
         saveSettings: (settings: AppSettings) => Promise<boolean>;
         selectFolder: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+    };
+    automation?: {
+        getStatus: () => Promise<AutomationStatus>;
+        updateConfig: (
+            patch: AutomationConfigPatch,
+        ) => Promise<AutomationStatus>;
+        pickAvailablePort?: () => Promise<AutomationStatus>;
+        getToken: () => Promise<string>;
+        rotateToken: () => Promise<{ status: AutomationStatus; token: string }>;
     };
     app?: {
         getInfo: () => Promise<AppInfo>;

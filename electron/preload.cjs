@@ -1,5 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+const VALID_EVENT_CHANNELS = [
+    'chrome-status-changed',
+    'kernel-download-progress',
+    'proxy-state-changed',
+    'automation-state-changed',
+];
+
 try {
     // 暴露给渲染进程的安全API
     contextBridge.exposeInMainWorld('electronAPI', {
@@ -166,6 +173,17 @@ try {
             openDir: () => ipcRenderer.invoke('kernels:open-dir'),
         },
 
+        // 本地 CDP 透传守卫与 MCP 服务
+        automation: {
+            getStatus: () => ipcRenderer.invoke('automation:get-status'),
+            updateConfig: (patch) =>
+                ipcRenderer.invoke('automation:update-config', patch),
+            pickAvailablePort: () =>
+                ipcRenderer.invoke('automation:pick-available-port'),
+            setActiveProfile: (profileId) =>
+                ipcRenderer.invoke('automation:set-active-profile', profileId),
+        },
+
         // 应用与窗口API
         app: {
             getInfo: () => ipcRenderer.invoke('app:get-info'),
@@ -178,21 +196,13 @@ try {
 
         // 事件监听API
         on: (channel, callback) => {
-            const validChannels = [
-                'chrome-status-changed',
-                'kernel-download-progress',
-            ];
-            if (validChannels.includes(channel)) {
+            if (VALID_EVENT_CHANNELS.includes(channel)) {
                 ipcRenderer.on(channel, callback);
             }
         },
 
         removeListener: (channel, callback) => {
-            const validChannels = [
-                'chrome-status-changed',
-                'kernel-download-progress',
-            ];
-            if (validChannels.includes(channel)) {
+            if (VALID_EVENT_CHANNELS.includes(channel)) {
                 ipcRenderer.removeListener(channel, callback);
             }
         },

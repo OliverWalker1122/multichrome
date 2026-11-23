@@ -1,11 +1,26 @@
 import { parseProxyLine } from './singboxConfig.js';
+import {
+    buildOutboundEndpointKey,
+    isAdvancedProxyUri,
+    parseProxyUriToOutbound,
+    redactProxyUri,
+} from './proxyUriParser.js';
 
-export function buildProxyEndpointKey(simple) {
-    if (!simple) return '';
-    const protocol = String(simple.protocol || '').toLowerCase();
-    const host = String(simple.host || '').toLowerCase();
-    const port = Number(simple.port) || 0;
-    const username = String(simple.username || '');
+export function buildProxyEndpointKey(entry) {
+    if (!entry) return '';
+    if (typeof entry.endpointKey === 'string' && entry.endpointKey) {
+        return entry.endpointKey;
+    }
+    if (typeof entry.type === 'string' && entry.server !== undefined) {
+        return buildOutboundEndpointKey(entry);
+    }
+    const protocol = String(entry.protocol || '').toLowerCase();
+    const host = String(entry.host || '')
+        .trim()
+        .replace(/^\[([^\]]+)\]$/, '$1')
+        .toLowerCase();
+    const port = Number(entry.port) || 0;
+    const username = String(entry.username || '');
     return `${protocol}://${username}@${host}:${port}`;
 }
 
@@ -13,7 +28,8 @@ export function buildProxyEndpointKey(simple) {
  * Parse multi-line proxy text into structured batch items.
  * Supports:
  *   - Plain lines: protocol://user:pass@host:port, host:port:user:pass, host:port
- *   - Named lines: "名称 | 代理地址" or "名称\t代理地址"
+ *   - Advanced share URIs: vless://, vmess://, trojan://, ss://, hy2://, hysteria2://, tuic://
+ *   - Named lines: "名称 | 代理地址" or "名称\t代理地址" (falls back to #remark, then prefix-N)
  *   - Ignores empty lines and lines starting with # or //
  */
 export function parseBatchProxyText(
@@ -56,28 +72,65 @@ export function parseBatchProxyText(
         }
 
         try {
-            const simple = parseProxyLine(proxySpec);
-            const key = buildProxyEndpointKey(simple);
-            const duplicate = seenKeys.has(key);
-            seenKeys.add(key);
-            validIndex += 1;
+            if (isAdvancedProxyUri(proxySpec)) {
+                const parsed = parseProxyUriToOutbound(proxySpec);
+                const key = parsed.endpointKey;
+                const duplicate = seenKeys.has(key);
+                seenKeys.add(key);
+                validIndex += 1;
 
-            const name =
-                explicitName ||
-                (prefix ? `${prefix}-${validIndex}` : `${simple.host}:${simple.port}`);
+                const name =
+                    explicitName ||
+                    parsed.suggestedName ||
+                    (prefix
+                        ? `${prefix}-${validIndex}`
+                        : `${parsed.host}:${parsed.port}`);
 
-            items.push({
-                lineNumber,
-                name: name.slice(0, 80),
-                line: proxySpec,
-                simple,
-                key,
-                duplicate,
-            });
+                items.push({
+                    lineNumber,
+                    name: name.slice(0, 80),
+                    line: proxySpec,
+                    mode: 'json',
+                    protocol: parsed.protocol,
+                    host: parsed.host,
+                    port: parsed.port,
+                    parsed,
+                    key,
+                    duplicate,
+                });
+            } else {
+                const simple = parseProxyLine(proxySpec);
+                const key = buildProxyEndpointKey(simple);
+                const duplicate = seenKeys.has(key);
+                seenKeys.add(key);
+                validIndex += 1;
+
+                const name =
+                    explicitName ||
+                    (prefix
+                        ? `${prefix}-${validIndex}`
+                        : `${simple.host}:${simple.port}`);
+
+                items.push({
+                    lineNumber,
+                    name: name.slice(0, 80),
+                    line: proxySpec,
+                    mode: 'simple',
+                    protocol: simple.protocol,
+                    host: simple.host,
+                    port: simple.port,
+                    simple,
+                    key,
+                    duplicate,
+                });
+            }
         } catch (error) {
+            const safeRaw = explicitName
+                ? `${explicitName} | ${redactProxyUri(proxySpec)}`
+                : redactProxyUri(proxySpec);
             errors.push({
                 lineNumber,
-                raw: trimmed.slice(0, 120),
+                raw: safeRaw.slice(0, 120),
                 error:
                     error instanceof Error
                         ? error.message

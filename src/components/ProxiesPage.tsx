@@ -68,6 +68,7 @@ import {
     useSavedTableValue,
     useTableSelection,
 } from '../hooks/useTableWorkspace';
+import { useVirtualRows } from '../hooks/useVirtualRows';
 import { getProtocolStyle, getToneStyle } from '../theme/semanticColors';
 import { tr, useI18n } from '../i18n';
 
@@ -100,12 +101,14 @@ function errorMessage(error: unknown): string {
 function formatProtocolLabel(protocol: string): string {
     const lower = protocol.toLowerCase();
     if (lower === 'shadowsocks' || lower === 'ss') return 'Shadowsocks';
+    if (lower === 'vmess') return 'VMess';
+    if (lower === 'trojan') return 'Trojan';
+    if (lower === 'hysteria2' || lower === 'hy2') return 'Hysteria2';
     if (
         lower === 'http' ||
         lower === 'https' ||
         lower === 'socks5' ||
         lower === 'vless' ||
-        lower === 'vmess' ||
         lower === 'tuic'
     ) {
         return lower.toUpperCase();
@@ -542,6 +545,18 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
         onSelectProxy,
         () => onToggleDetails(true),
     );
+    const {
+        containerRef: tableWrapRef,
+        visibleItems: visibleProxies,
+        startIndex,
+        topSpacerHeight,
+        bottomSpacerHeight,
+        isVirtualized,
+    } = useVirtualRows(filtered, {
+        rowHeight: 48,
+        overscan: 8,
+        threshold: 80,
+    });
     const runningCount = proxies.filter(
         (proxy) => proxy.status === 'running',
     ).length;
@@ -1086,8 +1101,8 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                       'Try a different name, protocol, or exit IP keyword.',
                                   )
                                 : t(
-                                      'HTTP / SOCKS5 支持粘贴一行地址；VLESS、Shadowsocks、TUIC 等支持 sing-box 出口 JSON。',
-                                      'Paste a single line for HTTP/SOCKS5, or sing-box outbound JSON for VLESS, Shadowsocks, TUIC, and more.',
+                                      '支持粘贴一行地址或分享链接（HTTP / SOCKS5 / VLESS / VMess / Trojan / SS / Hy2 / TUIC），也支持 sing-box 出口 JSON。',
+                                      'Paste a single line or share URI (HTTP, SOCKS5, VLESS, VMess, Trojan, SS, Hy2, TUIC), or sing-box outbound JSON.',
                                   )}
                         </span>
                         {!search.trim() && (
@@ -1101,7 +1116,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                         )}
                     </div>
                 ) : (
-                    <div className={styles.tableWrap}>
+                    <div ref={tableWrapRef} className={styles.tableWrap}>
                         <table
                             className={styles.table}
                             aria-label={t('代理列表', 'Proxies table')}
@@ -1165,7 +1180,25 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                 </tr>
                             </thead>
                             <tbody>
-                                {filtered.map((proxy, index) => {
+                                {isVirtualized && topSpacerHeight > 0 && (
+                                    <tr
+                                        aria-hidden="true"
+                                        style={{
+                                            height: `${topSpacerHeight}px`,
+                                        }}
+                                    >
+                                        <td
+                                            colSpan={narrowWindow ? 4 : 5}
+                                            style={{
+                                                padding: 0,
+                                                border: 'none',
+                                                height: `${topSpacerHeight}px`,
+                                            }}
+                                        />
+                                    </tr>
+                                )}
+                                {visibleProxies.map((proxy, localIndex) => {
+                                    const index = startIndex + localIndex;
                                     const assigned =
                                         envBindingsByProxy.get(proxy.id) || [];
                                     const inUseCount = assigned.filter(
@@ -1608,6 +1641,23 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                         </tr>
                                     );
                                 })}
+                                {isVirtualized && bottomSpacerHeight > 0 && (
+                                    <tr
+                                        aria-hidden="true"
+                                        style={{
+                                            height: `${bottomSpacerHeight}px`,
+                                        }}
+                                    >
+                                        <td
+                                            colSpan={narrowWindow ? 4 : 5}
+                                            style={{
+                                                padding: 0,
+                                                border: 'none',
+                                                height: `${bottomSpacerHeight}px`,
+                                            }}
+                                        />
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -1683,15 +1733,15 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             <Field
                                 label={t('代理列表（每行一条）', 'Proxy List (one per line)')}
                                 hint={t(
-                                    '支持 protocol://账号:密码@主机:端口、主机:端口:账号:密码、主机:端口；也支持“自定义名称 | 代理地址”格式，以 # 或 // 开头的注释行会自动忽略。',
-                                    'Supports protocol://user:pass@host:port, host:port:user:pass, host:port, and "Custom Name | address". Lines starting with # or // are ignored.',
+                                    '支持 http/https/socks5、主机:端口(:账号:密码)，以及 vless://、vmess://、trojan://、ss://、hy2://、tuic:// 分享链接；支持“自定义名称 | 代理地址”或链接末尾 #备注 自动命名，以 # 或 // 开头的注释行会自动忽略。',
+                                    'Supports http/https/socks5, host:port(:user:pass), and vless://, vmess://, trojan://, ss://, hy2://, tuic:// share URIs; supports "Custom Name | address" or #remark naming. Lines starting with # or // are ignored.',
                                 )}
                             >
                                 <Textarea
                                     rows={7}
                                     resize="vertical"
                                     placeholder={
-                                        'US-Res-1 | socks5://user:pass@1.2.3.4:1080\nhttp://user:pass@5.6.7.8:8080\n9.10.11.12:3128:alice:secret'
+                                        'US-Res-1 | socks5://user:pass@198.51.100.1:1080\nhttp://user:pass@198.51.100.2:8080\nvless://00000000-0000-4000-8000-000000000001@example.com:443?security=tls#US-VLESS'
                                     }
                                     value={batchText}
                                     onChange={(_, data) =>

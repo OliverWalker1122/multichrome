@@ -17,6 +17,15 @@ export default defineConfig({
     build: {
         outDir: 'dist/renderer',
         emptyOutDir: true,
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    'react-vendor': ['react', 'react-dom'],
+                    'fluent-icons': ['@fluentui/react-icons'],
+                    'fluent-components': ['@fluentui/react-components'],
+                },
+            },
+        },
     },
     server: {
         port: 5173,

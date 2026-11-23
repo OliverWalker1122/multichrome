@@ -6,6 +6,8 @@ import path from 'node:path';
 import {
     normalizeBookmarkTemplates,
     normalizeGroupStartupUrls,
+    removeGroupStartupUrl,
+    renameGroupStartupUrl,
     resolveEffectiveStartupUrl,
     resolveExtensionTemplatePaths,
     syncBookmarksToProfile,
@@ -120,4 +122,35 @@ test('normalizeGroupStartupUrls filters invalid URLs', () => {
         }),
         { A: 'https://example.com' },
     );
+});
+
+test('renameGroupStartupUrl and removeGroupStartupUrl keep group startup URLs in sync', () => {
+    const initial = {
+        OldGroup: 'https://old.example.com',
+        ExistingGroup: 'https://keep.example.com',
+    };
+
+    const renamed = renameGroupStartupUrl(initial, 'OldGroup', 'NewGroup');
+    assert.equal(renamed.changed, true);
+    assert.deepEqual(renamed.next, {
+        NewGroup: 'https://old.example.com',
+        ExistingGroup: 'https://keep.example.com',
+    });
+
+    // Renaming into a group that already has a startup URL preserves target URL
+    const merged = renameGroupStartupUrl(initial, 'OldGroup', 'ExistingGroup');
+    assert.equal(merged.changed, true);
+    assert.deepEqual(merged.next, {
+        ExistingGroup: 'https://keep.example.com',
+    });
+
+    // Missing group is a no-op
+    const noop = renameGroupStartupUrl(initial, 'Missing', 'Other');
+    assert.equal(noop.changed, false);
+
+    const removed = removeGroupStartupUrl(initial, 'OldGroup');
+    assert.equal(removed.changed, true);
+    assert.deepEqual(removed.next, {
+        ExistingGroup: 'https://keep.example.com',
+    });
 });

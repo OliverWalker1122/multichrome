@@ -15,6 +15,10 @@
 
 - **通用多环境指纹浏览器**：定位为开源、本地优先、Fail-Closed 代理防泄露、原生 C++ 隐匿的通用多环境浏览器。禁止在代码、字段或文案中引入特定垂类硬编码内容。
 - **Fail-Closed 安全底线**：绑定代理时强制阻断直连回退、QUIC/UDP 绕过、本地 DNS 与 WebRTC 泄露；任何优化不得削弱此机制。
+- **零 IP / DNS / WebRTC / 指纹泄露铁律**：涵盖首开瞬间、旧会话与缓存恢复、代理异常断连及外部 REST API / MCP 自动化调度全链路，强制贯彻 Fail-Closed 隔离与零宿主机特征暴露。
+- **Profile 启动速度不劣化铁律**：严禁在环境启动关键路径引入同步阻塞扫描、重复系统密钥链（`safeStorage`）解密、串行冗余网络探测或额外子进程冷启动。
+- **绝对正确性与零明文凭据铁律**：严禁静默吞错造假成功；严禁明文落盘代理节点、鉴权凭据或 API Token（加密不可用时直接拒绝而非降级明文）；严禁破坏 SQLite 与 `electron-store` 向后兼容；严禁在 API、MCP 响应或日志中回显未脱敏密钥。
+- **外部自动化控制面（标准 CDP 透传守卫 & 极简环境 MCP）底线**：默认关闭；开启时强制仅监听 `127.0.0.1`，强制校验 `Host` 白名单并拒绝浏览器 `Origin` 请求头以防御跨站请求与 DNS Rebinding；内部 Chrome 调试端口迁离 `9222` 使用私有随机高端口防盲连错号。不重复造页面操作轮子（100% 兼容官方 `@playwright/mcp`、`chrome-devtools-mcp` 与原生 Playwright/Puppeteer），内置 MCP 仅保留环境查/启/停/切换，由轻量无状态 CDP 守卫统一防呆保护：**绑定 Fail-Closed 独立代理生命线（代理异常断连同步断开 CDP）+ 守住独立 C++ 指纹种子 + 静默忽略外部 `Emulation` 指纹/时区/语言/窗口尺寸覆盖指令 + 拦截无痕 `BrowserContext` 误创建防丢登录态（遇到人机验证交由人工处理，严禁绕过验证码）**。
 - **C++ 纯原生零扩展隐匿**：`fingerprint-chromium` 环境默认不注入 JS 原型 Hook、不自动加载未打包扩展（除非用户在设置中显式开启），仅允许使用原生 CLI 参数、原生 `Preferences` 与底层 CDP Emulation（如时区/Geolocation）。
 - **向后兼容**：不得破坏用户已有本地 SQLite 数据库或 `electron-store` 配置；新增列需做安全 `ALTER TABLE` 迁移，历史废弃列需在读取层安全兼容。
 - **双语支持（i18n）**：所有新增或修改的用户可见文案必须同时提供中文与英文（渲染层使用 `useI18n()` 的 `t(zh, en)` 或 `tr(zh, en)`，主进程根据 `settings.locale` 区分 `zh-CN` / `en-US`）。
@@ -22,7 +26,29 @@
 
 ---
 
-## 3. 测试分层标准（四层测试金字塔）
+## 3. UI/UX 设计与审美规范（强制遵循）
+
+MultiChrome 确立了统一、克制、原生级的 **Windows 11 Fluent 2 + 轻量毛玻璃（Glassmorphism）** 桌面视觉体系。所有新增或修改的界面（含设置页、弹窗、抽屉、表格、详情面板）必须严格遵守，严禁回退为臃肿表单或堆叠说明墙：
+
+1. **材质与层次纪律（禁止“盒套盒”）**：
+   - 严格复用 [win11Theme.ts](src/theme/win11Theme.ts) 与 [semanticColors.css](src/theme/semanticColors.css) 的主题 token 和玻璃变量：`--glass-shell` → `--glass-workspace` → `--glass-card`（`borderRadius: 14px`、`padding: 16px 18px`、`border: 1px solid var(--glass-border)`、`boxShadow: var(--glass-shadow)`）→ `--glass-card-inner`（`borderRadius: 8px–10px`）→ `--glass-pill`。
+   - **最多两层容器嵌套**（`--glass-card` 内最多一层 `--glass-card-inner`），严禁 `card → subPanel → codeBlock` 三层描边盒套盒，严禁在玻璃卡片内硬贴割裂的高对比实心灰底块或出现丑陋的横向滚动条裁断。
+   - **克制使用语义色**：仅通过 `getToneStyle('blue' | 'teal' | 'violet' | 'amber' | 'green' | 'rose')` 给 `24×24`（`borderRadius: 7px`）的 `sectionIcon`、分组图标、协议/标签芯片着色；禁止额外装饰性小图标或高饱和大面积色块；必须完整适配浅色与深色模式（禁止硬编码浅/深色 hex）。
+
+2. **极简呼吸感与渐进式披露（Zero Text Wall · InfoTip First）**：
+   - **单行清爽设置行**：设置项统一使用单行 `row`（`minHeight: 34px`，左标签 + 右控件，中间用 `1px` `colorNeutralStroke2` 分隔线），**严禁在每个开关/输入框下堆砌大段灰色解释副标题（`rowDesc`）**，更不得同时写长副标题又挂 `<InfoTip>` 重复解释。
+   - **解释收敛进 `<InfoTip>`**：原理说明、安全防线、路径与参数细节统一放进 [InfoTip.tsx](src/components/InfoTip.tsx)（`?` 悬浮提示），**严禁单独开辟大段「安全说明 / 科普 / Bullet 列表」卡片**（参考「设置 → 隐私 → 网络保护」）。
+   - **低频/高阶区块默认折叠**：高级配置、接入代码片段等非核心常驻内容采用「右侧摘要 + `subtle` 展开/收起按钮（`ChevronDownRegular` / `ChevronUpRegular`）」折叠展示（参考「设置 → 隐私 → 设备伪装」），确保常规设置页默认一屏内即可完成核心操作、无压迫感。
+   - **自然人话文案**：标题与选项名精炼直观（如「防关联浏览器」「代理引擎」「本地服务」），避免在主标题和开关名称上堆砌括号技术术语（如 `(/api/v1)`、`(Streamable HTTP)`、`SHA-256 + timingSafeEqual`），技术细节按需放入 `<InfoTip>` 或代码片段中。
+
+3. **动作层级与控件克制**：
+   - 保持清晰的主次按钮层级：次要操作优先使用 `appearance="subtle"`、带 `<Tooltip>` 的小图标按钮，或收纳至 `⋯`（`MoreHorizontalRegular`）`<Menu>`，**禁止同一行横排多个带边框的 `outline` 按钮**造成视觉噪音。
+   - 与保存表单无关的即时生效页签（如「自动化与 MCP」「组件」「关于」）在无未保存表单改动（`!isDirty`）时，不显示无意义的禁用态「已保存」按钮。
+   - 状态反馈使用 Fluent `Badge`（`appearance="tint"`：`success` / `warning` / `danger` / `subtle`）精准表达；命令/代码展示使用单层 `--glass-card-inner` 并配合 `whiteSpace: 'pre-wrap'` 自动换行，避免裁断与粗横滚条；动效统一克制在 `100–140ms` 并尊重 `prefers-reduced-motion`。
+
+---
+
+## 4. 测试分层标准（四层测试金字塔）
 
 | 层级 | 命令 | 脚本位置 | 定位与职责 | 何时运行 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -36,7 +62,7 @@
 
 ---
 
-## 4. 交付与验收检查清单
+## 5. 交付与验收检查清单
 
 1. **常规代码改动必跑**：
    - `npm run check`（TypeScript 类型检查，0 errors）

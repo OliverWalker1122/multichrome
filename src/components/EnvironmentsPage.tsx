@@ -58,6 +58,7 @@ import {
     useSavedTableValue,
     useTableSelection,
 } from '../hooks/useTableWorkspace';
+import { useVirtualRows } from '../hooks/useVirtualRows';
 import { getGroupStyle, getTagStyle, getToneStyle } from '../theme/semanticColors';
 import { useI18n } from '../i18n';
 import {
@@ -715,7 +716,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
             return;
         }
         let cancelled = false;
-        const poll = async () => {
+        const poll = async (force = false) => {
+            if (!force && document.hidden) return;
             try {
                 const stats =
                     await window.electronAPI.chromeEnvironments.getRunningResourceStats?.();
@@ -726,11 +728,21 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 // ignore transient process query errors
             }
         };
-        void poll();
-        const timer = window.setInterval(() => void poll(), 5000);
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                void poll(true);
+            }
+        };
+        void poll(true);
+        const timer = window.setInterval(() => void poll(false), 8000);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => {
             cancelled = true;
             window.clearInterval(timer);
+            document.removeEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+            );
         };
     }, [allRunningCount]);
 
@@ -740,16 +752,28 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         }
         setClosingAll(true);
         try {
-            const closedCount =
+            const rawResult =
                 await window.electronAPI.chromeEnvironments.closeAll();
+            const closedCount =
+                typeof rawResult === 'number'
+                    ? rawResult
+                    : Number(rawResult?.closedCount) || 0;
+            const failedCount =
+                typeof rawResult === 'object' && rawResult !== null
+                    ? Number(rawResult.failedCount) || 0
+                    : 0;
             setCloseAllConfirmOpen(false);
             await onRefresh();
             showNotification(
-                'success',
+                failedCount > 0 ? 'warning' : 'success',
                 closedCount > 0
-                    ? isEn
-                        ? `Closed all ${closedCount} running environment(s)`
-                        : `已关闭全部 ${closedCount} 个运行中环境`
+                    ? failedCount > 0
+                        ? isEn
+                            ? `Closed ${closedCount} running environment(s) (${failedCount} failed)`
+                            : `已关闭 ${closedCount} 个运行中环境（${failedCount} 个失败）`
+                        : isEn
+                          ? `Closed all ${closedCount} running environment(s)`
+                          : `已关闭全部 ${closedCount} 个运行中环境`
                     : t('当前没有运行中的环境', 'No running environments'),
             );
         } catch (error) {
@@ -858,12 +882,30 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         onSelectEnv,
         () => onToggleDetails(true),
     );
+    const {
+        containerRef: tableWrapRef,
+        visibleItems: visibleEnvironments,
+        startIndex,
+        topSpacerHeight,
+        bottomSpacerHeight,
+        isVirtualized,
+    } = useVirtualRows(filtered, {
+        rowHeight: 50,
+        overscan: 8,
+        threshold: 80,
+    });
 
     // 窄窗口自动隐藏可选列与次要列，保留名称、状态与主要操作
     const activeOptionalCols = narrowWindow ? [] : optionalColumns;
     const showGroupCol = !narrowWindow && currentGroup === '用户分组';
     const showLastUsedCol = !narrowWindow;
     const showProxyCol = !narrowWindow;
+    const visibleColumnCount =
+        3 +
+        (showGroupCol ? 1 : 0) +
+        (showProxyCol ? 1 : 0) +
+        activeOptionalCols.length +
+        (showLastUsedCol ? 1 : 0);
 
     const handleRunToggle = async (env: ChromeEnvironment) => {
         if (busyId) return;
@@ -1381,7 +1423,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                         )}
                     </div>
                 ) : (
-                    <div className={styles.tableWrap}>
+                    <div ref={tableWrapRef} className={styles.tableWrap}>
                         <table
                             className={styles.table}
                             aria-label={t('环境列表', 'Environments table')}
@@ -1509,7 +1551,25 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                 </tr>
                             </thead>
                             <tbody>
-                                {filtered.map((env, index) => {
+                                {isVirtualized && topSpacerHeight > 0 && (
+                                    <tr
+                                        aria-hidden="true"
+                                        style={{
+                                            height: `${topSpacerHeight}px`,
+                                        }}
+                                    >
+                                        <td
+                                            colSpan={visibleColumnCount}
+                                            style={{
+                                                padding: 0,
+                                                border: 'none',
+                                                height: `${topSpacerHeight}px`,
+                                            }}
+                                        />
+                                    </tr>
+                                )}
+                                {visibleEnvironments.map((env, localIndex) => {
+                                    const index = startIndex + localIndex;
                                     const selected = selectedEnv?.id === env.id;
                                     const boundProxy = env.proxyId
                                         ? proxyMap.get(env.proxyId)
@@ -2128,6 +2188,23 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                         </tr>
                                     );
                                 })}
+                                {isVirtualized && bottomSpacerHeight > 0 && (
+                                    <tr
+                                        aria-hidden="true"
+                                        style={{
+                                            height: `${bottomSpacerHeight}px`,
+                                        }}
+                                    >
+                                        <td
+                                            colSpan={visibleColumnCount}
+                                            style={{
+                                                padding: 0,
+                                                border: 'none',
+                                                height: `${bottomSpacerHeight}px`,
+                                            }}
+                                        />
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>

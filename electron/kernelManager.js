@@ -1,10 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import https from 'https';
-import net from 'net';
-import tls from 'tls';
 import { execFile } from 'child_process';
+import {
+    assertOfficialGitHubUrl,
+    openOfficialGitHubStream,
+} from './githubProxyTransport.js';
 import {
     assertAllowedFingerprintRelease,
     assertAllowedSingboxRelease,
@@ -13,12 +14,7 @@ import {
     getKernelUpdateSummary,
 } from './kernelPolicy.js';
 
-const ALLOWED_GITHUB_HOSTS = new Set([
-    'github.com',
-    'api.github.com',
-    'objects.githubusercontent.com',
-    'release-assets.githubusercontent.com',
-]);
+export { assertOfficialGitHubUrl };
 
 export function getCuratedFingerprintReleases(platform = process.platform) {
     return getAllowedFingerprintReleases(platform);
@@ -31,24 +27,6 @@ export function getCuratedSingboxReleases(
     arch = process.arch,
 ) {
     return getAllowedSingboxReleases(platform, arch);
-}
-
-export function assertOfficialGitHubUrl(urlStr) {
-    let parsed;
-    try {
-        parsed = new URL(urlStr);
-    } catch {
-        throw new Error('无效的下载地址');
-    }
-    if (parsed.protocol !== 'https:') {
-        throw new Error('仅允许通过 HTTPS 从 GitHub 官方下载');
-    }
-    if (!ALLOWED_GITHUB_HOSTS.has(parsed.hostname.toLowerCase())) {
-        throw new Error(
-            `已拦截非 GitHub 官方域名下载：${parsed.hostname}`,
-        );
-    }
-    return parsed;
 }
 
 export function parseGitHubSha256Digest(digest) {
@@ -114,14 +92,16 @@ export function computeFileSha256(filePath) {
     });
 }
 
-function getDirectorySizeBytes(dirPath) {
+async function getDirectorySizeBytes(dirPath) {
     let total = 0;
     const stack = [dirPath];
     while (stack.length > 0) {
         const current = stack.pop();
         let entries;
         try {
-            entries = fs.readdirSync(current, { withFileTypes: true });
+            entries = await fs.promises.readdir(current, {
+                withFileTypes: true,
+            });
         } catch {
             continue;
         }
@@ -131,7 +111,8 @@ function getDirectorySizeBytes(dirPath) {
                 if (entry.isDirectory()) {
                     stack.push(fullPath);
                 } else if (entry.isFile()) {
-                    total += fs.statSync(fullPath).size;
+                    const stat = await fs.promises.stat(fullPath);
+                    total += stat.size;
                 }
             } catch {
                 // ignore unreadable entries
@@ -139,151 +120,6 @@ function getDirectorySizeBytes(dirPath) {
         }
     }
     return total;
-}
-
-function createHttpsProxyAgent(proxyUrlStr) {
-    const proxyUrl = new URL(proxyUrlStr);
-    const proxyHost = proxyUrl.hostname;
-    const proxyPort =
-        Number(proxyUrl.port) || (proxyUrl.protocol === 'https:' ? 443 : 80);
-    const authHeader =
-        proxyUrl.username || proxyUrl.password
-            ? `Basic ${Buffer.from(
-                  `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`,
-              ).toString('base64')}`
-            : null;
-
-    return {
-        createConnection(options, callback) {
-            const targetHost = options.host || options.servername;
-            const targetPort = options.port || 443;
-            const socket = net.connect(proxyPort, proxyHost);
-            let done = false;
-
-            const finish = (err, tlsSocket) => {
-                if (done) return;
-                done = true;
-                callback(err, tlsSocket);
-            };
-
-            socket.setTimeout(25000, () => {
-                socket.destroy();
-                finish(new Error('通过代理连接 GitHub 超时'));
-            });
-
-            socket.once('error', (err) => finish(err));
-            socket.once('connect', () => {
-                const lines = [
-                    `CONNECT ${targetHost}:${targetPort} HTTP/1.1`,
-                    `Host: ${targetHost}:${targetPort}`,
-                    'Proxy-Connection: Keep-Alive',
-                ];
-                if (authHeader) {
-                    lines.push(`Proxy-Authorization: ${authHeader}`);
-                }
-                socket.write(`${lines.join('\r\n')}\r\n\r\n`);
-
-                let headerBuf = '';
-                const onData = (chunk) => {
-                    headerBuf += chunk.toString('latin1');
-                    const headerEnd = headerBuf.indexOf('\r\n\r\n');
-                    if (headerEnd === -1) return;
-                    socket.removeListener('data', onData);
-                    const statusLine = headerBuf.slice(0, headerBuf.indexOf('\r\n'));
-                    if (!/^HTTP\/\d\.\d\s+200\b/i.test(statusLine)) {
-                        socket.destroy();
-                        finish(new Error(`代理 CONNECT 失败: ${statusLine}`));
-                        return;
-                    }
-                    const tlsSocket = tls.connect({
-                        socket,
-                        servername: targetHost,
-                    });
-                    tlsSocket.once('error', (err) => finish(err));
-                    finish(null, tlsSocket);
-                };
-                socket.on('data', onData);
-            });
-        },
-    };
-}
-
-function openOfficialGitHubStream(urlStr, options = {}, redirectCount = 0) {
-    if (redirectCount > 8) {
-        return Promise.reject(new Error('下载重定向次数过多'));
-    }
-
-    let parsed;
-    try {
-        parsed = assertOfficialGitHubUrl(urlStr);
-    } catch (err) {
-        return Promise.reject(err);
-    }
-
-    return new Promise((resolve, reject) => {
-        const proxyAddress =
-            options.proxyAddress && /^https?:\/\//i.test(options.proxyAddress)
-                ? options.proxyAddress
-                : null;
-
-        const reqOptions = {
-            hostname: parsed.hostname,
-            port: parsed.port || 443,
-            path: `${parsed.pathname}${parsed.search}`,
-            method: 'GET',
-            headers: {
-                'User-Agent': 'MultiChrome-KernelManager/1.2',
-                Accept: options.accept || '*/*',
-            },
-            timeout: options.timeoutMs || 30000,
-        };
-
-        if (proxyAddress) {
-            reqOptions.createConnection =
-                createHttpsProxyAgent(proxyAddress).createConnection;
-        }
-
-        const req = https.request(reqOptions, (res) => {
-            const status = res.statusCode || 0;
-            if (
-                [301, 302, 303, 307, 308].includes(status) &&
-                res.headers.location
-            ) {
-                res.resume();
-                const nextUrl = new URL(res.headers.location, urlStr).toString();
-                openOfficialGitHubStream(nextUrl, options, redirectCount + 1).then(
-                    resolve,
-                    reject,
-                );
-                return;
-            }
-            if (status < 200 || status >= 300) {
-                res.resume();
-                reject(new Error(`HTTP ${status}: 无法访问 ${parsed.hostname}`));
-                return;
-            }
-            resolve(res);
-        });
-
-        req.on('timeout', () => {
-            req.destroy(new Error('GitHub 网络请求超时'));
-        });
-        req.on('error', reject);
-
-        if (options.signal) {
-            if (options.signal.aborted) {
-                req.destroy(new Error('操作已取消'));
-                return;
-            }
-            options.signal.addEventListener(
-                'abort',
-                () => req.destroy(new Error('操作已取消')),
-                { once: true },
-            );
-        }
-
-        req.end();
-    });
 }
 
 function execFileAsync(command, args, options = {}) {
@@ -662,17 +498,27 @@ export class KernelManager {
         );
     }
 
-    getStatus(systemChromePath = '') {
+    getStatus(systemChromePath = '', locale = 'zh-CN') {
         const manifest = this.readManifest();
         const fpDl = this.activeDownloads.get('fingerprint-chromium');
         const sbDl = this.activeDownloads.get('sing-box');
-        const availableReleases = getAllowedFingerprintReleases();
-        const availableSingboxReleases = getAllowedSingboxReleases();
+        const availableReleases = getAllowedFingerprintReleases(
+            process.platform,
+            undefined,
+            locale,
+        );
+        const availableSingboxReleases = getAllowedSingboxReleases(
+            process.platform,
+            process.arch,
+            undefined,
+            locale,
+        );
         const updateSummary = getKernelUpdateSummary({
             installedKernels: manifest.kernels,
             activeKernelId: manifest.activeKernelId,
             installedSingbox: manifest.singboxKernels,
             activeSingboxId: manifest.activeSingboxId,
+            locale,
         });
         return {
             kernelsDir: this.getKernelsDir(),
@@ -925,7 +771,7 @@ export class KernelManager {
             }
 
             const executableSha256 = await computeFileSha256(executablePath);
-            const sizeBytes = getDirectorySizeBytes(installDir);
+            const sizeBytes = await getDirectorySizeBytes(installDir);
 
             try {
                 fs.unlinkSync(archivePath);
@@ -1167,7 +1013,7 @@ export class KernelManager {
         }
 
         const executableSha256 = await computeFileSha256(executablePath);
-        const sizeBytes = getDirectorySizeBytes(installDir);
+        const sizeBytes = await getDirectorySizeBytes(installDir);
         const kernelId = `local-${version}-${executableSha256.slice(0, 8)}`;
 
         const record = {

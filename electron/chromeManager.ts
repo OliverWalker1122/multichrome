@@ -3,7 +3,6 @@ import {
     ChildProcess,
     StdioOptions,
     execSync,
-    exec,
     execFile,
 } from 'child_process';
 import path from 'path';
@@ -57,11 +56,15 @@ import { evaluateLaunchConsistency } from './launchGuard.js';
 import { evaluateEnvironmentHealth } from './healthCheck.js';
 import {
     aggregateProcessMemory,
+    buildForceKillProcessSpec,
     buildMemorySaverChromiumArgs,
+    filterBrowserProcessLines,
     parseUnixPsOutput,
     parseWindowsCimProcessJson,
 } from './processMetrics.js';
 import {
+    removeGroupStartupUrl,
+    renameGroupStartupUrl,
     resolveEffectiveStartupUrl,
     resolveExtensionTemplatePaths,
     syncBookmarksToProfile,
@@ -188,6 +191,22 @@ interface ChromePreferencesDoc {
     [key: string]: unknown;
 }
 
+const ALLOWED_UPDATE_COLUMNS = new Set([
+    'name',
+    'groupName',
+    'notes',
+    'tags',
+    'proxy',
+    'proxyId',
+    'proxyLabel',
+    'userAgent',
+    'timezone',
+    'language',
+    'startupUrl',
+    'browserEngine',
+    'fingerprintConfig',
+]);
+
 // Chrome管理器类
 export class ChromeManager {
     private db: Database.Database;
@@ -195,7 +214,7 @@ export class ChromeManager {
         chromeExecutablePath: unknown;
     }>;
     private runningProcesses: Map<string, RunningEnvironmentRecord>;
-    private defaultChromeDataDir: string;
+    private launchingEnvironments: Map<string, Promise<boolean>> = new Map();
     private environmentsDataDir: string;
     private settingsManager: SettingsManager;
     private kernelManager: KernelManager;
@@ -240,12 +259,15 @@ export class ChromeManager {
             fs.mkdirSync(this.environmentsDataDir, { recursive: true });
         }
 
-        // 默认Chrome数据目录
-        this.defaultChromeDataDir = this.getDefaultChromeDataDir();
-
-        // 初始化数据库
+        // 初始化数据库（开启 WAL 与忙等待，提升读写并发与崩溃安全性）
         const dbPath = path.join(this.appDataPath, 'chrome-environments.db');
         this.db = new Database(dbPath);
+        try {
+            this.db.pragma('journal_mode = WAL');
+            this.db.pragma('busy_timeout = 5000');
+        } catch (pragmaError) {
+            log.warn('SQLite WAL 配置跳过:', pragmaError);
+        }
 
         // 初始化存储
         this.store = new Store({
@@ -344,34 +366,6 @@ export class ChromeManager {
         }
     }
 
-    // 检查进程是否还在运行
-    private isProcessRunning(process: ChildProcess): boolean {
-        // 进程已被杀死
-        if (process.killed) {
-            return false;
-        }
-
-        // 进程已退出
-        if (process.exitCode !== null) {
-            return false;
-        }
-
-        // 没有PID说明进程异常
-        if (!process.pid) {
-            return false;
-        }
-
-        // 尝试发送0信号来检查进程是否存在（跨平台方法）
-        try {
-            // 发送0信号不会真正杀死进程，只是检查进程是否存在
-            process.kill(0);
-            return true;
-        } catch (error) {
-            // 如果抛出异常，说明进程不存在
-            return false;
-        }
-    }
-
     // 停止状态监控
     public stopStatusMonitoring(): void {
         if (this.statusCheckInterval) {
@@ -389,6 +383,17 @@ export class ChromeManager {
 
         // 清理所有 CDP 连接
         this.cdpManager.cleanup();
+    }
+
+    // 优雅关闭 SQLite 数据库连接
+    public closeDatabase(): void {
+        try {
+            if (this.db && this.db.open) {
+                this.db.close();
+            }
+        } catch (error) {
+            log.warn('关闭环境数据库失败:', error);
+        }
     }
 
     // 初始化数据库表
@@ -412,6 +417,17 @@ export class ChromeManager {
         
         // 检查是否需要迁移现有数据
         this.migrateDatabase();
+
+        try {
+            this.db.exec(`
+                CREATE INDEX IF NOT EXISTS idx_environments_deleted_lastused
+                ON environments (deletedAt, lastUsed DESC);
+                CREATE INDEX IF NOT EXISTS idx_environments_proxy_id
+                ON environments (proxyId);
+            `);
+        } catch (indexError) {
+            log.warn('创建数据库索引跳过:', indexError);
+        }
     }
     
     // 数据库迁移
@@ -480,7 +496,16 @@ export class ChromeManager {
     }
 
     public getSystemChromePath(): string {
-        return (this.store.get('chromeExecutablePath') as string) || '';
+        const cached = (this.store.get('chromeExecutablePath') as string) || '';
+        if (cached && fs.existsSync(cached)) {
+            return cached;
+        }
+        const detected = this.findChromeExecutable();
+        if (detected && fs.existsSync(detected)) {
+            this.store.set('chromeExecutablePath', detected);
+            return detected;
+        }
+        return cached;
     }
 
     private hydrateEnvironment(dbEnv: DBEnvironment, isRunning: boolean): ChromeEnvironment {
@@ -499,20 +524,6 @@ export class ChromeManager {
         };
     }
 
-    // 获取默认Chrome数据目录
-    private getDefaultChromeDataDir(): string {
-        switch (process.platform) {
-            case 'win32':
-                return path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'User Data');
-            case 'darwin':
-                return path.join(os.homedir(), 'Library', 'Application Support', 'Google', 'Chrome');
-            case 'linux':
-                return path.join(os.homedir(), '.config', 'google-chrome');
-            default:
-                return '';
-        }
-    }
-
     // 查找Chrome可执行文件路径
     private findChromeExecutable(): string {
         if (process.platform === 'win32') {
@@ -529,7 +540,22 @@ export class ChromeManager {
                 }
             }
         } else if (process.platform === 'darwin') {
-            return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+            const macPaths = [
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                path.join(
+                    os.homedir(),
+                    'Applications',
+                    'Google Chrome.app',
+                    'Contents',
+                    'MacOS',
+                    'Google Chrome',
+                ),
+            ];
+            for (const chromePath of macPaths) {
+                if (fs.existsSync(chromePath)) {
+                    return chromePath;
+                }
+            }
         } else if (process.platform === 'linux') {
             // Linux平台尝试查找chrome或google-chrome
             const possibleNames = ['google-chrome', 'chrome', 'chromium-browser', 'chromium'];
@@ -1100,50 +1126,54 @@ export class ChromeManager {
         });
     }
 
-    // 查找可用的调试端口(带端口预留机制,防止竞态条件)
-    private async findAvailableDebugPort(startPort: number = 9222, maxAttempts: number = 100): Promise<number> {
-        for (let i = 0; i < maxAttempts; i++) {
-            const port = startPort + i;
+    // 查找可用的私有随机调试端口（避开 9222/18922 与 Windows 49152+ Hyper-V 保留段，带 OS 动态兜底与预留防竞态）
+    private async findAvailableDebugPort(
+        minPort: number = 20000,
+        maxPort: number = 39999,
+        maxAttempts: number = 60,
+    ): Promise<number> {
+        const span = Math.max(1, maxPort - minPort + 1);
+        const startOffset = Math.floor(Math.random() * span);
 
-            // 检查是否已被预留
-            if (this.reservedPorts.has(port)) {
+        for (let i = 0; i < maxAttempts; i++) {
+            const port = minPort + ((startOffset + i * 97) % span);
+            if (port === 9222 || port === 18922 || this.reservedPorts.has(port)) {
                 continue;
             }
-
-            // 检查端口是否可用
-            const available = await this.isPortAvailable(port);
-
-            if (available) {
-                // 立即预留端口,防止并发分配
+            if (await this.isPortAvailable(port)) {
                 this.reservedPorts.add(port);
                 return port;
             }
         }
 
-        throw new Error(`无法找到可用的调试端口 (尝试范围: ${startPort}-${startPort + maxAttempts - 1})`);
+        // OS 内核级兜底分配（自动绕过 Windows netsh excludedportrange 保留段）
+        for (let fallback = 0; fallback < 10; fallback++) {
+            const osPort = await new Promise<number>((resolve) => {
+                const srv = net.createServer();
+                srv.once('error', () => resolve(0));
+                srv.listen(0, '127.0.0.1', () => {
+                    const addr = srv.address();
+                    const p = addr && typeof addr === 'object' ? addr.port : 0;
+                    srv.close(() => resolve(p));
+                });
+            });
+            if (
+                osPort > 1024 &&
+                osPort !== 9222 &&
+                osPort !== 18922 &&
+                !this.reservedPorts.has(osPort)
+            ) {
+                this.reservedPorts.add(osPort);
+                return osPort;
+            }
+        }
+
+        throw new Error(`无法找到可用的调试端口 (尝试范围: ${minPort}-${maxPort})`);
     }
 
     // 释放预留的端口
     private releasePort(port: number): void {
         this.reservedPorts.delete(port);
-    }
-
-    /**
-     * 获取 Windows 短路径（8.3 格式）
-     * 解决 Chrome --load-extension 不支持非 ASCII 路径的问题
-     */
-    private getShortPath(longPath: string): string {
-        if (process.platform !== 'win32') return longPath;
-        try {
-            const result = execSync(`cmd /c for %I in ("${longPath}") do @echo %~sI`, {
-                encoding: 'utf-8',
-                timeout: 3000
-            }).trim();
-            return result || longPath;
-        } catch {
-            log.warn(`无法获取短路径: ${longPath}`);
-            return longPath;
-        }
     }
 
     private async resolveProxyExitInfoBeforeLaunch(
@@ -1194,6 +1224,7 @@ export class ChromeManager {
         chromeProcess: ChildProcess,
         extensionPaths: string[],
         envName: string,
+        installedTrackerPath?: string,
     ): void {
         const pipeWrite = chromeProcess.stdio[3] as import('stream').Writable;
         const pipeRead = chromeProcess.stdio[4] as import('stream').Readable;
@@ -1205,6 +1236,33 @@ export class ChromeManager {
 
         let msgId = 0;
         let buffer = '';
+        const pendingByMsgId = new Map<number, string>();
+
+        const recordInstalledExtension = (extPath: string) => {
+            if (!installedTrackerPath) return;
+            try {
+                let existing: string[] = [];
+                if (fs.existsSync(installedTrackerPath)) {
+                    const parsed = JSON.parse(
+                        fs.readFileSync(installedTrackerPath, 'utf-8'),
+                    );
+                    if (Array.isArray(parsed)) {
+                        existing = parsed.filter(
+                            (item): item is string => typeof item === 'string',
+                        );
+                    }
+                }
+                if (!existing.includes(extPath)) {
+                    fs.writeFileSync(
+                        installedTrackerPath,
+                        JSON.stringify([...existing, extPath]),
+                        'utf-8',
+                    );
+                }
+            } catch {
+                // ignore tracker write failure
+            }
+        };
 
         // 监听 pipe 响应
         pipeRead.on('data', (chunk: Buffer) => {
@@ -1216,13 +1274,17 @@ export class ChromeManager {
                 buffer = buffer.substring(nullIdx + 1);
                 try {
                     const msg = JSON.parse(msgStr);
+                    const targetExtPath =
+                        typeof msg.id === 'number'
+                            ? pendingByMsgId.get(msg.id)
+                            : undefined;
+                    if (typeof msg.id === 'number') {
+                        pendingByMsgId.delete(msg.id);
+                    }
                     if (msg.result?.id) {
                         log.info(`[${envName}] 扩展已通过 CDP pipe 加载，ID: ${msg.result.id}`);
-                        // 标记扩展已安装，后续启动不再需要 pipe
-                        for (const extPath of extensionPaths) {
-                            try {
-                                fs.writeFileSync(path.join(extPath, '.installed'), msg.result.id);
-                            } catch { /* ignore */ }
+                        if (targetExtPath) {
+                            recordInstalledExtension(targetExtPath);
                         }
                     } else if (msg.error) {
                         log.warn(`[${envName}] CDP pipe 扩展加载失败: ${msg.error.message || JSON.stringify(msg.error)}`);
@@ -1240,8 +1302,10 @@ export class ChromeManager {
         setTimeout(() => {
             for (const extPath of extensionPaths) {
                 try {
+                    const id = ++msgId;
+                    pendingByMsgId.set(id, extPath);
                     const cmd = JSON.stringify({
-                        id: ++msgId,
+                        id,
                         method: 'Extensions.loadUnpacked',
                         params: { path: extPath }
                     }) + '\0';
@@ -1306,8 +1370,24 @@ export class ChromeManager {
         }
     }
 
-    // 启动Chrome环境
-    public async launchEnvironment(id: string): Promise<boolean> {
+    // 启动Chrome环境（单环境并发去重，防止快速双击触发双开竞态；不同环境仍完全并发）
+    public launchEnvironment(id: string): Promise<boolean> {
+        const inflight = this.launchingEnvironments.get(id);
+        if (inflight) {
+            log.info(`环境正在启动中，复用当前启动任务: ${id.substring(0, 8)}`);
+            return inflight;
+        }
+        const task = this.launchEnvironmentInternal(id);
+        this.launchingEnvironments.set(id, task);
+        void task.finally(() => {
+            if (this.launchingEnvironments.get(id) === task) {
+                this.launchingEnvironments.delete(id);
+            }
+        });
+        return task;
+    }
+
+    private async launchEnvironmentInternal(id: string): Promise<boolean> {
         let allocatedDebugPort: number | undefined;
         let startupGate: ProxyStartupGate | undefined;
         try {
@@ -1364,16 +1444,16 @@ export class ChromeManager {
                     `[${env.name}] 使用 C++ 指纹内核 ${activeKernel.version} (seed=${activeFingerprintConfig.seed}, platform=${activeFingerprintConfig.platform}, brand=${activeFingerprintConfig.brand}, cores=${activeFingerprintConfig.hardwareConcurrency}, window=${activeFingerprintConfig.windowSize.width}x${activeFingerprintConfig.windowSize.height})`,
                 );
             } else {
-                chromePath = this.store.get('chromeExecutablePath') as string;
+                chromePath = this.getSystemChromePath();
                 if (!chromePath || !fs.existsSync(chromePath)) {
                     log.error('Chrome可执行文件未找到');
                     throw new Error('Chrome可执行文件未找到，请确认已安装 Google Chrome');
                 }
             }
 
-            // 并行执行：分配调试端口 + 启动内置代理（如有）
+            // 并行执行：分配私有随机高调试端口 + 启动内置代理（如有）
             const [debugPort, proxyAddress] = await Promise.all([
-                this.findAvailableDebugPort(9222),
+                this.findAvailableDebugPort(),
                 env.proxyId
                     ? this.proxyManager.ensureStarted(env.proxyId)
                     : Promise.resolve(env.proxy || (globalProxy?.enabled ? globalProxy?.address : undefined)),
@@ -1582,6 +1662,10 @@ export class ChromeManager {
             }
 
             // 分发本地扩展模板（C++ 纯原生隐匿模式默认禁止加载扩展，除非用户在设置中显式开启）
+            const installedTrackerPath = path.join(
+                env.dataDir,
+                '.template-extensions.json',
+            );
             const templateExtPaths = resolveExtensionTemplatePaths(
                 settings.extensionTemplates,
                 {
@@ -1592,10 +1676,6 @@ export class ChromeManager {
                 },
             );
             if (templateExtPaths.length > 0) {
-                const installedTrackerPath = path.join(
-                    env.dataDir,
-                    '.template-extensions.json',
-                );
                 let installedTemplatePaths: string[] = [];
                 try {
                     if (fs.existsSync(installedTrackerPath)) {
@@ -1622,22 +1702,6 @@ export class ChromeManager {
                     }
                 }
                 if (newlyAddedExtPaths.length > 0) {
-                    try {
-                        fs.writeFileSync(
-                            installedTrackerPath,
-                            JSON.stringify(
-                                Array.from(
-                                    new Set([
-                                        ...installedTemplatePaths,
-                                        ...newlyAddedExtPaths,
-                                    ]),
-                                ),
-                            ),
-                            'utf-8',
-                        );
-                    } catch {
-                        // ignore tracker write failure
-                    }
                     log.info(
                         `[${env.name}] 将通过 CDP pipe 安装 ${newlyAddedExtPaths.length} 个本地扩展模板`,
                     );
@@ -1704,9 +1768,14 @@ export class ChromeManager {
             // 启动 Chrome 进程
             const chromeProcess = spawn(chromePath, args, spawnOptions);
 
-            // 通过 CDP pipe 加载扩展（仅首次安装时）
+            // 通过 CDP pipe 加载扩展（仅首次安装时，成功后再写入 .template-extensions.json）
             if (needPipe && chromeProcess.stdio[3] && chromeProcess.stdio[4]) {
-                this.loadExtensionsViaPipe(chromeProcess, extensionsToLoad, env.name);
+                this.loadExtensionsViaPipe(
+                    chromeProcess,
+                    extensionsToLoad,
+                    env.name,
+                    installedTrackerPath,
+                );
             }
 
             // 重要说明：spawn 返回的进程只是 Chrome 的启动器进程，会立即退出
@@ -1981,6 +2050,160 @@ export class ChromeManager {
         }
     }
 
+    /**
+     * 获取运行中环境的自动化 CDP 连接信息（用于 Local REST API & MCP）
+     */
+    public async getAutomationConnectionInfo(id: string): Promise<{
+        debugPort: number;
+        wsEndpoint: string | null;
+        httpEndpoint: string;
+        debuggerAddress: string;
+    } | null> {
+        const procRecord = this.runningProcesses.get(id);
+        const cdpInfo = this.cdpManager.getConnectionInfo(id);
+        if (!procRecord) {
+            return null;
+        }
+        if (procRecord.startupGate && !procRecord.startupGate.isReleased()) {
+            return null;
+        }
+        const debugPort = procRecord.debugPort || cdpInfo?.debugPort;
+        if (!debugPort || !Number.isInteger(debugPort) || debugPort <= 0) {
+            return null;
+        }
+        const liveWs = await this.cdpManager.fetchLiveWsEndpoint(debugPort);
+        const wsEndpoint =
+            liveWs ||
+            (cdpInfo?.connected && cdpInfo.debugUrl ? cdpInfo.debugUrl : null);
+        if (!wsEndpoint) {
+            return null;
+        }
+        return {
+            debugPort,
+            wsEndpoint,
+            httpEndpoint: `http://127.0.0.1:${debugPort}`,
+            debuggerAddress: `127.0.0.1:${debugPort}`,
+        };
+    }
+
+    /**
+     * 以 Fail-Closed 模式为外部自动化控制面启动环境，并等待 CDP WebSocket 调试端点完全就绪。
+     * 直接复用普通 launchEnvironment() 路径，不改变或拖慢 UI 正常启动流程。
+     */
+    public async launchEnvironmentForAutomation(
+        id: string,
+        timeoutMs = 15000,
+    ): Promise<{
+        profileId: string;
+        name: string;
+        browserEngine: BrowserEngineType;
+        debugPort: number;
+        wsEndpoint: string;
+        httpEndpoint: string;
+        debuggerAddress: string;
+        env: ChromeEnvironment;
+        cdp: {
+            debugPort: number;
+            wsEndpoint: string;
+            httpEndpoint: string;
+            debuggerAddress: string;
+        };
+    }> {
+        const effectiveTimeoutMs =
+            Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
+        const deadline = Date.now() + effectiveTimeoutMs;
+
+        const launched = await this.launchEnvironment(id);
+        if (!launched) {
+            throw new Error(`启动环境失败: ${id}`);
+        }
+
+        let liveWsEndpoint: string | null = null;
+        let activeDebugPort = 0;
+        let wsLiveSince = 0;
+        const cdpConnectGraceMs = 2000;
+
+        while (Date.now() < deadline) {
+            const procRecord = this.runningProcesses.get(id);
+            if (!procRecord) {
+                throw new Error(`浏览器进程未能保持运行，启动失败: ${id}`);
+            }
+
+            if (procRecord.startupGate) {
+                if (procRecord.startupGate.isAborted()) {
+                    throw new Error(`启动安全闸门已 Fail-Closed 中止: ${id}`);
+                }
+                if (!procRecord.startupGate.isReleased()) {
+                    await new Promise((resolve) => setTimeout(resolve, 50));
+                    continue;
+                }
+            }
+
+            const port =
+                procRecord.debugPort ||
+                this.cdpManager.getConnectionInfo(id)?.debugPort ||
+                0;
+            if (Number.isInteger(port) && port > 0) {
+                activeDebugPort = port;
+                if (!liveWsEndpoint) {
+                    liveWsEndpoint = await this.cdpManager.fetchLiveWsEndpoint(port);
+                    if (liveWsEndpoint) {
+                        wsLiveSince = Date.now();
+                    }
+                }
+            }
+
+            if (liveWsEndpoint && activeDebugPort > 0) {
+                const isCdpReady = this.cdpManager.isConnected(id);
+                const waitedForCdp = wsLiveSince > 0 ? Date.now() - wsLiveSince : 0;
+                if (
+                    isCdpReady ||
+                    Boolean(procRecord.startupGate) ||
+                    waitedForCdp >= cdpConnectGraceMs
+                ) {
+                    break;
+                }
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 75));
+        }
+
+        if (!this.runningProcesses.has(id)) {
+            throw new Error(`浏览器进程未能保持运行，启动失败: ${id}`);
+        }
+        if (!liveWsEndpoint || activeDebugPort <= 0) {
+            throw new Error(
+                `环境 ${id} 的 CDP WebSocket 调试端点在 ${effectiveTimeoutMs}ms 内未就绪 (Fail-Closed)`,
+            );
+        }
+
+        const dbEnv = this.db
+            .prepare('SELECT * FROM environments WHERE id = ? AND deletedAt IS NULL')
+            .get(id) as DBEnvironment | undefined;
+        if (!dbEnv) {
+            throw new Error(`环境未找到: ${id}`);
+        }
+        const env = this.hydrateEnvironment(dbEnv, true);
+        const cdp = {
+            debugPort: activeDebugPort,
+            wsEndpoint: liveWsEndpoint,
+            httpEndpoint: `http://127.0.0.1:${activeDebugPort}`,
+            debuggerAddress: `127.0.0.1:${activeDebugPort}`,
+        };
+
+        return {
+            profileId: env.id,
+            name: env.name,
+            browserEngine: env.browserEngine || 'system-chrome',
+            debugPort: cdp.debugPort,
+            wsEndpoint: cdp.wsEndpoint,
+            httpEndpoint: cdp.httpEndpoint,
+            debuggerAddress: cdp.debuggerAddress,
+            env,
+            cdp,
+        };
+    }
+
     // 关闭Chrome环境
     public async closeEnvironment(id: string): Promise<boolean> {
         try {
@@ -2030,29 +2253,31 @@ export class ChromeManager {
                 }
             }
 
-            if (stillRunning && process.platform === 'win32') {
-                // Windows: 通过 taskkill 关闭进程
-                try {
-                    const command = `powershell "Get-CimInstance -ClassName Win32_Process -Filter \\"Name='chrome.exe'\\" | Where-Object { $_.CommandLine -like '*${envIdShort}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"`;
-                    exec(command, { windowsHide: true }, (error) => {
-                        if (!error) {
-                            log.info(`[${envName}] Chrome进程已关闭 - ID:${envIdShort}`);
-                        }
+            if (stillRunning) {
+                const killSpec = buildForceKillProcessSpec(
+                    envIdShort,
+                    process.platform,
+                );
+                if (killSpec) {
+                    await new Promise<void>((resolve) => {
+                        execFile(
+                            killSpec.executable,
+                            killSpec.args,
+                            {
+                                windowsHide: true,
+                                timeout: 4000,
+                                maxBuffer: 1024 * 1024,
+                            },
+                            (error) => {
+                                if (!error) {
+                                    log.info(
+                                        `[${envName}] Chrome进程已强制关闭 - ID:${envIdShort}`,
+                                    );
+                                }
+                                resolve();
+                            },
+                        );
                     });
-                } catch (error) {
-                    log.error('执行关闭命令失败:', error);
-                }
-            } else if (stillRunning) {
-                // macOS/Linux: 通过 pkill 关闭
-                try {
-                    const command = `pkill -f "${envIdShort}"`;
-                    exec(command, (error) => {
-                        if (!error) {
-                            log.info(`[${envName}] Chrome进程已关闭 - ID:${envIdShort}`);
-                        }
-                    });
-                } catch (error) {
-                    // 忽略错误
                 }
             }
 
@@ -2090,23 +2315,28 @@ export class ChromeManager {
         return { count: ids.length, ids, names };
     }
 
-    // 关闭所有正在运行的环境
+    // 关闭所有正在运行的环境（并发优雅关闭，避免多个环境串行叠加耗时）
     public async closeAllEnvironments(): Promise<{
         closedCount: number;
         failedCount: number;
     }> {
         const ids = Array.from(this.runningProcesses.keys());
+        if (ids.length === 0) {
+            return { closedCount: 0, failedCount: 0 };
+        }
         let closedCount = 0;
         let failedCount = 0;
-        for (const id of ids) {
-            try {
-                await this.closeEnvironment(id);
-                closedCount += 1;
-            } catch (error) {
-                failedCount += 1;
-                log.warn(`关闭环境失败 (${id}):`, error);
-            }
-        }
+        await Promise.allSettled(
+            ids.map(async (id) => {
+                try {
+                    await this.closeEnvironment(id);
+                    closedCount += 1;
+                } catch (error) {
+                    failedCount += 1;
+                    log.warn(`关闭环境失败 (${id}):`, error);
+                }
+            }),
+        );
         return { closedCount, failedCount };
     }
 
@@ -2293,6 +2523,9 @@ export class ChromeManager {
             );
 
             Object.entries(updateData).forEach(([key, value]) => {
+                if (!ALLOWED_UPDATE_COLUMNS.has(key)) {
+                    return;
+                }
                 // 特殊处理tags字段
                 if (key === 'tags' && Array.isArray(value)) {
                     updates.push(`${key} = ?`);
@@ -2307,7 +2540,7 @@ export class ChromeManager {
                             ? JSON.stringify(normalizeFingerprintConfig(value, fpDefaults))
                             : null,
                     );
-                } else if (key !== 'isRunning' && key !== 'processId') { // 跳过运行状态字段
+                } else {
                     updates.push(`${key} = ?`);
                     params.push(value);
                 }
@@ -2384,6 +2617,22 @@ export class ChromeManager {
             log.info(
                 `重命名分组: ${result.oldName} -> ${result.newName}, 影响环境数=${result.affectedCount}`,
             );
+            try {
+                const currentSettings = this.settingsManager.getSettings();
+                const migrated = renameGroupStartupUrl(
+                    currentSettings.groupStartupUrls,
+                    result.oldName,
+                    result.newName,
+                );
+                if (migrated.changed) {
+                    await this.settingsManager.saveSettings({
+                        ...currentSettings,
+                        groupStartupUrls: migrated.next,
+                    });
+                }
+            } catch (syncError) {
+                log.warn('同步分组启动页配置失败:', syncError);
+            }
             return result as RenameGroupResult;
         } catch (error) {
             log.error('重命名分组失败:', error);
@@ -2412,6 +2661,21 @@ export class ChromeManager {
                 `删除分组: ${result.groupName}, 方式=${result.action}, 影响环境数=${result.affectedCount}` +
                     (result.targetGroup ? `, 目标分组=${result.targetGroup}` : ''),
             );
+            try {
+                const currentSettings = this.settingsManager.getSettings();
+                const cleaned = removeGroupStartupUrl(
+                    currentSettings.groupStartupUrls,
+                    result.groupName,
+                );
+                if (cleaned.changed) {
+                    await this.settingsManager.saveSettings({
+                        ...currentSettings,
+                        groupStartupUrls: cleaned.next,
+                    });
+                }
+            } catch (syncError) {
+                log.warn('清理已删除分组启动页配置失败:', syncError);
+            }
             return result as DeleteGroupResult;
         } catch (error) {
             log.error('删除分组失败:', error);
@@ -2474,11 +2738,10 @@ export class ChromeManager {
                         return;
                     }
                     // ps 成功但没有 Chrome 是正常空结果，不与查询失败混淆。
-                    const chromeCommands = windows ? stdout : stdout.split('\n')
-                        .filter(line => process.platform === 'darwin'
-                            ? line.includes('Google Chrome')
-                            : line.toLowerCase().includes('chrome'))
-                        .join('\n');
+                    const chromeCommands = filterBrowserProcessLines(
+                        stdout,
+                        process.platform,
+                    );
                     resolve(this.parseEnvironmentIds(chromeCommands));
                 });
             });

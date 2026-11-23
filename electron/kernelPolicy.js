@@ -50,7 +50,10 @@ export function compareDotVersions(a, b) {
 export function getAllowedFingerprintReleases(
     platform = process.platform,
     manifest = loadKernelManifest(),
+    locale = 'zh-CN',
 ) {
+    const isEn =
+        typeof locale === 'string' && locale.toLowerCase().startsWith('en');
     const key =
         platform === 'darwin'
             ? 'darwin'
@@ -63,11 +66,17 @@ export function getAllowedFingerprintReleases(
     )) {
         const asset = info?.assets?.[key];
         if (!asset) continue;
-        const suffix = info.recommended
-            ? '源码已公开 · 推荐'
-            : info.sourceAuditable
-              ? '源码已公开'
-              : '最新版 · 延迟开源';
+        const suffix = isEn
+            ? info.recommended
+                ? 'Source Auditable · Recommended'
+                : info.sourceAuditable
+                  ? 'Source Auditable'
+                  : 'Latest · Delayed Source'
+            : info.recommended
+              ? '源码已公开 · 推荐'
+              : info.sourceAuditable
+                ? '源码已公开'
+                : '最新版 · 延迟开源';
         list.push({
             version,
             chromeMajor: info.chromeMajor,
@@ -89,17 +98,25 @@ export function getAllowedSingboxReleases(
     platform = process.platform,
     arch = process.arch,
     manifest = loadKernelManifest(),
+    locale = 'zh-CN',
 ) {
+    const isEn =
+        typeof locale === 'string' && locale.toLowerCase().startsWith('en');
     const key = `${platform}-${arch}`;
     const list = [];
     for (const [version, info] of Object.entries(manifest.singBox || {})) {
         const asset = info?.assets?.[key];
         if (!asset) continue;
+        const suffix = isEn
+            ? info.recommended
+                ? 'Official Stable · Recommended'
+                : 'Official Stable'
+            : info.recommended
+              ? '官方稳定版 · 推荐'
+              : '官方稳定版';
         list.push({
             version,
-            name: info.recommended
-                ? `sing-box v${version} (官方稳定版 · 推荐)`
-                : `sing-box v${version} (官方稳定版)`,
+            name: `sing-box v${version} (${suffix})`,
             publishedAt: info.publishedAt,
             assetName: asset.name,
             downloadUrl: `https://github.com/SagerNet/sing-box/releases/download/v${version}/${asset.name}`,
@@ -163,8 +180,13 @@ export function getKernelUpdateSummary({
     platform = process.platform,
     arch = process.arch,
     manifest = loadKernelManifest(),
+    locale = 'zh-CN',
 } = {}) {
-    const fpReleases = getAllowedFingerprintReleases(platform, manifest);
+    const fpReleases = getAllowedFingerprintReleases(
+        platform,
+        manifest,
+        locale,
+    );
     const recommendedFp =
         fpReleases.find((item) => item.recommended) || fpReleases[0] || null;
     const currentFpVersion = pickCurrentInstalledVersion(
@@ -178,7 +200,12 @@ export function getKernelUpdateSummary({
             compareDotVersions(recommendedFp.version, currentFpVersion) > 0,
     );
 
-    const sbReleases = getAllowedSingboxReleases(platform, arch, manifest);
+    const sbReleases = getAllowedSingboxReleases(
+        platform,
+        arch,
+        manifest,
+        locale,
+    );
     const recommendedSb =
         sbReleases.find((item) => item.recommended) || sbReleases[0] || null;
     const currentSbVersion = pickCurrentInstalledVersion(
@@ -202,12 +229,14 @@ export function getKernelUpdateSummary({
             currentVersion: currentFpVersion,
             recommendedVersion: recommendedFp?.version || null,
             recommendedChromeMajor: recommendedFp?.chromeMajor || null,
+            recommendedName: recommendedFp?.name || null,
             installedCount: installedKernels.length,
         },
         singbox: {
             hasUpdate: sbHasUpdate,
             currentVersion: currentSbVersion,
             recommendedVersion: recommendedSb?.version || null,
+            recommendedName: recommendedSb?.name || null,
             installedCount: installedSingbox.length,
         },
         hasAnyUpdate: updateCount > 0,

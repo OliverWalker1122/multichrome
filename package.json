@@ -121,7 +121,10 @@
         },
         "asar": true,
         "asarUnpack": [
-            "**/*.node"
+            "**/*.node",
+            "dist/electron/mcpStdioBridge.js",
+            "dist/electron/automationConfig.js",
+            "package.json"
         ],
         "npmRebuild": false
     }

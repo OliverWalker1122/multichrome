@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { ProxyManager } from '../electron/proxyManager.js';
+import { ProxyManager, resolveSafeStartError } from '../electron/proxyManager.js';
 
 const TEST_USERNAME = 'fixture-user';
 const TEST_PASSWORD = 'local-only/p@ss:%?#';
@@ -369,4 +369,118 @@ test('stop aborts detection; a late result cannot overwrite a restarted proxy', 
     calls.handlers[1].onExit({ unexpected: true });
     assert.deepEqual(manager.list()[0].exitInfo, { status: 'idle' });
     await manager.closeAll();
+});
+
+test('in-memory redacted summary cache avoids repeated decryptString calls without weakening security', async () => {
+    const { manager, secretStorage, store } = fixture();
+    let decryptCalls = 0;
+    const origDecrypt = secretStorage.decryptString.bind(secretStorage);
+    secretStorage.decryptString = (buf) => {
+        decryptCalls += 1;
+        return origDecrypt(buf);
+    };
+
+    const saved = await manager.save(simpleInput());
+    decryptCalls = 0;
+
+    // Repeated list() calls reuse redacted in-memory metadata
+    for (let i = 0; i < 10; i++) {
+        const items = manager.list();
+        assert.equal(items[0].id, saved.id);
+        assert.equal(items[0].host, 'proxy.example.com');
+        assert.equal(items[0].hasPassword, true);
+        assert(!JSON.stringify(items[0]).includes(TEST_PASSWORD));
+    }
+    assert.equal(decryptCalls, 0);
+
+    // Persisted store remains strictly encrypted with no plaintext host/credentials
+    const persisted = JSON.stringify(store.get('proxies'));
+    assert(!persisted.includes('proxy.example.com'));
+    assert(!persisted.includes(TEST_PASSWORD));
+
+    // If OS encryption becomes unavailable, cache is immediately invalidated
+    secretStorage.isEncryptionAvailable = () => false;
+    assert.equal(manager.list()[0].status, 'error');
+    secretStorage.isEncryptionAvailable = () => true;
+    assert.equal(manager.list()[0].status, 'stopped');
+    assert.equal(decryptCalls, 1);
+});
+
+test('resolveSafeStartError surfaces safe known causes and redacts arbitrary upstream errors', async () => {
+    assert.match(
+        resolveSafeStartError(
+            new Error(
+                '尚未安装 sing-box 代理核心，请前往「设置 → 代理核心（sing-box）」下载官方核心',
+            ),
+        ),
+        /^sing-box 启动失败：尚未安装 sing-box 代理核心/,
+    );
+    assert.equal(
+        resolveSafeStartError(
+            new Error('connect ECONNREFUSED 198.51.100.9:8080 user:secretPass'),
+        ),
+        'sing-box 启动失败，请检查核心、配置和本地端口',
+    );
+
+    const { manager, core } = fixture();
+    const saved = await manager.save(simpleInput());
+    core.check = async () => {
+        throw new Error(
+            '配置使用了已移除的 sing-box 字段，请按当前核心版本迁移',
+        );
+    };
+    await assert.rejects(
+        manager.ensureStarted(saved.id),
+        /sing-box 启动失败：配置使用了已移除的 sing-box 字段/,
+    );
+});
+
+test('batchImport validates concurrently with a single atomic persist and preserves order', async () => {
+    const { manager, store, core } = fixture();
+    let persistWrites = 0;
+    const origSet = store.set.bind(store);
+    store.set = (key, value) => {
+        if (key === 'proxies') persistWrites += 1;
+        return origSet(key, value);
+    };
+
+    let activeChecks = 0;
+    let maxConcurrentChecks = 0;
+    core.check = async () => {
+        activeChecks += 1;
+        maxConcurrentChecks = Math.max(maxConcurrentChecks, activeChecks);
+        await new Promise((r) => setTimeout(r, 15));
+        activeChecks -= 1;
+    };
+
+    const events = [];
+    const unsubscribe = manager.subscribe((evt) => events.push(evt));
+
+    const text = [
+        'Node-1 | http://u1:p1@198.51.100.1:8080',
+        'Node-2 | socks5://u2:p2@198.51.100.2:1080',
+        'Node-3 | http://u3:p3@198.51.100.3:8080',
+        'Node-4 | http://u4:p4@198.51.100.4:8080',
+        'Node-5 | http://u5:p5@198.51.100.5:8080',
+        'Node-Dup | http://u1:p1@198.51.100.1:8080',
+        'bad-host:99999',
+    ].join('\n');
+
+    const result = await manager.batchImport({
+        text,
+        namePrefix: '批量',
+        skipDuplicates: true,
+    });
+    unsubscribe();
+
+    assert.equal(result.imported.length, 5);
+    assert.deepEqual(
+        result.imported.map((item) => item.name),
+        ['Node-1', 'Node-2', 'Node-3', 'Node-4', 'Node-5'],
+    );
+    assert.equal(result.skippedDuplicates.length, 1);
+    assert.equal(result.errors.length, 1);
+    assert.equal(persistWrites, 1);
+    assert.ok(maxConcurrentChecks >= 2 && maxConcurrentChecks <= 4);
+    assert.ok(events.some((evt) => evt.kind === 'state'));
 });

@@ -1251,6 +1251,35 @@ export class CDPManager {
     }
 
     /**
+     * 获取指定环境当前缓存的 CDP 连接元数据（只读快照）
+     */
+    public getConnectionInfo(envId: string): {
+        debugPort: number;
+        debugUrl: string;
+        connected: boolean;
+    } | null {
+        const connection = this.connections.get(envId);
+        if (!connection) {
+            return null;
+        }
+        return {
+            debugPort: connection.debugPort,
+            debugUrl: connection.debugUrl,
+            connected: connection.connected,
+        };
+    }
+
+    /**
+     * 查询运行中 Chrome 调试端口当前的浏览器级 WebSocket 端点
+     */
+    public async fetchLiveWsEndpoint(port: number): Promise<string | null> {
+        if (!Number.isInteger(port) || port <= 0) {
+            return null;
+        }
+        return this.getBrowserWebSocketUrl(port);
+    }
+
+    /**
      * 清理所有连接
      */
     public cleanup(): void {

@@ -6,7 +6,7 @@ import {
     ERROR_MESSAGES,
     ERROR_MESSAGES_EN,
 } from '../types/errors';
-import { getStoredLocale } from '../i18n';
+import { getStoredLocale, translateBackendMessage } from '../i18n';
 
 interface UseErrorHandlerReturn {
     handleError: (error: unknown, context?: string) => void;
@@ -17,28 +17,33 @@ export function useErrorHandler(): UseErrorHandlerReturn {
     const handleError = useCallback((error: unknown, context?: string) => {
         const appError = createAppError(error);
         showErrorMessage(appError, context);
-        
+
         // 在开发环境中打印详细错误信息
         if (process.env.NODE_ENV === 'development') {
             console.error(`Error context: ${context || 'unknown'}`, error);
         }
     }, []);
-    
+
     const showError = useCallback((error: AppError, context?: string) => {
         showErrorMessage(error, context);
     }, []);
-    
+
     return { handleError, showError };
 }
 
 function showErrorMessage(error: AppError, context?: string) {
-    const isEn = getStoredLocale() === 'en-US';
+    const locale = getStoredLocale();
+    const isEn = locale === 'en-US';
     const baseMessage = isEn
         ? ERROR_MESSAGES_EN[error.type] || 'Operation failed'
         : ERROR_MESSAGES[error.type] || '操作失败';
     const contextPrefix = context ? `${context}: ` : '';
-    const displayMessage = error.details || error.message || baseMessage;
-    
+    const cleanedMessage = (error.details || error.message || baseMessage).replace(
+        /^Error invoking remote method '[^']+': (?:Error: )?/,
+        '',
+    );
+    const displayMessage = translateBackendMessage(cleanedMessage, locale);
+
     message.error(`${contextPrefix}${displayMessage}`, 5000);
 }
 

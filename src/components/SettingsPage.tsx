@@ -33,6 +33,7 @@ import {
     InfoRegular,
     MoreHorizontalRegular,
     OpenRegular,
+    PlugConnectedRegular,
     SettingsRegular,
     ShieldCheckmarkRegular,
     StarRegular,
@@ -55,8 +56,9 @@ import {
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { getToneStyle } from '../theme/semanticColors';
-import { tr, useI18n } from '../i18n';
+import { tr, translateBackendMessage, useI18n } from '../i18n';
 import AppBrandIcon from './AppBrandIcon';
+import AutomationSettingsPanel from './AutomationSettingsPanel';
 import InfoTip from './InfoTip';
 
 interface SettingsPageProps {
@@ -71,7 +73,13 @@ interface SettingsPageProps {
     onKernelStatusChange: (status: KernelStatus) => void;
 }
 
-type SettingsTab = 'general' | 'browser' | 'privacy' | 'components' | 'about';
+type SettingsTab =
+    | 'general'
+    | 'browser'
+    | 'privacy'
+    | 'automation'
+    | 'components'
+    | 'about';
 
 function getHostDefaultPlatform(): FingerprintPlatform {
     const p = window.electronAPI?.app?.platform;
@@ -150,14 +158,27 @@ function formatBytes(bytes?: number): string {
     return `${Math.round(bytes / 1024)} KB`;
 }
 
-function cleanIpcError(err: unknown): string {
-    if (err instanceof Error) {
-        return err.message.replace(
-            /^Error invoking remote method '[^']+': (?:Error: )?/,
-            '',
-        );
+function cleanIpcError(err: unknown, locale: AppLocale): string {
+    const raw =
+        err instanceof Error
+            ? err.message.replace(
+                  /^Error invoking remote method '[^']+': (?:Error: )?/,
+                  '',
+              )
+            : typeof err === 'string' && err.trim()
+              ? err.replace(
+                    /^Error invoking remote method '[^']+': (?:Error: )?/,
+                    '',
+                )
+              : '';
+    if (raw.trim()) {
+        return translateBackendMessage(raw.trim(), locale);
     }
-    return tr('操作失败，请稍后重试', 'Operation failed. Please try again.');
+    return tr(
+        '操作失败，请稍后重试',
+        'Operation failed. Please try again.',
+        locale,
+    );
 }
 
 function normalizeFpState(
@@ -701,7 +722,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                     : `代理引擎 v${res.installed.version} 已安装就绪`,
             );
         } catch (err) {
-            setSingboxError(cleanIpcError(err));
+            setSingboxError(cleanIpcError(err, locale));
         } finally {
             setDownloadingSingbox(false);
         }
@@ -729,7 +750,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 );
             }
         } catch (err) {
-            setSingboxError(cleanIpcError(err));
+            setSingboxError(cleanIpcError(err, locale));
         } finally {
             setSingboxBusy(false);
         }
@@ -747,7 +768,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 t('已切换代理引擎', 'Switched proxy engine'),
             );
         } catch (err) {
-            setSingboxError(cleanIpcError(err));
+            setSingboxError(cleanIpcError(err, locale));
         } finally {
             setSingboxBusy(false);
         }
@@ -762,7 +783,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             onKernelStatusChange(next);
             showNotification('success', t('已移除代理引擎', 'Removed proxy engine'));
         } catch (err) {
-            setSingboxError(cleanIpcError(err));
+            setSingboxError(cleanIpcError(err, locale));
         } finally {
             setSingboxBusy(false);
         }
@@ -799,7 +820,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                     : `防关联浏览器 ${result.installed.version} 已安装就绪`,
             );
         } catch (err) {
-            setKernelError(cleanIpcError(err));
+            setKernelError(cleanIpcError(err, locale));
         } finally {
             setDownloadingFp(false);
         }
@@ -829,7 +850,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 );
             }
         } catch (err) {
-            setKernelError(cleanIpcError(err));
+            setKernelError(cleanIpcError(err, locale));
         } finally {
             setKernelBusy(false);
         }
@@ -847,7 +868,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 t('已切换防关联浏览器', 'Switched privacy browser'),
             );
         } catch (err) {
-            setKernelError(cleanIpcError(err));
+            setKernelError(cleanIpcError(err, locale));
         } finally {
             setKernelBusy(false);
         }
@@ -862,7 +883,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             onKernelStatusChange(next);
             showNotification('success', t('已移除该组件', 'Removed component'));
         } catch (err) {
-            setKernelError(cleanIpcError(err));
+            setKernelError(cleanIpcError(err, locale));
         } finally {
             setKernelBusy(false);
         }
@@ -874,7 +895,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         try {
             await window.electronAPI?.app?.openExternal?.(url);
         } catch (err) {
-            showNotification('error', cleanIpcError(err));
+            showNotification('error', cleanIpcError(err, locale));
         }
     };
 
@@ -894,7 +915,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 );
             }
         } catch (err) {
-            setUpdateError(cleanIpcError(err));
+            setUpdateError(cleanIpcError(err, locale));
         } finally {
             setCheckingUpdate(false);
         }
@@ -1098,11 +1119,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 );
             }
         } catch (err) {
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : t('保存设置失败', 'Failed to save settings'),
-            );
+            setError(cleanIpcError(err, locale));
         } finally {
             setSaving(false);
         }
@@ -1135,6 +1152,11 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         { id: 'browser', label: t('浏览器', 'Browser'), icon: <WindowMultipleRegular /> },
         { id: 'privacy', label: t('隐私', 'Privacy'), icon: <ShieldCheckmarkRegular /> },
         {
+            id: 'automation',
+            label: t('自动化与 MCP', 'Automation & MCP'),
+            icon: <PlugConnectedRegular />,
+        },
+        {
             id: 'components',
             label: t('组件', 'Components'),
             icon: <BoxRegular />,
@@ -1143,35 +1165,43 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         { id: 'about', label: t('关于', 'About'), icon: <InfoRegular /> },
     ];
 
+    const showFormHeaderActions =
+        isDirty ||
+        activeTab === 'general' ||
+        activeTab === 'browser' ||
+        activeTab === 'privacy';
+
     return (
         <section className={styles.root} aria-label={t('设置', 'Settings')}>
             <div className={styles.header}>
                 <div className={styles.headerTop}>
                     <h1 className={styles.title}>{t('设置', 'Settings')}</h1>
-                    <div className={styles.headerActions}>
-                        {isDirty && (
+                    {showFormHeaderActions && (
+                        <div className={styles.headerActions}>
+                            {isDirty && (
+                                <Button
+                                    type="button"
+                                    appearance="secondary"
+                                    disabled={saving}
+                                    onClick={handleReset}
+                                >
+                                    {t('还原', 'Reset')}
+                                </Button>
+                            )}
                             <Button
-                                type="button"
-                                appearance="secondary"
-                                disabled={saving}
-                                onClick={handleReset}
+                                type="submit"
+                                form="app-settings-form"
+                                appearance="primary"
+                                disabled={!isDirty || saving}
                             >
-                                {t('还原', 'Reset')}
+                                {saving
+                                    ? t('保存中…', 'Saving…')
+                                    : isDirty
+                                      ? t('保存设置', 'Save')
+                                      : t('已保存', 'Saved')}
                             </Button>
-                        )}
-                        <Button
-                            type="submit"
-                            form="app-settings-form"
-                            appearance="primary"
-                            disabled={!isDirty || saving}
-                        >
-                            {saving
-                                ? t('保存中…', 'Saving…')
-                                : isDirty
-                                  ? t('保存设置', 'Save')
-                                  : t('已保存', 'Saved')}
-                        </Button>
-                    </div>
+                        </div>
+                    )}
                 </div>
 
                 <div
@@ -1187,6 +1217,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 type="button"
                                 role="tab"
                                 aria-selected={active}
+                                data-testid={`settings-tab-${tab.id}`}
                                 className={mergeClasses(
                                     styles.pillTab,
                                     active && styles.pillTabActive,
@@ -1215,7 +1246,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                 <div className={styles.container}>
                     {error && (
                         <MessageBar intent="error" layout="multiline">
-                            <MessageBarBody>{error}</MessageBarBody>
+                            <MessageBarBody>
+                                {translateBackendMessage(error, locale)}
+                            </MessageBarBody>
                         </MessageBar>
                     )}
 
@@ -2192,7 +2225,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                         </>
                     )}
 
-                    {/* 4. 组件 */}
+                    {/* 4. 自动化与 MCP */}
+                    {activeTab === 'automation' && <AutomationSettingsPanel />}
+
+                    {/* 5. 组件 */}
                     {activeTab === 'components' && (
                         <>
                             {/* 代理引擎 */}
@@ -2310,7 +2346,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 {singboxError && (
                                     <MessageBar intent="error" layout="multiline">
                                         <MessageBarBody>
-                                            {singboxError}
+                                            {translateBackendMessage(
+                                                singboxError,
+                                                locale,
+                                            )}
                                         </MessageBarBody>
                                     </MessageBar>
                                 )}
@@ -2466,11 +2505,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                                                 styles.listItemSub
                                                             }
                                                         >
-                                                            {singboxProgress.message ||
-                                                                t(
-                                                                    '正在处理…',
-                                                                    'Processing…',
-                                                                )}
+                                                            {singboxProgress.message
+                                                                ? translateBackendMessage(
+                                                                      singboxProgress.message,
+                                                                      locale,
+                                                                  )
+                                                                : t(
+                                                                      '正在处理…',
+                                                                      'Processing…',
+                                                                  )}
                                                             {singboxProgress.receivedBytes
                                                                 ? ` (${formatBytes(singboxProgress.receivedBytes)}${singboxProgress.totalBytes ? ` / ${formatBytes(singboxProgress.totalBytes)}` : ''})`
                                                                 : ''}
@@ -2649,7 +2692,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 {kernelError && (
                                     <MessageBar intent="error" layout="multiline">
                                         <MessageBarBody>
-                                            {kernelError}
+                                            {translateBackendMessage(
+                                                kernelError,
+                                                locale,
+                                            )}
                                         </MessageBarBody>
                                     </MessageBar>
                                 )}
@@ -2818,11 +2864,15 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                                             styles.listItemSub
                                                         }
                                                     >
-                                                        {fpProgress.message ||
-                                                            t(
-                                                                '正在处理…',
-                                                                'Processing…',
-                                                            )}
+                                                        {fpProgress.message
+                                                            ? translateBackendMessage(
+                                                                  fpProgress.message,
+                                                                  locale,
+                                                              )
+                                                            : t(
+                                                                  '正在处理…',
+                                                                  'Processing…',
+                                                              )}
                                                         {fpProgress.receivedBytes
                                                             ? ` (${formatBytes(fpProgress.receivedBytes)}${fpProgress.totalBytes ? ` / ${formatBytes(fpProgress.totalBytes)}` : ''})`
                                                             : ''}
@@ -2892,7 +2942,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                         </>
                     )}
 
-                    {/* 5. 关于 */}
+                    {/* 6. 关于 */}
                     {activeTab === 'about' && (
                         <div className={styles.card}>
                             <div className={styles.cardHeader}>
@@ -2938,7 +2988,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                             {updateError && (
                                 <MessageBar intent="error" layout="multiline">
                                     <MessageBarBody>
-                                        {updateError}
+                                        {translateBackendMessage(
+                                            updateError,
+                                            locale,
+                                        )}
                                     </MessageBarBody>
                                 </MessageBar>
                             )}

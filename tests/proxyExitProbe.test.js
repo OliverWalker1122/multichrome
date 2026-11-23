@@ -169,3 +169,50 @@ test('only a bare numeric loopback HTTP proxy is accepted and geolocation text i
     assert.equal(parsed.countryCode, '');
     assert.equal(parsed.city, '');
 });
+
+test('supports en-US locale and falls back to ipinfo.io over same loopback HTTPS tunnel on upstream 429/503', async (t) => {
+    const requestedHosts = [];
+    const requestedPaths = [];
+    const proxy = await proxyFixture(t, (request, socket) => {
+        requestedHosts.push(request.url);
+        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        socket.once('data', (chunk) => {
+            const firstLine = chunk.toString('utf8').split('\r\n')[0];
+            requestedPaths.push(firstLine);
+            if (request.url === 'ipwho.is:443') {
+                socket.end(
+                    'HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+                );
+                return;
+            }
+            const body = JSON.stringify({
+                ip: '198.51.100.42',
+                country: 'JP',
+                region: 'Tokyo',
+                city: 'Minato',
+            });
+            socket.end(
+                `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
+            );
+        });
+    });
+
+    const tlsHosts = [];
+    const probe = plaintextTlsFixture((options) => {
+        tlsHosts.push(options.servername);
+        assert.equal(options.rejectUnauthorized, true);
+    });
+
+    const result = await probe(proxy, { locale: 'en-US' });
+    assert.deepEqual(requestedHosts, ['ipwho.is:443', 'ipinfo.io:443']);
+    assert.deepEqual(tlsHosts, ['ipwho.is', 'ipinfo.io']);
+    assert.match(requestedPaths[0], /lang=en HTTP\/1\.1$/);
+    assert.match(requestedPaths[1], /^GET \/json HTTP\/1\.1$/);
+    assert.deepEqual(result, {
+        ip: '198.51.100.42',
+        country: 'JP',
+        countryCode: 'JP',
+        region: 'Tokyo',
+        city: 'Minato',
+    });
+});

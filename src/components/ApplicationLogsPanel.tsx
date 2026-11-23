@@ -147,6 +147,7 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
     const clearingRef = useRef(false);
     const generation = useRef(0);
     const pending = useRef<Promise<AppLog[]> | null>(null);
+    const entriesSigRef = useRef('');
     const logRef = useRef<HTMLDivElement>(null);
     const previousFocus = useRef<HTMLElement | null>(
         document.activeElement instanceof HTMLElement
@@ -154,33 +155,44 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
             : null,
     );
 
-    const load = useCallback(async () => {
-        if (!alive.current || pending.current || clearingRef.current) return;
-        const version = generation.current;
-        setLoading(true);
-        let request: Promise<AppLog[]> | null = null;
-        try {
-            request = window.electronAPI.appLogs.getLogs();
-            pending.current = request;
-            const logs = await request;
-            if (alive.current && version === generation.current) {
-                setEntries(logs);
-                setError('');
+    const load = useCallback(
+        async (silent = false) => {
+            if (!alive.current || pending.current || clearingRef.current)
+                return;
+            if (silent && document.hidden) return;
+            const version = generation.current;
+            if (!silent) setLoading(true);
+            let request: Promise<AppLog[]> | null = null;
+            try {
+                request = window.electronAPI.appLogs.getLogs();
+                pending.current = request;
+                const logs = await request;
+                if (alive.current && version === generation.current) {
+                    const firstId = logs[0]?.id || '';
+                    const lastId = logs[logs.length - 1]?.id || '';
+                    const nextSig = `${logs.length}|${firstId}|${lastId}`;
+                    if (nextSig !== entriesSigRef.current) {
+                        entriesSigRef.current = nextSig;
+                        setEntries(logs);
+                    }
+                    setError((prev) => (prev ? '' : prev));
+                }
+            } catch {
+                if (alive.current && version === generation.current) {
+                    setError(
+                        t(
+                            '无法读取后台日志，请点击刷新重试。',
+                            'Failed to read application logs. Click Refresh to retry.',
+                        ),
+                    );
+                }
+            } finally {
+                if (pending.current === request) pending.current = null;
+                if (alive.current && !silent) setLoading(false);
             }
-        } catch {
-            if (alive.current && version === generation.current) {
-                setError(
-                    t(
-                        '无法读取后台日志，请点击刷新重试。',
-                        'Failed to read application logs. Click Refresh to retry.',
-                    ),
-                );
-            }
-        } finally {
-            if (pending.current === request) pending.current = null;
-            if (alive.current) setLoading(false);
-        }
-    }, [t]);
+        },
+        [t],
+    );
 
     useEffect(() => {
         alive.current = true;
@@ -190,7 +202,7 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
                     ? document.activeElement
                     : null;
         }
-        void load();
+        void load(false);
         return () => {
             alive.current = false;
             generation.current += 1;
@@ -207,8 +219,20 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
 
     useEffect(() => {
         if (paused || clearing) return;
-        const timer = window.setInterval(() => void load(), 2000);
-        return () => window.clearInterval(timer);
+        const handleVisibilityChange = () => {
+            if (!document.hidden) {
+                void load(true);
+            }
+        };
+        const timer = window.setInterval(() => void load(true), 2000);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener(
+                'visibilitychange',
+                handleVisibilityChange,
+            );
+        };
     }, [paused, clearing, load]);
 
     const filtered = useMemo(() => {
@@ -240,6 +264,7 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
         try {
             await window.electronAPI.appLogs.clearLogs();
             if (alive.current) {
+                entriesSigRef.current = '';
                 setEntries([]);
                 setError('');
             }

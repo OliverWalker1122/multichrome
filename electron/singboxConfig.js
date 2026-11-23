@@ -4,15 +4,15 @@ import { domainToASCII } from 'node:url';
 const SIMPLE_PROTOCOLS = new Set(['http', 'https', 'socks5']);
 const MAX_CONFIG_BYTES = 1024 * 1024;
 const REDACTED = '[已隐藏]';
-const hasControls = (value) =>
+export const hasControls = (value) =>
     [...value].some(
         (character) =>
             character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
     );
-const isObject = (value) =>
+export const isObject = (value) =>
     value !== null && typeof value === 'object' && !Array.isArray(value);
 
-function hostValue(value) {
+export function hostValue(value) {
     if (typeof value !== 'string') throw new Error('代理服务器地址无效');
     const host = value.trim().replace(/^\[([^\]]+)\]$/, '$1');
     if (isIP(host)) return host;
