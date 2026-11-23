@@ -91,3 +91,11 @@ pre,
         scroll-behavior: auto !important;
     }
 }
+
+@media (forced-colors: active) {
+    button[aria-current='page'],
+    tr[aria-selected='true'] {
+        outline: 1px solid Highlight;
+        outline-offset: -1px;
+    }
+}

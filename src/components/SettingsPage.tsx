@@ -241,7 +241,6 @@ const useStyles = makeStyles({
         borderRadius: '11px',
         backgroundColor: 'var(--glass-pill)',
         border: '1px solid var(--glass-border)',
-        backdropFilter: 'blur(12px)',
         alignSelf: 'flex-start',
         flexWrap: 'wrap',
         maxWidth: '100%',
@@ -311,7 +310,6 @@ const useStyles = makeStyles({
         backgroundColor: 'var(--glass-card)',
         border: '1px solid var(--glass-border)',
         boxShadow: 'var(--glass-shadow)',
-        backdropFilter: 'blur(14px)',
     },
     cardHeader: {
         display: 'flex',

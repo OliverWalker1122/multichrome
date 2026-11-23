@@ -73,7 +73,7 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         overflow: 'hidden',
         backgroundColor: 'var(--glass-workspace)',
-        backdropFilter: 'blur(20px) saturate(135%)',
+        isolation: 'isolate',
         borderTop: '1px solid var(--glass-border)',
         borderLeft: '1px solid var(--glass-border)',
         borderTopLeftRadius: '14px',

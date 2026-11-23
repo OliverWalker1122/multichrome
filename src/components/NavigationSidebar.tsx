@@ -29,6 +29,7 @@ import {
     WindowMultipleRegular,
 } from '@fluentui/react-icons';
 import { useI18n } from '../i18n';
+import { getGroupStyle } from '../theme/semanticColors';
 
 export type NavSection = 'environments' | 'proxies' | 'trash' | 'settings';
 
@@ -92,7 +93,7 @@ const useStyles = makeStyles({
         borderRadius: '8px',
         border: 'none',
         backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground3,
+        color: 'var(--shell-foreground-muted)',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -142,7 +143,7 @@ const useStyles = makeStyles({
         borderRadius: tokens.borderRadiusMedium,
         border: 'none',
         backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground1,
         fontSize: '14px',
         fontWeight: 500,
         fontFamily: 'inherit',
@@ -176,7 +177,7 @@ const useStyles = makeStyles({
     sectionTitle: {
         fontSize: '13px',
         fontWeight: 600,
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground1,
     },
     activeItem: {
         color: tokens.colorBrandForeground2,
@@ -216,7 +217,7 @@ const useStyles = makeStyles({
     },
     navCount: {
         fontSize: '12px',
-        color: tokens.colorNeutralForeground3,
+        color: 'var(--shell-foreground-muted)',
         fontVariantNumeric: 'tabular-nums',
         fontWeight: 400,
         flexShrink: 0,
@@ -250,7 +251,7 @@ const useStyles = makeStyles({
         backgroundColor: 'transparent',
         cursor: 'pointer',
         borderRadius: tokens.borderRadiusSmall,
-        color: tokens.colorNeutralForeground3,
+        color: 'var(--shell-foreground-muted)',
         flexShrink: 0,
         marginRight: '2px',
         '&:hover': {
@@ -283,7 +284,7 @@ const useStyles = makeStyles({
         borderRadius: tokens.borderRadiusMedium,
         border: 'none',
         backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground1,
         fontSize: '14px',
         fontFamily: 'inherit',
         cursor: 'pointer',
@@ -298,10 +299,13 @@ const useStyles = makeStyles({
         },
     },
     groupIcon: {
-        width: '18px',
-        height: '18px',
+        width: '24px',
+        height: '24px',
+        boxSizing: 'border-box',
+        padding: '4px',
+        borderRadius: '7px',
         justifySelf: 'end',
-        marginRight: '10px',
+        marginRight: '7px',
     },
     groupRow: {
         position: 'relative',
@@ -421,7 +425,10 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                             {isAll ? (
                                 <GridRegular className={styles.groupIcon} />
                             ) : (
-                                <FolderRegular className={styles.groupIcon} />
+                                <FolderRegular
+                                    className={styles.groupIcon}
+                                    style={getGroupStyle(group)}
+                                />
                             )}
                             <span
                                 className={mergeClasses(

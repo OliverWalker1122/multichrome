@@ -54,7 +54,6 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         flexShrink: 0,
         backgroundColor: 'var(--glass-card)',
-        backdropFilter: 'blur(16px)',
         borderTop: '1px solid var(--glass-border)',
         position: 'relative',
         overflow: 'hidden',

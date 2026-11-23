@@ -245,6 +245,141 @@ async function waitUntil(fn, timeoutMs = 8000, intervalMs = 150) {
     return last;
 }
 
+async function verifyWindowMaterials(cdp, reloadUI) {
+    const originalTheme = await cdp.eval("window.electronAPI.settings.getSettings().then(s => s.theme || 'system')");
+    const startsDark = await cdp.eval("document.documentElement.dataset.theme === 'dark'");
+    const systemMedia = await cdp.eval(`({
+        reduced: matchMedia('(prefers-reduced-transparency: reduce)').matches,
+        forced: matchMedia('(forced-colors: active)').matches,
+    })`);
+    const screenshots = process.argv.includes('--screenshots');
+    const shellLightness = {};
+    const failures = [];
+    const waitForPaint = async () => {
+        if (await cdp.eval('document.hidden')) await cdp.send('Page.bringToFront');
+        await cdp.eval(`new Promise(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))`);
+    };
+    const setMedia = async (transparency, forcedColors = 'none') => {
+        const features = [];
+        if (transparency && (systemMedia.reduced || transparency === 'reduce')) {
+            features.push({ name: 'prefers-reduced-transparency', value: transparency });
+        }
+        if (transparency && (systemMedia.forced || forcedColors === 'active')) {
+            features.push({ name: 'forced-colors', value: forcedColors });
+        }
+        await cdp.send('Emulation.setEmulatedMedia', { features });
+        // matchMedia updates before the new material colors and filters are painted.
+        await waitForPaint();
+    };
+    try {
+        // Start with the other theme so both passes explicitly select a theme through the title bar.
+        for (const theme of startsDark ? ['light', 'dark'] : ['dark', 'light']) {
+            await setMedia('no-preference');
+            await cdp.eval(`if (document.documentElement.dataset.theme !== '${theme}') {
+                document.querySelector('header[aria-label="应用顶栏"] button[aria-label*="色"]').click();
+            }`);
+            if (!await waitUntil(() => cdp.eval(`document.documentElement.dataset.theme === '${theme}'`))) {
+                throw new Error(`标题栏无法切换至 ${theme}`);
+            }
+            if (screenshots) {
+                const fixtureVisible = await cdp.eval(`(() => {
+                    const names = [...document.querySelectorAll('table[aria-label="环境列表"] tbody tr')]
+                        .map(row => row.querySelector('td [title]')?.title);
+                    return names.length === 2 && names.includes('测试环境Alpha') && names.includes('测试环境Beta')
+                        && !document.querySelector('[data-details-panel], [role="dialog"]');
+                })()`);
+                if (!fixtureVisible) throw new Error('截图时未显示预期的两个测试环境');
+                // Use a solid backdrop underneath the renderer to keep the host desktop out of captures.
+                await cdp.eval(`document.querySelector('tr [title="测试环境Alpha"]').closest('tr').click();
+                    document.body.style.backgroundColor = '${theme === 'light' ? '#e0e0e0' : '#303030'}';
+                    document.fonts.ready.then(() => true)`);
+                await waitForPaint();
+                const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+                const dir = path.join(projectRoot, '.tmp', 'ui-screenshots');
+                fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(path.join(dir, `home-${theme}.png`), Buffer.from(data, 'base64'));
+            }
+            await cdp.eval(`document.querySelector('table[aria-label="环境列表"] tbody tr')
+                .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+            if (!await waitUntil(() => cdp.eval("!!document.querySelector('[data-details-panel]')"))) {
+                throw new Error('环境详情未打开');
+            }
+            for (const mode of ['standard', 'reduced', 'forced-colors']) {
+                const expectReduced = mode === 'reduced';
+                const expectForced = mode === 'forced-colors';
+                if (mode !== 'standard') {
+                    await setMedia(expectReduced ? 'reduce' : 'no-preference', expectForced ? 'active' : 'none');
+                }
+                const measure = () => cdp.eval(`(() => {
+                    const nodes = {
+                        shell: document.querySelector('header[aria-label="应用顶栏"]').parentElement,
+                        workspace: document.querySelector('main'),
+                        card: document.querySelector('table[aria-label="环境列表"]').parentElement,
+                        drawer: document.querySelector('[data-details-panel]'),
+                    };
+                    const canvas = document.createElement('canvas');
+                    canvas.width = canvas.height = 1;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    const layers = {};
+                    for (const [name, node] of Object.entries(nodes)) {
+                        if (!node?.getClientRects().length) throw new Error('缺少材质层 ' + name);
+                        const style = getComputedStyle(node);
+                        ctx.clearRect(0, 0, 1, 1);
+                        ctx.fillStyle = style.backgroundColor;
+                        ctx.fillRect(0, 0, 1, 1);
+                        const [r, g, b, alpha] = ctx.getImageData(0, 0, 1, 1).data;
+                        layers[name] = { alpha, brightness: r + g + b, filter: style.backdropFilter };
+                    }
+                    return {
+                        layers,
+                        reduced: matchMedia('(prefers-reduced-transparency: reduce)').matches,
+                        forced: matchMedia('(forced-colors: active)').matches,
+                    };
+                })()`);
+                let mismatches;
+                await waitUntil(async () => {
+                    const { layers, reduced, forced } = await measure();
+                    mismatches = [];
+                    const expectOpaque = expectReduced || expectForced;
+                    if (reduced !== expectReduced || forced !== expectForced) mismatches.push(`${theme}/${mode}: media`);
+                    for (const [name, { alpha, filter }] of Object.entries(layers)) {
+                        if (expectOpaque ? alpha !== 255 || filter !== 'none' : alpha === 0 || alpha === 255) {
+                            mismatches.push(`${theme}/${mode}/${name}: alpha=${alpha}, filter=${filter}`);
+                        }
+                    }
+                    if (!expectOpaque) {
+                        const { workspace, shell, card, drawer } = layers;
+                        shellLightness[theme] = shell.brightness;
+                        if (!(workspace.alpha < shell.alpha && shell.alpha <= card.alpha && card.alpha < drawer.alpha)) {
+                            mismatches.push(`${theme}: 层级 alpha=${[workspace.alpha, shell.alpha, card.alpha, drawer.alpha]}`);
+                        }
+                    }
+                    return mismatches.length === 0;
+                }, 2500);
+                failures.push(...mismatches);
+            }
+            await cdp.eval(`document.querySelector('[data-details-panel] button[aria-label="关闭详情面板"]').click()`);
+            if (!await waitUntil(() => cdp.eval("!document.querySelector('[data-details-panel]')"))) {
+                throw new Error('环境详情未关闭');
+            }
+        }
+        if (shellLightness.light <= shellLightness.dark) failures.push('浅色与深色外壳亮度异常');
+    } catch (error) {
+        failures.push(error.message);
+    } finally {
+        await setMedia();
+        await cdp.eval(`(async () => {
+            const settings = await window.electronAPI.settings.getSettings();
+            if (settings.theme !== ${JSON.stringify(originalTheme)}) {
+                await window.electronAPI.settings.saveSettings({ ...settings, theme: ${JSON.stringify(originalTheme)} });
+            }
+        })()`);
+        await reloadUI();
+    }
+    record('E2E-02d', '浅深主题玻璃材质、降低透明度与强制颜色回退', failures.length === 0, failures.join(' | '));
+}
+
 function startLocalTestServer() {
     let hits = 0;
     const server = http.createServer((req, res) => {
@@ -526,6 +661,7 @@ async function main() {
         // Sync UI after direct IPC environment creation
         await reloadUI();
         await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`));
+        await verifyWindowMaterials(cdp, reloadUI);
 
         const sidebarLayoutOk = await cdp.eval(`(() => {
             const nav = document.querySelector('aside[aria-label="主导航"]');

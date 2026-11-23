@@ -1,44 +1,69 @@
 :root {
-    --tone-green-background: #e5f4eb;
-    --tone-green-foreground: #17613c;
-    --tone-teal-background: #e0f3f1;
-    --tone-teal-foreground: #116b65;
-    --tone-blue-background: #e7effb;
-    --tone-blue-foreground: #245ba2;
-    --tone-violet-background: #f0eafb;
-    --tone-violet-foreground: #7041a3;
-    --tone-amber-background: #fff2d7;
-    --tone-amber-foreground: #895a12;
-    --tone-rose-background: #fce9ee;
-    --tone-rose-foreground: #a13256;
-    --glass-shell: rgba(239, 240, 242, 0.84);
-    --glass-workspace: rgba(252, 252, 253, 0.90);
-    --glass-card: rgba(255, 255, 255, 0.82);
-    --glass-drawer: rgba(255, 255, 255, 0.96);
-    --glass-card-inner: rgba(248, 250, 254, 0.72);
-    --glass-pill: rgba(235, 241, 250, 0.62);
-    --glass-border: rgba(15, 23, 42, 0.08);
-    --glass-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+    --tone-green-background: #e1f3de;
+    --tone-green-foreground: #346a30;
+    --tone-teal-background: #d9f3ef;
+    --tone-teal-foreground: #006c65;
+    --tone-blue-background: #deedff;
+    --tone-blue-foreground: #245eac;
+    --tone-violet-background: #eee5ff;
+    --tone-violet-foreground: #7041ad;
+    --tone-amber-background: #ffedcb;
+    --tone-amber-foreground: #8c510c;
+    --tone-rose-background: #fbe3eb;
+    --tone-rose-foreground: #a63361;
+    --glass-shell: rgb(232 240 249 / var(--glass-opacity, 74%));
+    --glass-workspace: rgb(248 251 255 / var(--glass-opacity, 60%));
+    --glass-card: rgb(255 255 255 / var(--glass-opacity, 80%));
+    --glass-drawer: rgb(250 252 255 / var(--glass-opacity, 92%));
+    --glass-card-inner: rgb(242 246 252 / var(--glass-opacity, 76%));
+    --glass-pill: rgb(225 235 247 / var(--glass-opacity, 72%));
+    --glass-border: rgb(30 60 95 / 12%);
+    --glass-shadow: 0 2px 10px rgb(30 60 95 / 5%);
+    --glass-drawer-filter: blur(24px);
+    --shell-foreground-muted: #3b4451;
 }
 :root[data-theme='dark'] {
-    --tone-green-background: #203e2e;
-    --tone-green-foreground: #94ddb1;
-    --tone-teal-background: #193c39;
-    --tone-teal-foreground: #89d5cb;
-    --tone-blue-background: #22364c;
-    --tone-blue-foreground: #9ec5ff;
-    --tone-violet-background: #382d49;
-    --tone-violet-foreground: #ccb0f1;
-    --tone-amber-background: #43381e;
-    --tone-amber-foreground: #eccb80;
-    --tone-rose-background: #472b36;
-    --tone-rose-foreground: #f2aec5;
-    --glass-shell: rgba(26, 27, 30, 0.86);
-    --glass-workspace: rgba(34, 35, 39, 0.92);
-    --glass-card: rgba(38, 39, 43, 0.80);
-    --glass-drawer: rgba(38, 39, 43, 0.97);
-    --glass-card-inner: rgba(32, 33, 37, 0.66);
-    --glass-pill: rgba(255, 255, 255, 0.06);
-    --glass-border: rgba(255, 255, 255, 0.09);
-    --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+    --tone-green-background: #293e2d;
+    --tone-green-foreground: #a7dc98;
+    --tone-teal-background: #183e40;
+    --tone-teal-foreground: #79d9ca;
+    --tone-blue-background: #233d5a;
+    --tone-blue-foreground: #99c7ff;
+    --tone-violet-background: #3b2f50;
+    --tone-violet-foreground: #ceb0ff;
+    --tone-amber-background: #493922;
+    --tone-amber-foreground: #f4c47c;
+    --tone-rose-background: #4a2e3e;
+    --tone-rose-foreground: #f4a9c7;
+    --glass-shell: rgb(27 37 49 / var(--glass-opacity, 80%));
+    --glass-workspace: rgb(33 44 58 / var(--glass-opacity, 64%));
+    --glass-card: rgb(37 47 60 / var(--glass-opacity, 84%));
+    --glass-drawer: rgb(37 47 60 / var(--glass-opacity, 93%));
+    --glass-card-inner: rgb(26 36 49 / var(--glass-opacity, 72%));
+    --glass-pill: rgb(48 63 80 / var(--glass-opacity, 76%));
+    --glass-border: rgb(197 216 238 / 15%);
+    --glass-shadow: 0 4px 16px rgb(8 14 24 / 22%);
+    --shell-foreground-muted: #c3ceda;
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+    :root {
+        --glass-opacity: 100%;
+        --glass-drawer-filter: none;
+    }
+}
+
+@media (forced-colors: active) {
+    :root,
+    :root[data-theme='dark'] {
+        --glass-shell: Canvas;
+        --glass-workspace: Canvas;
+        --glass-card: Canvas;
+        --glass-drawer: Canvas;
+        --glass-card-inner: Canvas;
+        --glass-pill: Canvas;
+        --glass-border: ButtonBorder;
+        --glass-shadow: none;
+        --shell-foreground-muted: CanvasText;
+    }
 }

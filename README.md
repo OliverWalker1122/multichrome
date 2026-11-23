@@ -49,6 +49,12 @@ npm install
 npm run dev
 ```
 
+## 本地 UI 验证
+
+运行 `npm run build` 后，用 `npm run test:ui` 在临时用户目录中启动真实 Electron 窗口，检查主要页面、交互流程，以及浅深主题在标准、降低透明度和强制颜色模式下的界面材质。
+
+运行 `npm run test:ui -- --screenshots` 可额外保存浅色和深色主页到 `.tmp/ui-screenshots/home-light.png` 和 `home-dark.png`。两张图使用合成测试环境和固定底色，便于对照。
+
 ## 文档
 
 - [架构与核心机制](docs/architecture.md) — 双引擎设计、Fail-Closed 代理策略、供应链校验与目录结构

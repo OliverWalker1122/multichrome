@@ -49,6 +49,12 @@ npm install
 npm run dev
 ```
 
+## Local UI tests
+
+After `npm run build`, run `npm run test:ui` to launch Electron with a temporary user data directory. The suite checks the main pages, interactions, and window materials in light and dark themes under standard, reduced-transparency, and forced-colors settings.
+
+Run `npm run test:ui -- --screenshots` to also save the light and dark home screens as `.tmp/ui-screenshots/home-light.png` and `home-dark.png`. Both captures use synthetic profiles and a fixed backdrop for comparison.
+
 ## Documentation
 
 - [Architecture & Design](docs/architecture.md) — Dual-engine model, fail-closed networking, supply-chain verification, and repository layout

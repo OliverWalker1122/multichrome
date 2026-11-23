@@ -107,7 +107,7 @@ const useStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: 'var(--glass-drawer)',
-        backdropFilter: 'blur(28px)',
+        backdropFilter: 'var(--glass-drawer-filter)',
         borderLeft: '1px solid var(--glass-border)',
         outline: 'none',
         overflow: 'hidden',

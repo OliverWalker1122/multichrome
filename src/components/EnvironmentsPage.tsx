@@ -272,12 +272,12 @@ const useStyles = makeStyles({
     groupLabel: {
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        color: tokens.colorNeutralForeground2,
+        gap: '7px',
     },
     groupDot: {
         width: '7px',
         height: '7px',
+        backgroundColor: 'currentColor',
         borderRadius: tokens.borderRadiusCircular,
         flexShrink: 0,
     },
@@ -1644,11 +1644,14 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             </td>
                                             {showGroupCol && (
                                                 <td className={styles.td}>
-                                                    <span className={styles.groupLabel} title={env.groupName}>
+                                                    <span
+                                                        className={styles.groupLabel}
+                                                        style={{ color: getGroupStyle(env.groupName).color }}
+                                                        title={env.groupName}
+                                                    >
                                                         <span
                                                             aria-hidden="true"
                                                             className={styles.groupDot}
-                                                            style={{ backgroundColor: getGroupStyle(env.groupName).color }}
                                                         />
                                                         <span className={styles.clippedLabel}>{env.groupName}</span>
                                                     </span>

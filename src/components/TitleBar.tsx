@@ -75,7 +75,7 @@ const useStyles = makeStyles({
         borderRadius: tokens.borderRadiusMedium,
         border: '1px solid transparent',
         backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
+        color: 'var(--shell-foreground-muted)',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -102,7 +102,7 @@ const useStyles = makeStyles({
     },
     runningStatus: {
         paddingRight: '6px',
-        color: tokens.colorNeutralForeground2,
+        color: 'var(--shell-foreground-muted)',
         fontSize: '12px',
         display: 'inline-flex',
         alignItems: 'center',
