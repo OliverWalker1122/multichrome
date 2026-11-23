@@ -64,12 +64,19 @@ import ProxyEditorDrawer, {
 } from './ProxyEditorDrawer';
 import ProxyConfigDrawer from './ProxyConfigDrawer';
 import ColumnResizeHandle from './ColumnResizeHandle';
+import RunStatusFilter, { type RunStatus } from './RunStatusFilter';
 import {
     useSavedTableValue,
     useTableSelection,
 } from '../hooks/useTableWorkspace';
 import { useVirtualRows } from '../hooks/useVirtualRows';
 import { getProtocolStyle, getToneStyle } from '../theme/semanticColors';
+import {
+    workspaceTitle,
+    tableViewport,
+    stickyTableHeader,
+    selectedTableRow,
+} from '../theme/workspaceStyles';
 import { tr, useI18n } from '../i18n';
 
 interface ProxiesPageProps {
@@ -136,30 +143,32 @@ const useStyles = makeStyles({
     header: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '12px',
-        padding: '16px 20px 10px 20px',
+        gap: '10px',
+        padding: '22px 24px 12px',
         flexShrink: 0,
+        flexWrap: 'wrap',
     },
     headingGroup: {
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: '2px',
+        gap: '3px',
+        flex: '1 1 100px',
     },
-    title: {
-        fontSize: '20px',
-        fontWeight: 600,
-        lineHeight: '28px',
-        margin: 0,
-        color: tokens.colorNeutralForeground1,
-    },
+    title: workspaceTitle,
     subtitle: {
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
+        fontVariantNumeric: 'tabular-nums',
+    },
+    headerActions: {
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '6px',
     },
     alerts: {
-        padding: '0 20px 10px 20px',
+        padding: '0 24px 10px',
         display: 'flex',
         flexDirection: 'column',
         gap: '6px',
@@ -168,61 +177,49 @@ const useStyles = makeStyles({
     toolbar: {
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '0 20px 10px 20px',
+        justifyContent: 'space-between',
+        gap: '4px 12px',
+        padding: '0 24px',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
     searchInput: {
-        flex: 1,
-        minWidth: '180px',
+        flex: '0 1 260px',
+        minWidth: '140px',
     },
     toolbarActions: {
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: '4px',
+        marginLeft: 'auto',
         flexShrink: 0,
     },
-    tableWrap: {
-        flex: 1,
-        minHeight: 0,
-        overflowY: 'auto',
-        overflowX: 'auto',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    },
+    tableWrap: tableViewport,
     table: {
         width: '100%',
         borderCollapse: 'collapse',
         tableLayout: 'fixed',
     },
-    thead: {
-        position: 'sticky',
-        top: 0,
-        zIndex: 2,
-        backgroundColor: 'var(--glass-card)',
-        backdropFilter: 'blur(14px)',
-        boxShadow: 'inset 0 -1px 0 var(--glass-border)',
-    },
+    thead: stickyTableHeader,
     th: {
         position: 'relative',
         textAlign: 'left',
-        padding: '8px 12px',
+        padding: '9px 12px',
         fontSize: '12px',
-        fontWeight: 600,
+        fontWeight: tokens.fontWeightMedium,
         color: tokens.colorNeutralForeground3,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
-    },
-    thRight: {
-        textAlign: 'right',
+        '&:first-child': { paddingLeft: '24px' },
+        '&:last-child': { paddingRight: '18px' },
     },
     row: {
-        height: '48px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        height: '50px',
+        borderBottom: '1px solid color-mix(in srgb, var(--glass-border) 55%, transparent)',
         cursor: 'pointer',
         transitionProperty: 'background-color',
-        transitionDuration: '80ms',
+        transitionDuration: '120ms',
         '&:hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
@@ -231,15 +228,7 @@ const useStyles = makeStyles({
             outlineOffset: '-2px',
         },
     },
-    rowSelected: {
-        backgroundColor: tokens.colorNeutralBackground1Selected,
-        '&:hover': {
-            backgroundColor: tokens.colorNeutralBackground1Selected,
-        },
-        '& > td:first-child': {
-            boxShadow: `inset 3px 0 0 ${tokens.colorBrandBackground}`,
-        },
-    },
+    rowSelected: selectedTableRow,
     td: {
         padding: '6px 12px',
         fontSize: '13px',
@@ -248,37 +237,8 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
-    },
-    nameCell: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '9px',
-        minWidth: 0,
-    },
-    proxyIcon: {
-        width: '28px',
-        height: '28px',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: '8px',
-        fontSize: '17px',
-        flexShrink: 0,
-    },
-    dot: {
-        width: '8px',
-        height: '8px',
-        borderRadius: '999px',
-        flexShrink: 0,
-    },
-    dotRunning: {
-        backgroundColor: tokens.colorPaletteGreenForeground1,
-    },
-    dotError: {
-        backgroundColor: tokens.colorPaletteRedForeground1,
-    },
-    dotStopped: {
-        backgroundColor: tokens.colorNeutralForeground4,
+        '&:first-child': { paddingLeft: '24px' },
+        '&:last-child': { paddingRight: '18px' },
     },
     nameTextWrap: {
         display: 'flex',
@@ -286,8 +246,8 @@ const useStyles = makeStyles({
         minWidth: 0,
     },
     namePrimary: {
-        fontSize: '14px',
-        fontWeight: 600,
+        fontSize: '15px',
+        fontWeight: tokens.fontWeightSemibold,
         color: tokens.colorNeutralForeground1,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -316,7 +276,7 @@ const useStyles = makeStyles({
         padding: '3px 7px',
     },
     statusStopped: {
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground3,
         fontSize: '13px',
     },
     numeric: {
@@ -327,8 +287,11 @@ const useStyles = makeStyles({
     actionCell: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'flex-end',
-        gap: '4px',
+        gap: '2px',
+    },
+    runButton: {
+        minWidth: '48px',
+        fontWeight: tokens.fontWeightRegular,
     },
     emptyState: {
         flex: 1,
@@ -340,37 +303,6 @@ const useStyles = makeStyles({
         padding: '32px 20px',
         color: tokens.colorNeutralForeground3,
         textAlign: 'center',
-    },
-    statusFilterGroup: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px',
-        borderRadius: '8px',
-        backgroundColor: 'var(--glass-pill)',
-        border: '1px solid var(--glass-border)',
-        gap: '2px',
-        flexShrink: 0,
-    },
-    statusFilterBtn: {
-        border: 'none',
-        backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
-        fontSize: '12px',
-        fontFamily: 'inherit',
-        padding: '4px 10px',
-        borderRadius: '6px',
-        cursor: 'pointer',
-        lineHeight: '16px',
-        whiteSpace: 'nowrap',
-        '&:hover': {
-            color: tokens.colorNeutralForeground1,
-        },
-    },
-    statusFilterBtnActive: {
-        backgroundColor: tokens.colorNeutralBackground1,
-        color: tokens.colorNeutralForeground1,
-        fontWeight: 600,
-        boxShadow: tokens.shadow2,
     },
     contextMenu: {
         position: 'fixed',
@@ -438,9 +370,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
     const { showNotification } = useNotification();
 
     const [search, setSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState<
-        'all' | 'running' | 'stopped'
-    >('all');
+    const [statusFilter, setStatusFilter] = useState<RunStatus>('all');
     const [contextMenu, setContextMenu] = useState<{
         proxy: ManagedProxy;
         x: number;
@@ -553,7 +483,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
         bottomSpacerHeight,
         isVirtualized,
     } = useVirtualRows(filtered, {
-        rowHeight: 48,
+        rowHeight: 50,
         overscan: 8,
         threshold: 80,
     });
@@ -905,7 +835,29 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                 : `${proxies.length} 个代理 · ${runningCount} 项服务已启动`}
                         </span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                    <Input
+                        className={styles.searchInput}
+                        aria-label={t('搜索代理', 'Search proxies')}
+                        contentBefore={<SearchRegular />}
+                        contentAfter={
+                            search ? (
+                                <Button
+                                    appearance="transparent"
+                                    size="small"
+                                    icon={<DismissRegular />}
+                                    aria-label={t('清空搜索', 'Clear search')}
+                                    onClick={() => setSearch('')}
+                                />
+                            ) : undefined
+                        }
+                        placeholder={t(
+                            '搜索代理名称、协议或出口 IP',
+                            'Search by proxy name, protocol, or exit IP',
+                        )}
+                        value={search}
+                        onChange={(_, data) => setSearch(data.value)}
+                    />
+                    <div className={styles.headerActions}>
                         <Tooltip
                             content={t(
                                 '启动未运行的代理并刷新当前列表所有代理的出口 IP、地区与延迟',
@@ -914,7 +866,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             relationship="description"
                         >
                             <Button
-                                appearance="outline"
+                                appearance="subtle"
                                 icon={<PulseRegular />}
                                 disabled={
                                     !!busy ||
@@ -932,7 +884,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             </Button>
                         </Tooltip>
                         <Button
-                            appearance="outline"
+                            appearance="subtle"
                             icon={<ArrowImportRegular />}
                             disabled={!!busy || !!batchChecking}
                             onClick={() => {
@@ -982,69 +934,19 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                 )}
 
                 <div className={styles.toolbar}>
-                    <Input
-                        className={styles.searchInput}
-                        contentBefore={<SearchRegular />}
-                        contentAfter={
-                            search ? (
-                                <Button
-                                    appearance="transparent"
-                                    size="small"
-                                    icon={<DismissRegular />}
-                                    aria-label={t('清空搜索', 'Clear search')}
-                                    onClick={() => setSearch('')}
-                                />
-                            ) : undefined
-                        }
-                        placeholder={t(
-                            '搜索代理名称、协议或出口 IP',
-                            'Search by proxy name, protocol, or exit IP',
-                        )}
-                        value={search}
-                        onChange={(_, data) => setSearch(data.value)}
+                    <RunStatusFilter
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        total={proxies.length}
+                        runningCount={runningCount}
+                        runningLabel={t('已启动', 'Running')}
+                        stoppedLabel={t('未启动', 'Stopped')}
                     />
-                    <div
-                        className={styles.statusFilterGroup}
-                        role="group"
-                        aria-label={t('按运行状态筛选', 'Filter by status')}
-                    >
-                        {(
-                            [
-                                ['all', t('全部', 'All')],
-                                [
-                                    'running',
-                                    isEn
-                                        ? `Running (${runningCount})`
-                                        : `已启动 (${runningCount})`,
-                                ],
-                                [
-                                    'stopped',
-                                    isEn
-                                        ? `Stopped (${proxies.length - runningCount})`
-                                        : `未启动 (${proxies.length - runningCount})`,
-                                ],
-                            ] as const
-                        ).map(([key, label]) => (
-                            <button
-                                key={key}
-                                type="button"
-                                className={mergeClasses(
-                                    styles.statusFilterBtn,
-                                    statusFilter === key &&
-                                        styles.statusFilterBtnActive,
-                                )}
-                                aria-pressed={statusFilter === key}
-                                onClick={() => setStatusFilter(key)}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
                     <div className={styles.toolbarActions}>
                         <Menu positioning="below-end">
                             <MenuTrigger disableButtonEnhancement>
                                 <Button
-                                    appearance="outline"
+                                    appearance="subtle"
                                     icon={<ArrowSortRegular />}
                                     aria-label={t('代理排序方式', 'Sort proxies')}
                                 />
@@ -1121,7 +1023,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             className={styles.table}
                             aria-label={t('代理列表', 'Proxies table')}
                             style={{
-                                minWidth: narrowWindow ? 600 : nameWidth + 620,
+                                minWidth: narrowWindow ? 600 : nameWidth + 634,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -1169,11 +1071,8 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                         {t('出口 IP / 位置', 'Exit IP / Location')}
                                     </th>
                                     <th
-                                        className={mergeClasses(
-                                            styles.th,
-                                            styles.thRight,
-                                        )}
-                                        style={{ width: '116px' }}
+                                        className={styles.th}
+                                        style={{ width: '120px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>
@@ -1253,53 +1152,16 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                             }}
                                         >
                                             <td className={styles.td}>
-                                                <div
-                                                    className={styles.nameCell}
-                                                >
-                                                    <span
-                                                        className={
-                                                            styles.proxyIcon
-                                                        }
-                                                        style={getProtocolStyle(
-                                                            proxy.protocol,
-                                                        )}
-                                                        aria-hidden="true"
-                                                    >
-                                                        <GlobeRegular />
+                                                <div className={styles.nameTextWrap}>
+                                                    <span className={styles.namePrimary} title={proxy.name}>
+                                                        {proxy.name}
                                                     </span>
-                                                    <div
-                                                        className={
-                                                            styles.nameTextWrap
-                                                        }
-                                                    >
-                                                        <span
-                                                            className={
-                                                                styles.namePrimary
-                                                            }
-                                                            title={proxy.name}
-                                                        >
-                                                            {proxy.name}
+                                                    <span className={styles.nameSub}>
+                                                        <span style={{ color: getProtocolStyle(proxy.protocol).color }}>
+                                                            {protocolLabel}
                                                         </span>
-                                                        <span
-                                                            className={
-                                                                styles.nameSub
-                                                            }
-                                                        >
-                                                            <span
-                                                                style={{
-                                                                    color: getProtocolStyle(
-                                                                        proxy.protocol,
-                                                                    ).color,
-                                                                }}
-                                                            >
-                                                                {protocolLabel}
-                                                            </span>
-                                                            {proxy.host &&
-                                                            proxy.port
-                                                                ? ` · ${proxy.host}:${proxy.port}`
-                                                                : ''}
-                                                        </span>
-                                                    </div>
+                                                        {proxy.host && proxy.port ? ` · ${proxy.host}:${proxy.port}` : ''}
+                                                    </span>
                                                 </div>
                                             </td>
                                             <td className={styles.td}>
@@ -1447,11 +1309,8 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                                     >
                                                         <Button
                                                             size="small"
-                                                            appearance={
-                                                                running
-                                                                    ? 'secondary'
-                                                                    : 'outline'
-                                                            }
+                                                            appearance="subtle"
+                                                            className={styles.runButton}
                                                             disabled={
                                                                 !!busy ||
                                                                 (running &&

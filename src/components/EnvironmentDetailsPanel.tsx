@@ -89,18 +89,20 @@ const COMMON_LANGUAGES = [
     'zh-CN',
 ];
 
+export const ENV_DETAILS_WIDTH = 348;
+
 const useStyles = makeStyles({
     backdrop: {
         position: 'absolute',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.36)',
+        backgroundColor: `color-mix(in srgb, ${tokens.colorBackgroundOverlay} 55%, transparent)`,
         zIndex: 20,
         display: 'flex',
         justifyContent: 'flex-end',
     },
     panel: {
-        width: '348px',
-        minWidth: '348px',
+        width: `${ENV_DETAILS_WIDTH}px`,
+        minWidth: `${ENV_DETAILS_WIDTH}px`,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
@@ -112,13 +114,12 @@ const useStyles = makeStyles({
         flexShrink: 0,
     },
     panelOverlay: {
-        width: 'min(380px, 92vw)',
+        width: 'min(400px, 100%)',
         minWidth: 0,
         boxShadow: tokens.shadow28,
     },
     header: {
-        padding: '12px 14px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        padding: '16px 18px 6px',
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'space-between',
@@ -131,15 +132,10 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '4px',
     },
-    titleRow: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        minWidth: 0,
-    },
     title: {
-        fontSize: '15px',
-        fontWeight: 600,
+        fontSize: tokens.fontSizeBase500,
+        lineHeight: tokens.lineHeightBase500,
+        fontWeight: tokens.fontWeightSemibold,
         color: tokens.colorNeutralForeground1,
         margin: 0,
         overflow: 'hidden',
@@ -153,9 +149,14 @@ const useStyles = makeStyles({
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
     },
+    groupName: {
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
     dot: {
-        width: '8px',
-        height: '8px',
+        width: '6px',
+        height: '6px',
         borderRadius: '999px',
         flexShrink: 0,
     },
@@ -166,25 +167,33 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorNeutralForeground4,
     },
     quickActions: {
-        padding: '10px 14px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        padding: '6px 18px 12px',
+        borderBottom: '1px solid var(--glass-border)',
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
         flexShrink: 0,
-        flexWrap: 'nowrap',
+        flexWrap: 'wrap',
     },
     body: {
         flex: 1,
         minHeight: 0,
         overflowY: 'auto',
-        padding: '14px',
+        padding: '16px 18px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '12px',
+        gap: '14px',
         '& > *': {
             flexShrink: 0,
         },
+    },
+    identityFields: {
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1.25fr) minmax(0, 1fr)',
+        gap: '12px',
+        '& .fui-Field': { minWidth: 0, gridTemplateColumns: 'minmax(0, 1fr)' },
+        '& .fui-Input': { minWidth: 0, width: '100%' },
+        '& input': { minWidth: 0 },
     },
     sectionLabel: {
         fontSize: '12px',
@@ -221,9 +230,9 @@ const useStyles = makeStyles({
         wordBreak: 'break-all',
     },
     footer: {
-        padding: '10px 14px',
+        padding: '10px 18px',
         borderTop: '1px solid var(--glass-border)',
-        backgroundColor: 'transparent',
+        backgroundColor: 'var(--glass-card-inner)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -579,8 +588,12 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
         >
             <div className={styles.header}>
                 <div className={styles.titleWrap}>
-                    <div className={styles.titleRow}>
+                    <h2 className={styles.title} title={environment.name}>
+                        {environment.name}
+                    </h2>
+                    <div className={styles.statusRow}>
                         <span
+                            aria-hidden="true"
                             className={mergeClasses(
                                 styles.dot,
                                 environment.isRunning
@@ -588,18 +601,15 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                                     : styles.dotStopped,
                             )}
                         />
-                        <h3 className={styles.title} title={environment.name}>
-                            {environment.name}
-                        </h3>
-                    </div>
-                    <div className={styles.statusRow}>
                         <span>
                             {environment.isRunning
                                 ? t('运行中', 'Running')
                                 : t('未运行', 'Stopped')}
                         </span>
-                        <span>·</span>
-                        <span>{environment.groupName}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className={styles.groupName} title={environment.groupName}>
+                            {environment.groupName}
+                        </span>
                     </div>
                 </div>
                 <Tooltip
@@ -647,7 +657,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                     >
                         <Button
                             size="small"
-                            appearance="outline"
+                            appearance="subtle"
                             icon={<ShieldCheckmarkRegular />}
                             onClick={() => onInspectHealth(environment)}
                         >
@@ -712,25 +722,26 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                     </MessageBar>
                 )}
 
-                <Field label={t('环境名称', 'Environment Name')} required>
-                    <Input
-                        value={name}
-                        onChange={(_, data) => setName(data.value)}
-                    />
-                </Field>
-
-                <Field label={t('分组', 'Group')} required>
-                    <Input
-                        value={groupName}
-                        list="env-detail-groups"
-                        onChange={(_, data) => setGroupName(data.value)}
-                    />
+                <div className={styles.identityFields}>
+                    <Field label={t('环境名称', 'Environment Name')} required>
+                        <Input
+                            value={name}
+                            onChange={(_, data) => setName(data.value)}
+                        />
+                    </Field>
+                    <Field label={t('分组', 'Group')} required>
+                        <Input
+                            value={groupName}
+                            list="env-detail-groups"
+                            onChange={(_, data) => setGroupName(data.value)}
+                        />
+                    </Field>
                     <datalist id="env-detail-groups">
                         {groups.map((group) => (
                             <option key={group} value={group} />
                         ))}
                     </datalist>
-                </Field>
+                </div>
 
                 <Field label={t('标签', 'Tags')}>
                     <TagEditor
@@ -1425,35 +1436,35 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                 </div>
             </form>
 
-            <div className={styles.footer}>
-                <span className={styles.dirtyHint}>
-                    {isDirty
-                        ? t('有未保存更改', 'Unsaved changes')
-                        : t('已与本地同步', 'Synced locally')}
-                </span>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <Button
-                        type="button"
-                        size="small"
-                        appearance="secondary"
-                        disabled={!isDirty || saving}
-                        onClick={handleReset}
-                    >
-                        {t('还原', 'Reset')}
-                    </Button>
-                    <Button
-                        type="submit"
-                        form="env-details-form"
-                        size="small"
-                        appearance="primary"
-                        disabled={!isDirty || saving}
-                    >
-                        {saving
-                            ? t('保存中…', 'Saving…')
-                            : t('保存更改', 'Save')}
-                    </Button>
+            {(isDirty || saving) && (
+                <div className={styles.footer}>
+                    <span className={styles.dirtyHint}>
+                        {t('有未保存更改', 'Unsaved changes')}
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <Button
+                            type="button"
+                            size="small"
+                            appearance="subtle"
+                            disabled={saving}
+                            onClick={handleReset}
+                        >
+                            {t('还原', 'Reset')}
+                        </Button>
+                        <Button
+                            type="submit"
+                            form="env-details-form"
+                            size="small"
+                            appearance="primary"
+                            disabled={saving}
+                        >
+                            {saving
+                                ? t('保存中…', 'Saving…')
+                                : t('保存更改', 'Save')}
+                        </Button>
+                    </div>
                 </div>
-            </div>
+            )}
         </aside>
     );
 

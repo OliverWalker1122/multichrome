@@ -81,14 +81,13 @@ const useStyles = makeStyles({
         minHeight: '38px',
         padding: '4px 14px 4px 20px',
         flexShrink: 0,
-        flexWrap: 'wrap',
     },
     headerLeft: {
         display: 'flex',
         alignItems: 'center',
         gap: '8px',
         minWidth: 0,
-        flexWrap: 'wrap',
+        flex: 1,
     },
     title: {
         fontSize: '13px',
@@ -99,6 +98,7 @@ const useStyles = makeStyles({
     select: {
         minWidth: '116px',
         maxWidth: '200px',
+        flexShrink: 1,
     },
     liveMeta: {
         fontSize: '12px',
@@ -107,6 +107,7 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         maxWidth: '240px',
+        minWidth: 0,
     },
     headerRight: {
         display: 'flex',
@@ -121,7 +122,7 @@ const useStyles = makeStyles({
         height: '26px',
         padding: '0 10px',
         borderRadius: tokens.borderRadiusMedium,
-        border: `1px solid ${tokens.colorNeutralStroke2}`,
+        border: '1px solid transparent',
         backgroundColor: 'transparent',
         color: tokens.colorNeutralForeground2,
         fontSize: '12px',
@@ -145,7 +146,6 @@ const useStyles = makeStyles({
     },
     followToggleActive: {
         backgroundColor: tokens.colorNeutralBackground1Selected,
-        border: `1px solid ${tokens.colorBrandForeground1}`,
         color: tokens.colorBrandForeground1,
         fontWeight: 600,
     },
@@ -167,7 +167,7 @@ const useStyles = makeStyles({
         fontFamily: tokens.fontFamilyMonospace,
         fontSize: '12px',
         lineHeight: '1.65',
-        backgroundColor: tokens.colorNeutralBackground4,
+        backgroundColor: 'var(--glass-card-inner)',
         borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     },
     line: {
@@ -267,7 +267,7 @@ const useStyles = makeStyles({
     },
     searchMarkActive: {
         backgroundColor: tokens.colorPaletteDarkOrangeBackground3,
-        color: '#ffffff',
+        color: tokens.colorNeutralForegroundInverted,
         borderRadius: '2px',
         padding: '0 1px',
         fontWeight: 600,
@@ -537,6 +537,7 @@ const LogDockPanel: React.FC<LogDockPanelProps> = ({
 
     return (
         <section
+            id="proxy-log-dock"
             className={styles.root}
             style={{ height: `${height}px` }}
             aria-label={t('运行日志面板', 'Runtime log panel')}
@@ -613,7 +614,7 @@ const LogDockPanel: React.FC<LogDockPanelProps> = ({
                     </Select>
                     <span
                         className={styles.liveMeta}
-                        title={`${scopeLabel} · ${paused ? t('已暂停', 'Paused') : t('每 2 秒自动更新', 'Auto-refreshing every 2s')}`}
+                        title={`${scopeLabel} · ${paused ? t('已暂停', 'Paused') : t('自动刷新', 'Auto-refreshing')}`}
                     >
                         {scopeLabel}
                     </span>
@@ -665,7 +666,7 @@ const LogDockPanel: React.FC<LogDockPanelProps> = ({
                     <Tooltip
                         content={
                             paused
-                                ? t('恢复每 2 秒自动刷新', 'Resume 2s auto-refresh')
+                                ? t('恢复自动刷新', 'Resume auto-refresh')
                                 : t('暂停自动刷新', 'Pause auto-refresh')
                         }
                         relationship="label"

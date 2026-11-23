@@ -129,7 +129,7 @@ test('只有明确选择全部代理才向 IPC 传递 undefined', async () => {
 test('日志布局按页面恢复，损坏存储与异常高度安全回退', () => {
     const defaults = loadLogDockPreferences({ getItem: () => '{invalid' });
     assert.equal(defaults.environments.open, false);
-    assert.equal(defaults.proxies.open, true);
+    assert.equal(defaults.proxies.open, false);
     assert.equal(defaults.proxies.height, 170);
     assert.equal(defaults.settings.open, false);
     assert.equal(defaults.trash.open, false);
@@ -137,13 +137,13 @@ test('日志布局按页面恢复，损坏存储与异常高度安全回退', ()
         getItem: () =>
             JSON.stringify({
                 environments: { open: true, height: 270 },
-                proxies: { open: false, height: 99999 },
+                proxies: { open: true, height: 99999 },
                 settings: { open: 'yes', height: -50 },
             }),
     });
     assert.equal(restored.environments.open, true);
     assert.equal(restored.environments.height, 270);
-    assert.equal(restored.proxies.open, false);
+    assert.equal(restored.proxies.open, true);
     assert.equal(restored.proxies.height, 420);
     assert.equal(restored.settings.open, false);
     assert.equal(restored.settings.height, 120);

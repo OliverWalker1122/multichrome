@@ -22,6 +22,11 @@ import { ChromeEnvironment } from '../types';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { useNotification } from '../contexts/NotificationContext';
 import { getGroupStyle, getToneStyle } from '../theme/semanticColors';
+import {
+    workspaceTitle,
+    tableViewport,
+    stickyTableHeader,
+} from '../theme/workspaceStyles';
 import { useI18n } from '../i18n';
 
 interface TrashPageProps {
@@ -44,65 +49,46 @@ const useStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '12px',
-        padding: '16px 20px 12px 20px',
+        padding: '22px 24px 16px',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
     headingGroup: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '2px',
+        gap: '3px',
     },
-    title: {
-        fontSize: '20px',
-        fontWeight: 600,
-        lineHeight: '28px',
-        margin: 0,
-        color: tokens.colorNeutralForeground1,
-    },
+    title: workspaceTitle,
     subtitle: {
-        fontSize: '13px',
-        color: tokens.colorNeutralForeground2,
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground3,
+        fontVariantNumeric: 'tabular-nums',
     },
     headerActions: {
         display: 'flex',
         alignItems: 'center',
         gap: '8px',
     },
-    tableWrap: {
-        flex: 1,
-        minHeight: 0,
-        overflowY: 'auto',
-        overflowX: 'auto',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    },
+    tableWrap: tableViewport,
     table: {
         width: '100%',
         borderCollapse: 'collapse',
         tableLayout: 'fixed',
     },
-    thead: {
-        position: 'sticky',
-        top: 0,
-        zIndex: 2,
-        backgroundColor: 'var(--glass-card)',
-        backdropFilter: 'blur(14px)',
-        boxShadow: 'inset 0 -1px 0 var(--glass-border)',
-    },
+    thead: stickyTableHeader,
     th: {
         textAlign: 'left',
-        padding: '8px 12px',
+        padding: '9px 12px',
         fontSize: '12px',
-        fontWeight: 600,
+        fontWeight: tokens.fontWeightMedium,
         color: tokens.colorNeutralForeground3,
         whiteSpace: 'nowrap',
-    },
-    thRight: {
-        textAlign: 'right',
+        '&:first-child': { paddingLeft: '24px' },
+        '&:last-child': { paddingRight: '18px' },
     },
     row: {
-        height: '48px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        height: '50px',
+        borderBottom: '1px solid color-mix(in srgb, var(--glass-border) 55%, transparent)',
         '&:hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
@@ -115,10 +101,17 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        '&:first-child': { paddingLeft: '24px' },
+        '&:last-child': { paddingRight: '18px' },
+    },
+    name: {
+        fontSize: '15px',
+        fontWeight: tokens.fontWeightSemibold,
     },
     muted: {
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
+        fontVariantNumeric: 'tabular-nums',
     },
     expiring: {
         fontSize: '12px',
@@ -127,19 +120,28 @@ const useStyles = makeStyles({
     },
     actionsCell: {
         display: 'flex',
-        justifyContent: 'flex-end',
-        gap: '6px',
+        alignItems: 'center',
+        gap: '4px',
     },
-    groupBadge: {
-        display: 'inline-flex',
-        maxWidth: '100%',
-        padding: '2px 7px',
-        borderRadius: '5px',
-        fontSize: '12px',
-        lineHeight: '18px',
+    groupLabel: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        color: tokens.colorNeutralForeground2,
+    },
+    groupDot: {
+        width: '7px',
+        height: '7px',
+        borderRadius: tokens.borderRadiusCircular,
+        flexShrink: 0,
+    },
+    clippedLabel: {
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
     },
     deleteButton: {
-        color: tokens.colorPaletteRedForeground1,
+        color: tokens.colorNeutralForeground2,
         '&:hover': {
             color: tokens.colorPaletteRedForeground1,
             backgroundColor: tokens.colorPaletteRedBackground1,
@@ -344,7 +346,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                 <th
                                     className={styles.th}
                                     style={{
-                                        width: narrowWindow ? '40%' : '22%',
+                                        width: narrowWindow ? undefined : '24%',
                                     }}
                                 >
                                     {t('名称', 'Name')}
@@ -377,11 +379,8 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                     </th>
                                 )}
                                 <th
-                                    className={mergeClasses(
-                                        styles.th,
-                                        styles.thRight,
-                                    )}
-                                    style={{ width: '180px' }}
+                                    className={styles.th}
+                                    style={{ width: isEn ? '212px' : '168px' }}
                                 >
                                     {t('操作', 'Actions')}
                                 </th>
@@ -396,25 +395,23 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                 return (
                                     <tr key={env.id} className={styles.row}>
                                         <td
-                                            className={styles.td}
-                                            style={{ fontWeight: 600 }}
+                                            className={mergeClasses(styles.td, styles.name)}
                                             title={env.name}
                                         >
                                             {env.name}
                                         </td>
                                         {!narrowWindow && (
                                             <td className={styles.td}>
-                                                <span
-                                                    className={
-                                                        styles.groupBadge
-                                                    }
-                                                    style={getGroupStyle(
-                                                        env.groupName ||
-                                                            t('未分组', 'Ungrouped'),
-                                                    )}
-                                                >
-                                                    {env.groupName}
-                                                </span>
+                                                {env.groupName && (
+                                                    <span className={styles.groupLabel} title={env.groupName}>
+                                                        <span
+                                                            aria-hidden="true"
+                                                            className={styles.groupDot}
+                                                            style={{ backgroundColor: getGroupStyle(env.groupName).color }}
+                                                        />
+                                                        <span className={styles.clippedLabel}>{env.groupName}</span>
+                                                    </span>
+                                                )}
                                             </td>
                                         )}
                                         <td
@@ -460,7 +457,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                             <div className={styles.actionsCell}>
                                                 <Button
                                                     size="small"
-                                                    appearance="primary"
+                                                    appearance="subtle"
                                                     icon={<ArrowReplyRegular />}
                                                     disabled={busyId === env.id}
                                                     onClick={() =>
@@ -471,7 +468,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                                 </Button>
                                                 <Button
                                                     size="small"
-                                                    appearance="outline"
+                                                    appearance="subtle"
                                                     className={
                                                         styles.deleteButton
                                                     }

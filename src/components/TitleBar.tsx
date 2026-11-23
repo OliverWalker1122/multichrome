@@ -72,7 +72,7 @@ const useStyles = makeStyles({
     iconBtn: {
         width: '28px',
         height: '28px',
-        borderRadius: '999px',
+        borderRadius: tokens.borderRadiusMedium,
         border: '1px solid transparent',
         backgroundColor: 'transparent',
         color: tokens.colorNeutralForeground2,
@@ -85,8 +85,7 @@ const useStyles = makeStyles({
         transitionProperty: 'background-color, color, border-color',
         transitionDuration: '120ms',
         '&:hover': {
-            backgroundColor: tokens.colorNeutralBackground1,
-            border: `1px solid ${tokens.colorNeutralStroke2}`,
+            backgroundColor: tokens.colorSubtleBackgroundHover,
             color: tokens.colorNeutralForeground1,
         },
         '&:focus-visible': {
@@ -94,26 +93,21 @@ const useStyles = makeStyles({
             outlineOffset: '-1px',
         },
     },
-    statusPill: {
-        height: '26px',
-        padding: '0 10px',
-        borderRadius: '999px',
-        border: `1px solid ${tokens.colorNeutralStroke2}`,
-        backgroundColor: tokens.colorNeutralBackground1,
+    compactAction: {
+        width: 'auto',
+        padding: '0 7px',
+        gap: '5px',
+        fontFamily: 'inherit',
+        fontSize: '12px',
+    },
+    runningStatus: {
+        paddingRight: '6px',
         color: tokens.colorNeutralForeground2,
         fontSize: '12px',
-        fontWeight: 500,
         display: 'inline-flex',
         alignItems: 'center',
         gap: '6px',
-        cursor: 'pointer',
         fontVariantNumeric: 'tabular-nums',
-        transitionProperty: 'border-color, background-color, color',
-        transitionDuration: '120ms',
-        '&:hover': {
-            border: `1px solid ${tokens.colorNeutralStroke1}`,
-            color: tokens.colorNeutralForeground1,
-        },
     },
     dot: {
         width: '7px',
@@ -125,7 +119,7 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorPaletteGreenForeground1,
     },
     dotAmber: {
-        backgroundColor: '#f59e0b',
+        backgroundColor: tokens.colorPaletteMarigoldForeground1,
     },
 });
 
@@ -179,8 +173,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
             <div className={mergeClasses(styles.right, 'win11-no-drag')}>
                 {runningCount > 0 && (
                     <span
-                        className={styles.statusPill}
-                        style={{ cursor: 'default' }}
+                        className={styles.runningStatus}
                         title={t(
                             '当前运行中的浏览器环境数量',
                             'Number of running browser environments',
@@ -205,7 +198,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
                     >
                         <button
                             type="button"
-                            className={styles.statusPill}
+                            className={mergeClasses(styles.iconBtn, styles.compactAction)}
                             onClick={onOpenSettings}
                         >
                             <span
@@ -219,7 +212,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
                 <Tooltip content={langLabel} relationship="label">
                     <button
                         type="button"
-                        className={styles.statusPill}
+                        className={mergeClasses(styles.iconBtn, styles.compactAction)}
                         aria-label={langLabel}
                         onClick={() => void setLocale(isEn ? 'zh-CN' : 'en-US')}
                     >

@@ -1,8 +1,9 @@
 import React, { Component, ReactNode } from 'react';
-import { Button, Text, tokens } from '@fluentui/react-components';
+import { Button, FluentProvider, Text, tokens } from '@fluentui/react-components';
 import { ErrorCircleRegular } from '@fluentui/react-icons';
 import { handleGlobalError } from '../hooks/useErrorHandler';
 import { getStoredLocale } from '../i18n';
+import { win11DarkTheme, win11LightTheme } from '../theme/win11Theme';
 
 interface Props {
     children: ReactNode;
@@ -29,7 +30,6 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     handleRetry = () => {
-        this.setState({ hasError: false, error: undefined });
         window.location.reload();
     };
 
@@ -40,16 +40,19 @@ export class ErrorBoundary extends Component<Props, State> {
             }
 
             const isEn = getStoredLocale() === 'en-US';
+            const theme = document.documentElement.dataset.theme;
+            const dark = theme
+                ? theme === 'dark'
+                : window.matchMedia('(prefers-color-scheme: dark)').matches;
             return (
-                <div
+                <FluentProvider
+                    theme={dark ? win11DarkTheme : win11LightTheme}
                     style={{
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         minHeight: '100vh',
                         padding: '24px',
-                        backgroundColor: tokens.colorNeutralBackground3,
-                        color: tokens.colorNeutralForeground1,
                     }}
                 >
                     <div
@@ -76,19 +79,26 @@ export class ErrorBoundary extends Component<Props, State> {
                         <Text size={500} weight="semibold">
                             {isEn ? 'Application Error' : '应用遇到异常'}
                         </Text>
-                        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-                            {this.state.error?.message ||
-                                (isEn
-                                    ? 'An unexpected rendering error occurred. Reloading usually resolves it.'
-                                    : '界面渲染出现意外错误，刷新后通常可恢复。')}
+                        <Text size={300}>
+                            {isEn
+                                ? 'Reload the window to reopen the workspace.'
+                                : '请重新加载窗口，尝试重新打开工作区。'}
                         </Text>
+                        {this.state.error?.message && (
+                            <details style={{ maxWidth: '100%', overflowWrap: 'anywhere' }}>
+                                <summary style={{ cursor: 'pointer' }}>
+                                    {isEn ? 'Error details' : '错误详情'}
+                                </summary>
+                                <span data-selectable="true">{this.state.error.message}</span>
+                            </details>
+                        )}
                         <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                             <Button appearance="primary" onClick={this.handleRetry}>
                                 {isEn ? 'Reload' : '重新加载'}
                             </Button>
                         </div>
                     </div>
-                </div>
+                </FluentProvider>
             );
         }
 

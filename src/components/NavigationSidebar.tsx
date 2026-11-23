@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import {
     Button,
+    Menu,
+    MenuItem,
+    MenuList,
+    MenuPopover,
+    MenuTrigger,
     Popover,
     PopoverSurface,
     PopoverTrigger,
@@ -16,16 +21,13 @@ import {
     EditRegular,
     FolderRegular,
     GlobeRegular,
+    GridRegular,
+    MoreHorizontalRegular,
     PanelLeftContractRegular,
     PanelLeftExpandRegular,
     SettingsRegular,
     WindowMultipleRegular,
 } from '@fluentui/react-icons';
-import {
-    getGroupStyle,
-    getToneStyle,
-    AccentTone,
-} from '../theme/semanticColors';
 import { useI18n } from '../i18n';
 
 export type NavSection = 'environments' | 'proxies' | 'trash' | 'settings';
@@ -34,6 +36,7 @@ interface NavigationSidebarProps {
     activeSection: NavSection;
     onSelectSection: (section: NavSection) => void;
     collapsed: boolean;
+    canToggleCollapsed: boolean;
     onToggleCollapsed: () => void;
     environmentCount: number;
     proxyCount: number;
@@ -51,13 +54,13 @@ interface NavigationSidebarProps {
 
 const useStyles = makeStyles({
     sidebar: {
-        width: '192px',
-        minWidth: '192px',
+        width: 'clamp(204px, 18.5vw, 228px)',
+        minWidth: '204px',
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: 'transparent',
-        padding: '4px 8px 8px 8px',
+        padding: '18px 10px 8px',
         flexShrink: 0,
         transitionProperty: 'width, min-width',
         transitionDuration: '140ms',
@@ -67,27 +70,29 @@ const useStyles = makeStyles({
     sidebarCollapsed: {
         width: '56px',
         minWidth: '56px',
-        padding: '4px 6px 8px 6px',
+        padding: '12px 6px 8px',
     },
-    toggleRow: {
+    settingsRow: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'flex-start',
-        flexShrink: 0,
-        marginBottom: '4px',
-        paddingLeft: '5px',
+        gap: '4px',
+        '& > div:first-child': {
+            flex: 1,
+            minWidth: 0,
+        },
     },
-    toggleRowCollapsed: {
-        justifyContent: 'center',
-        paddingLeft: 0,
+    settingsRowCollapsed: {
+        flexDirection: 'column',
+        alignItems: 'stretch',
     },
     toggleBtn: {
-        width: '36px',
+        minWidth: '32px',
         height: '32px',
+        flexShrink: 0,
         borderRadius: '8px',
         border: 'none',
         backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground3,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -115,7 +120,7 @@ const useStyles = makeStyles({
         overflowX: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px',
+        gap: '3px',
     },
     bottomNav: {
         flexShrink: 0,
@@ -131,14 +136,14 @@ const useStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
-        height: '38px',
+        height: '40px',
         width: '100%',
         padding: '0 10px',
-        borderRadius: '10px',
+        borderRadius: tokens.borderRadiusMedium,
         border: 'none',
         backgroundColor: 'transparent',
         color: tokens.colorNeutralForeground2,
-        fontSize: '13.5px',
+        fontSize: '14px',
         fontWeight: 500,
         fontFamily: 'inherit',
         cursor: 'pointer',
@@ -168,18 +173,26 @@ const useStyles = makeStyles({
         gap: '2px',
         flexShrink: 0,
     },
-    expandableItem: {
-        paddingRight: '32px',
-    },
-    navItemActive: {
-        backgroundColor: tokens.colorNeutralBackground1Selected,
+    sectionTitle: {
+        fontSize: '13px',
         fontWeight: 600,
+        color: tokens.colorNeutralForeground2,
+    },
+    activeItem: {
+        color: tokens.colorBrandForeground2,
+        backgroundColor: tokens.colorSubtleBackgroundSelected,
+        fontWeight: 600,
+        '&:hover': {
+            backgroundColor: tokens.colorSubtleBackgroundSelected,
+            color: tokens.colorBrandForeground2,
+        },
         '&::before': {
             content: '""',
             position: 'absolute',
-            left: '0px',
-            top: '9px',
-            bottom: '9px',
+            left: '2px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            height: '16px',
             width: '3px',
             borderRadius: '999px',
             backgroundColor: tokens.colorBrandBackground,
@@ -187,14 +200,12 @@ const useStyles = makeStyles({
     },
     navIcon: {
         fontSize: '18px',
-        width: '26px',
-        height: '26px',
-        borderRadius: '7px',
+        width: '20px',
+        height: '20px',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: tokens.colorNeutralForeground2,
     },
     navLabel: {
         flex: 1,
@@ -207,12 +218,9 @@ const useStyles = makeStyles({
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
         fontVariantNumeric: 'tabular-nums',
+        fontWeight: 400,
         flexShrink: 0,
-        minWidth: '20px',
-        textAlign: 'center',
-        borderRadius: '6px',
-        lineHeight: '20px',
-        backgroundColor: tokens.colorNeutralBackgroundAlpha2,
+        textAlign: 'right',
     },
     navDot: {
         width: '7px',
@@ -232,12 +240,10 @@ const useStyles = makeStyles({
         boxShadow: `0 0 0 1.5px ${tokens.colorNeutralBackground3}`,
     },
     chevronBtn: {
-        position: 'absolute',
-        right: '4px',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: '26px',
+        width: '28px',
         height: '28px',
         padding: 0,
         border: 'none',
@@ -246,6 +252,7 @@ const useStyles = makeStyles({
         borderRadius: tokens.borderRadiusSmall,
         color: tokens.colorNeutralForeground3,
         flexShrink: 0,
+        marginRight: '2px',
         '&:hover': {
             backgroundColor: tokens.colorSubtleBackgroundHover,
             color: tokens.colorNeutralForeground1,
@@ -255,26 +262,29 @@ const useStyles = makeStyles({
         },
     },
     groupList: {
+        paddingLeft: '12px',
+        marginBottom: '12px',
+    },
+    groupItems: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1px',
-        paddingLeft: '10px',
-        marginTop: '2px',
-        marginBottom: '4px',
+        gap: '2px',
     },
     groupItem: {
         position: 'relative',
-        display: 'flex',
+        display: 'grid',
+        gridTemplateColumns: 'subgrid',
+        gridColumn: '1 / -1',
+        gridRow: '1',
         alignItems: 'center',
-        gap: '8px',
-        height: '32px',
+        height: '36px',
         width: '100%',
-        padding: '0 8px',
+        padding: 0,
         borderRadius: tokens.borderRadiusMedium,
         border: 'none',
         backgroundColor: 'transparent',
         color: tokens.colorNeutralForeground2,
-        fontSize: '13px',
+        fontSize: '14px',
         fontFamily: 'inherit',
         cursor: 'pointer',
         textAlign: 'left',
@@ -287,38 +297,26 @@ const useStyles = makeStyles({
             outlineOffset: '-2px',
         },
     },
-    groupItemActive: {
-        backgroundColor: tokens.colorBrandBackground2,
-        color: tokens.colorBrandForeground1,
-        fontWeight: 600,
-    },
     groupIcon: {
-        fontSize: '14px',
-        width: '22px',
-        height: '22px',
-        padding: '3px',
-        borderRadius: '5px',
-        flexShrink: 0,
-        color: tokens.colorNeutralForeground3,
+        width: '18px',
+        height: '18px',
+        justifySelf: 'end',
+        marginRight: '10px',
     },
     groupRow: {
         position: 'relative',
-        display: 'flex',
+        display: 'grid',
+        gridTemplateColumns: '42px minmax(0, 1fr) minmax(32px, max-content)',
         alignItems: 'center',
         minWidth: 0,
-        '&:hover .mc-group-actions': {
+    },
+    editableGroup: {
+        '&:hover .mc-group-more, &:focus-within .mc-group-more': {
             opacity: 1,
             pointerEvents: 'auto',
         },
-        '&:focus-within .mc-group-actions': {
-            opacity: 1,
-            pointerEvents: 'auto',
-        },
-        '&:hover .mc-group-count': {
-            opacity: 0,
-        },
-        '&:focus-within .mc-group-count': {
-            opacity: 0,
+        '&:hover .mc-group-label, &:focus-within .mc-group-label': {
+            marginRight: '24px',
         },
     },
     groupSurface: {
@@ -333,43 +331,25 @@ const useStyles = makeStyles({
         fontWeight: 600,
         color: tokens.colorNeutralForeground2,
     },
-    groupActions: {
-        position: 'absolute',
-        right: '4px',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '1px',
+    groupMore: {
+        gridColumn: '2',
+        gridRow: '1',
+        justifySelf: 'end',
+        position: 'relative',
+        minWidth: '22px',
+        width: '22px',
+        height: '22px',
+        padding: 0,
         opacity: 0,
         pointerEvents: 'none',
         transitionProperty: 'opacity',
         transitionDuration: '100ms',
-        backgroundColor: tokens.colorNeutralBackground3,
-        borderRadius: tokens.borderRadiusSmall,
-    },
-    groupActionBtn: {
-        minWidth: '22px',
-        width: '22px',
-        height: '22px',
-        padding: 0,
-        color: tokens.colorNeutralForeground3,
-        '&:hover': {
-            color: tokens.colorNeutralForeground1,
-        },
-    },
-    groupDeleteBtn: {
-        minWidth: '22px',
-        width: '22px',
-        height: '22px',
-        padding: 0,
-        color: tokens.colorNeutralForeground3,
-        '&:hover': {
-            color: tokens.colorPaletteRedForeground1,
-            backgroundColor: tokens.colorPaletteRedBackground1,
-        },
     },
     groupCount: {
-        transitionProperty: 'opacity',
-        transitionDuration: '100ms',
+        padding: '0 10px 0 4px',
+    },
+    activeCount: {
+        color: 'inherit',
     },
 });
 
@@ -377,6 +357,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     activeSection,
     onSelectSection,
     collapsed,
+    canToggleCollapsed,
     onToggleCollapsed,
     environmentCount,
     proxyCount,
@@ -392,7 +373,8 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     settingsBadgeTooltip,
 }) => {
     const styles = useStyles();
-    const { isEn, t } = useI18n();
+    const { t } = useI18n();
+    const groupListId = useId();
     const [groupsExpanded, setGroupsExpanded] = useState(true);
     const [groupPopoverOpen, setGroupPopoverOpen] = useState(false);
 
@@ -407,117 +389,100 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     };
 
     const renderGroups = () => (
-        <div role="group" aria-label={t('环境分组', 'Environment groups')}>
-            <button
-                type="button"
-                className={mergeClasses(
-                    styles.groupItem,
-                    activeSection === 'environments' &&
-                        currentGroup === '用户分组' &&
-                        styles.groupItemActive,
-                )}
-                aria-current={
-                    activeSection === 'environments' &&
-                    currentGroup === '用户分组'
-                        ? 'page'
-                        : undefined
-                }
-                onClick={() => selectGroup('用户分组')}
-            >
-                <WindowMultipleRegular className={styles.groupIcon} />
-                <span className={styles.navLabel}>
-                    {t('全部环境', 'All Environments')}
-                </span>
-                <span className={styles.navCount}>{environmentCount}</span>
-            </button>
-            {visibleGroups.map((group) => {
+        <div
+            className={styles.groupItems}
+            role="group"
+            aria-label={t('环境分组', 'Environment groups')}
+        >
+            {['用户分组', ...visibleGroups].map((group) => {
+                const isAll = group === '用户分组';
+                const label = isAll ? t('全部环境', 'All Environments') : group;
+                const count = isAll ? environmentCount : groupCounts[group] || 0;
                 const isActive =
                     activeSection === 'environments' && currentGroup === group;
-                const count = groupCounts[group] || 0;
                 return (
-                    <div key={group} className={styles.groupRow}>
+                    <div
+                        key={group}
+                        className={mergeClasses(
+                            styles.groupRow,
+                            !isAll && styles.editableGroup,
+                        )}
+                    >
                         <button
                             type="button"
                             className={mergeClasses(
                                 styles.groupItem,
-                                isActive && styles.groupItemActive,
+                                isActive && styles.activeItem,
                             )}
                             aria-current={isActive ? 'page' : undefined}
                             onClick={() => selectGroup(group)}
-                            title={group}
+                            title={label}
                         >
-                            <FolderRegular
-                                className={styles.groupIcon}
-                                style={getGroupStyle(group)}
-                            />
-                            <span className={styles.navLabel}>{group}</span>
+                            {isAll ? (
+                                <GridRegular className={styles.groupIcon} />
+                            ) : (
+                                <FolderRegular className={styles.groupIcon} />
+                            )}
+                            <span
+                                className={mergeClasses(
+                                    styles.navLabel,
+                                    'mc-group-label',
+                                )}
+                            >
+                                {label}
+                            </span>
                             <span
                                 className={mergeClasses(
                                     styles.navCount,
                                     styles.groupCount,
-                                    'mc-group-count',
+                                    isActive && styles.activeCount,
                                 )}
                             >
                                 {count}
                             </span>
                         </button>
-                        <div
-                            className={mergeClasses(
-                                styles.groupActions,
-                                'mc-group-actions',
-                            )}
-                        >
-                            <Tooltip
-                                content={t('重命名分组', 'Rename group')}
-                                relationship="label"
-                            >
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={
-                                        <EditRegular
-                                            style={{ fontSize: '13px' }}
-                                        />
-                                    }
-                                    className={styles.groupActionBtn}
-                                    aria-label={
-                                        isEn
-                                            ? `Rename group ${group}`
-                                            : `重命名分组 ${group}`
-                                    }
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setGroupPopoverOpen(false);
-                                        onRequestRenameGroup(group);
-                                    }}
-                                />
-                            </Tooltip>
-                            <Tooltip
-                                content={t('删除分组', 'Delete group')}
-                                relationship="label"
-                            >
-                                <Button
-                                    appearance="subtle"
-                                    size="small"
-                                    icon={
-                                        <DeleteRegular
-                                            style={{ fontSize: '13px' }}
-                                        />
-                                    }
-                                    className={styles.groupDeleteBtn}
-                                    aria-label={
-                                        isEn
-                                            ? `Delete group ${group}`
-                                            : `删除分组 ${group}`
-                                    }
-                                    onClick={(event) => {
-                                        event.stopPropagation();
-                                        setGroupPopoverOpen(false);
-                                        onRequestDeleteGroup(group);
-                                    }}
-                                />
-                            </Tooltip>
-                        </div>
+                        {!isAll && (
+                            <Menu>
+                                <MenuTrigger disableButtonEnhancement>
+                                    <Button
+                                        appearance="subtle"
+                                        size="small"
+                                        icon={<MoreHorizontalRegular />}
+                                        className={mergeClasses(
+                                            styles.groupMore,
+                                            'mc-group-more',
+                                        )}
+                                        aria-label={t(
+                                            `管理分组 ${group}`,
+                                            `Manage group ${group}`,
+                                        )}
+                                        title={t('管理分组', 'Manage group')}
+                                    />
+                                </MenuTrigger>
+                                <MenuPopover>
+                                    <MenuList>
+                                        <MenuItem
+                                            icon={<EditRegular />}
+                                            onClick={() => {
+                                                setGroupPopoverOpen(false);
+                                                onRequestRenameGroup(group);
+                                            }}
+                                        >
+                                            {t('重命名分组', 'Rename group')}
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<DeleteRegular />}
+                                            onClick={() => {
+                                                setGroupPopoverOpen(false);
+                                                onRequestDeleteGroup(group);
+                                            }}
+                                        >
+                                            {t('删除分组', 'Delete group')}
+                                        </MenuItem>
+                                    </MenuList>
+                                </MenuPopover>
+                            </Menu>
+                        )}
                     </div>
                 );
             })}
@@ -532,15 +497,11 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         showDot?: boolean,
         dotTooltip?: string,
     ) => {
-        const active = activeSection === id;
-        const expandable =
-            id === 'environments' && !collapsed && visibleGroups.length > 0;
-        const iconTone = {
-            environments: 'blue',
-            proxies: 'teal',
-            trash: 'amber',
-            settings: 'violet',
-        }[id];
+        const isEnvironments = id === 'environments';
+        const expandable = isEnvironments && !collapsed;
+        const active =
+            activeSection === id &&
+            (!isEnvironments || (collapsed && !groupPopoverOpen));
         const button = (
             <button
                 type="button"
@@ -550,17 +511,15 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                 className={mergeClasses(
                     styles.navItem,
                     collapsed && styles.navItemCollapsed,
-                    active && styles.navItemActive,
-                    expandable && styles.expandableItem,
+                    active && styles.activeItem,
+                    expandable && styles.sectionTitle,
                 )}
-                onClick={() => onSelectSection(id)}
+                onClick={() => {
+                    onSelectSection(id);
+                    if (expandable) setGroupsExpanded(true);
+                }}
             >
-                <span
-                    className={styles.navIcon}
-                    style={getToneStyle(iconTone as AccentTone)}
-                >
-                    {icon}
-                </span>
+                <span className={styles.navIcon}>{icon}</span>
                 {collapsed && showDot && (
                     <span
                         className={styles.navDotCollapsed}
@@ -636,6 +595,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                                 : t('展开环境分组', 'Expand groups')
                         }
                         aria-expanded={groupsExpanded}
+                        aria-controls={groupListId}
                         className={styles.chevronBtn}
                         onClick={() => setGroupsExpanded((prev) => !prev)}
                     >
@@ -659,41 +619,6 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     collapsed && styles.sidebarCollapsed,
                 )}
             >
-                <div
-                    className={mergeClasses(
-                        styles.toggleRow,
-                        collapsed && styles.toggleRowCollapsed,
-                    )}
-                >
-                    <Tooltip
-                        content={
-                            collapsed
-                                ? t('展开导航栏', 'Expand sidebar')
-                                : t('收起导航栏', 'Collapse sidebar')
-                        }
-                        relationship="label"
-                        positioning="after"
-                    >
-                        <button
-                            type="button"
-                            className={styles.toggleBtn}
-                            aria-label={
-                                collapsed
-                                    ? t('展开导航栏', 'Expand sidebar')
-                                    : t('收起导航栏', 'Collapse sidebar')
-                            }
-                            aria-expanded={!collapsed}
-                            onClick={onToggleCollapsed}
-                        >
-                            {collapsed ? (
-                                <PanelLeftExpandRegular />
-                            ) : (
-                                <PanelLeftContractRegular />
-                            )}
-                        </button>
-                    </Tooltip>
-                </div>
-
                 <nav
                     className={styles.topNav}
                     aria-label={t('核心功能', 'Primary')}
@@ -702,15 +627,16 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                         'environments',
                         t('环境', 'Environments'),
                         <WindowMultipleRegular />,
-                        environmentCount,
                     )}
-                    {!collapsed &&
-                        groupsExpanded &&
-                        visibleGroups.length > 0 && (
-                            <div className={styles.groupList}>
-                                {renderGroups()}
-                            </div>
-                        )}
+                    {!collapsed && (
+                        <div
+                            id={groupListId}
+                            className={styles.groupList}
+                            hidden={!groupsExpanded}
+                        >
+                            {renderGroups()}
+                        </div>
+                    )}
 
                     {renderPrimaryItem(
                         'proxies',
@@ -730,14 +656,50 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                         <DeleteRegular />,
                         trashCount > 0 ? trashCount : undefined,
                     )}
-                    {renderPrimaryItem(
-                        'settings',
-                        t('设置', 'Settings'),
-                        <SettingsRegular />,
-                        undefined,
-                        settingsBadge,
-                        settingsBadgeTooltip,
-                    )}
+                    <div
+                        className={mergeClasses(
+                            styles.settingsRow,
+                            collapsed && styles.settingsRowCollapsed,
+                        )}
+                    >
+                        {renderPrimaryItem(
+                            'settings',
+                            t('设置', 'Settings'),
+                            <SettingsRegular />,
+                            undefined,
+                            settingsBadge,
+                            settingsBadgeTooltip,
+                        )}
+                        {canToggleCollapsed && (
+                            <Tooltip
+                                content={
+                                    collapsed
+                                        ? t('展开导航栏', 'Expand sidebar')
+                                        : t('收起导航栏', 'Collapse sidebar')
+                                }
+                                relationship="label"
+                                positioning={collapsed ? 'after' : 'above'}
+                            >
+                                <button
+                                    type="button"
+                                    className={styles.toggleBtn}
+                                    aria-label={
+                                        collapsed
+                                            ? t('展开导航栏', 'Expand sidebar')
+                                            : t('收起导航栏', 'Collapse sidebar')
+                                    }
+                                    aria-expanded={!collapsed}
+                                    onClick={onToggleCollapsed}
+                                >
+                                    {collapsed ? (
+                                        <PanelLeftExpandRegular />
+                                    ) : (
+                                        <PanelLeftContractRegular />
+                                    )}
+                                </button>
+                            </Tooltip>
+                        )}
+                    </div>
                 </nav>
             </aside>
         </>

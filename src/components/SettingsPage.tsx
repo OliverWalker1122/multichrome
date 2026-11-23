@@ -56,6 +56,7 @@ import {
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
 import { getToneStyle } from '../theme/semanticColors';
+import { workspaceTitle } from '../theme/workspaceStyles';
 import { tr, translateBackendMessage, useI18n } from '../i18n';
 import AppBrandIcon from './AppBrandIcon';
 import AutomationSettingsPanel from './AutomationSettingsPanel';
@@ -225,13 +226,7 @@ const useStyles = makeStyles({
         gap: '12px',
         flexWrap: 'wrap',
     },
-    title: {
-        margin: 0,
-        fontSize: '20px',
-        fontWeight: 600,
-        lineHeight: '26px',
-        color: tokens.colorNeutralForeground1,
-    },
+    title: workspaceTitle,
     headerActions: {
         display: 'flex',
         alignItems: 'center',

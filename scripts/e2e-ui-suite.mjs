@@ -527,14 +527,65 @@ async function main() {
         await reloadUI();
         await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`));
 
+        const sidebarLayoutOk = await cdp.eval(`(() => {
+            const nav = document.querySelector('aside[aria-label="主导航"]');
+            const header = nav.querySelector('button[aria-label="环境"]');
+            const all = nav.querySelector('button[title="全部环境"]');
+            const group = nav.querySelector('button[title="测试组A"]');
+            if (!header || !all || !group) return false;
+            const aligned = Math.abs(all.lastElementChild.getBoundingClientRect().right
+                - group.lastElementChild.getBoundingClientRect().right) < 1;
+            return header.textContent.trim() === '环境' && aligned
+                && all.getAttribute('aria-current') === 'page'
+                && nav.querySelectorAll('[aria-current="page"]').length === 1;
+        })()`);
+        await cdp.eval(`document.querySelector('aside button[title="测试组A"]')?.click()`);
+        const selectionMoved = await waitUntil(() => cdp.eval(`Boolean(
+            document.querySelector('aside button[title="测试组A"][aria-current="page"]')
+            && document.querySelectorAll('aside [aria-current="page"]').length === 1)`));
+        await cdp.eval(`document.querySelector('aside button[title="全部环境"]')?.click()`);
+        record('E2E-02a', '侧栏计数对齐，当前分组单独高亮', sidebarLayoutOk && selectionMoved);
+
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+        const menuVisibilityOk = await cdp.eval(`(() => {
+            const menu = document.querySelector('tr[aria-selected="false"]:not(:hover) .mc-environment-row-menu');
+            if (!menu) return false;
+            const expected = matchMedia('(hover: hover) and (pointer: fine)').matches ? '0' : '1';
+            const resting = getComputedStyle(menu).opacity;
+            menu.focus();
+            const focused = getComputedStyle(menu).opacity;
+            menu.blur();
+            return resting === expected && focused === '1';
+        })()`);
+        record('E2E-02c', '行菜单按输入设备显示，键盘聚焦可见', menuVisibilityOk);
+
+        const isDockOpen = () => cdp.eval(`Boolean(document.getElementById('proxy-log-dock'))`);
+        const toggleDock = () => cdp.eval(`window.__e2e.clickExact('代理日志', 'footer button')`);
+        const initiallyClosed = !(await isDockOpen());
+        await toggleDock();
+        const opened = await waitUntil(isDockOpen);
+        await reloadUI();
+        const restoredOpen = await waitUntil(isDockOpen);
+        await cdp.eval(`document.querySelector('nav button[aria-label="代理"]')?.click()`);
+        const proxyPageClosed = await waitUntil(() => cdp.eval(`document.querySelector('main h1')?.textContent === '代理'
+            && !document.getElementById('proxy-log-dock')`));
+        await cdp.eval(`document.querySelector('nav button[aria-label="环境"]')?.click()`);
+        const stillOpen = await waitUntil(isDockOpen);
+        await toggleDock();
+        await reloadUI();
+        const restoredClosed = !(await isDockOpen());
+        record('E2E-02b', '代理日志默认收起，各页独立记住开关',
+            initiallyClosed && opened && restoredOpen && proxyPageClosed && stillOpen && restoredClosed);
+
         // Test status filter pills (运行中 -> empty, 未运行 -> shows envA)
-        await cdp.eval(`window.__e2e.clickByText('运行中 (')`);
+        const statusFilters = '[aria-label="按运行状态筛选"] button';
+        await cdp.eval(`window.__e2e.clickByText('运行中', ${JSON.stringify(statusFilters)})`);
         await sleep(200);
         const runningEmpty = await cdp.eval(`!window.__e2e.bodyText().includes('测试环境Alpha')`);
-        await cdp.eval(`window.__e2e.clickByText('未运行 (')`);
+        await cdp.eval(`window.__e2e.clickByText('未运行', ${JSON.stringify(statusFilters)})`);
         await sleep(200);
         const stoppedShows = await cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`);
-        await cdp.eval(`window.__e2e.clickExact('全部')`);
+        await cdp.eval(`window.__e2e.clickByText('全部', ${JSON.stringify(statusFilters)})`);
         await sleep(200);
 
         // Test right-click context menu on row
@@ -561,7 +612,9 @@ async function main() {
         // Click sidebar group '测试组A' -> Rename to '测试组B' via real dialog
         const clickedGroup = await cdp.eval(`window.__e2e.clickByText('测试组A', 'aside button, nav button')`);
         await sleep(300);
-        const clickedRename = await cdp.eval(`window.__e2e.clickByText('重命名分组', 'main button')`);
+        await cdp.eval(`window.__e2e.clickExact('管理分组', 'main button')`);
+        const clickedRename = await waitUntil(() =>
+            cdp.eval(`window.__e2e.clickExact('重命名分组', '[role="menuitem"]')`));
         await sleep(300);
         await cdp.eval(`
             (() => {
@@ -581,7 +634,9 @@ async function main() {
 
         // Delete group '测试组B' (move environments to 默认分组) via real dialog
         await sleep(250);
-        const clickedDeleteGroup = await cdp.eval(`window.__e2e.clickByText('删除分组', 'main button')`);
+        await cdp.eval(`window.__e2e.clickExact('管理分组', 'main button')`);
+        const clickedDeleteGroup = await waitUntil(() =>
+            cdp.eval(`window.__e2e.clickExact('删除分组', '[role="menuitem"]')`));
         await sleep(300);
         await cdp.eval(`window.__e2e.clickExact('确认删除', '[role="dialog"] button')`);
         const deletedGroupOk = await waitUntil(
@@ -655,6 +710,21 @@ async function main() {
             () => cdp.eval(`window.__e2e.bodyText().includes('清缓存') && window.__e2e.bodyText().includes('KB')`),
             5000,
         );
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+            width: 958, height: 700, deviceScaleFactor: 1, mobile: false,
+        });
+        try {
+            const fits = await waitUntil(() => cdp.eval(`(() => {
+                const table = document.querySelector('table[aria-label="环境列表"]')?.parentElement;
+                const form = document.getElementById('env-details-form');
+                return window.innerWidth === 958 && [table, form].every(
+                    el => el?.clientWidth > 0 && el.scrollWidth <= el.clientWidth + 1
+                );
+            })()`));
+            record('E2E-04a', '中等宽度窗口内，环境列表与详情表单完整可见', fits);
+        } finally {
+            await cdp.send('Emulation.clearDeviceMetricsOverride');
+        }
         await cdp.eval(`window.__e2e.clickByText('清缓存')`);
         const cacheCleared = await waitUntil(
             () => !fs.existsSync(path.join(cacheDataDir, 'f_000001')),
@@ -760,8 +830,20 @@ async function main() {
         // ---------------------------------------------------------------
         // E2E-06: Settings Tabs — Auto Language, Bookmarks, Memory Saver Mode
         // ---------------------------------------------------------------
-        await cdp.eval(`window.__e2e.clickByText('设置', 'nav button, aside button, button')`);
-        await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('数据目录')`), 5000);
+        // Simulate an already-running file:// window whose old build assets were replaced.
+        await cdp.send('Network.enable');
+        try {
+            await cdp.send('Network.setBlockedURLs', { urls: ['file://*/assets/*.js'] });
+            await cdp.eval(`window.__e2e.clickByText('设置', 'nav button, aside button')`);
+            const settingsOpened = await waitUntil(
+                () => cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-general"]'))`),
+                5000,
+            );
+            record('E2E-06a', '已打开的窗口在旧构建资源不可用时仍能进入设置', Boolean(settingsOpened));
+        } finally {
+            await cdp.send('Network.setBlockedURLs', { urls: [] });
+            await cdp.send('Network.disable');
+        }
 
         // Tab: 隐私 -> verify & toggle 自动匹配语言
         await cdp.eval(`window.__e2e.clickByText('隐私', '[role="tab"], button')`);

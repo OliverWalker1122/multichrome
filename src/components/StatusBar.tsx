@@ -22,15 +22,15 @@ interface StatusBarProps {
 
 const useStyles = makeStyles({
     root: {
-        height: '28px',
-        minHeight: '28px',
+        height: '32px',
+        minHeight: '32px',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '12px',
         padding: '0 14px 0 20px',
-        backgroundColor: 'transparent',
+        backgroundColor: 'var(--glass-card-inner)',
         borderTop: '1px solid var(--glass-border)',
         fontSize: '12px',
         color: tokens.colorNeutralForeground2,
@@ -44,7 +44,7 @@ const useStyles = makeStyles({
     right: {
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
+        gap: '6px',
         flexShrink: 0,
     },
     divider: {
@@ -59,8 +59,9 @@ const useStyles = makeStyles({
         fontSize: '12px',
         fontFamily: 'inherit',
         cursor: 'pointer',
-        padding: '2px 7px',
-        borderRadius: tokens.borderRadiusSmall,
+        minHeight: '24px',
+        padding: '0 7px',
+        borderRadius: tokens.borderRadiusMedium,
         display: 'inline-flex',
         alignItems: 'center',
         gap: '4px',
@@ -168,7 +169,8 @@ const StatusBar: React.FC<StatusBarProps> = ({
                 <div className={styles.logGroup}>
                     <button
                         type="button"
-                        aria-pressed={logOpen}
+                        aria-expanded={logOpen}
+                        aria-controls={logOpen ? 'proxy-log-dock' : undefined}
                         className={mergeClasses(
                             styles.logButton,
                             logOpen && styles.logButtonOpen,

@@ -51,15 +51,22 @@ import {
     RunningResourceStats,
 } from '../types';
 import { useNotification } from '../contexts/NotificationContext';
-import EnvironmentDetailsPanel from './EnvironmentDetailsPanel';
+import EnvironmentDetailsPanel, { ENV_DETAILS_WIDTH } from './EnvironmentDetailsPanel';
 import EnvironmentHealthDialog from './EnvironmentHealthDialog';
 import ColumnResizeHandle from './ColumnResizeHandle';
+import RunStatusFilter, { type RunStatus } from './RunStatusFilter';
 import {
     useSavedTableValue,
     useTableSelection,
 } from '../hooks/useTableWorkspace';
 import { useVirtualRows } from '../hooks/useVirtualRows';
 import { getGroupStyle, getTagStyle, getToneStyle } from '../theme/semanticColors';
+import {
+    workspaceTitle,
+    tableViewport,
+    stickyTableHeader,
+    selectedTableRow,
+} from '../theme/workspaceStyles';
 import { useI18n } from '../i18n';
 import {
     collectTagStats,
@@ -115,7 +122,7 @@ interface EnvironmentsPageProps {
     onSelectEnv: (id: string | null) => void;
     detailsOpen: boolean;
     onToggleDetails: (open?: boolean) => void;
-    narrowWindow: boolean;
+    workspaceWidth: number;
     overlayDetails: boolean;
     onCreateClick: () => void;
     onLaunch: (id: string) => Promise<void>;
@@ -154,93 +161,90 @@ const useStyles = makeStyles({
     header: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '12px',
-        padding: '16px 22px 10px 22px',
+        gap: '10px',
+        padding: '22px 24px 12px',
         flexShrink: 0,
+        flexWrap: 'wrap',
     },
     headingGroup: {
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
-        gap: '2px',
+        gap: '3px',
+        flex: '1 1 100px',
     },
     title: {
-        fontSize: '20px',
-        fontWeight: 700,
-        letterSpacing: '-0.02em',
-        lineHeight: '28px',
-        margin: 0,
-        color: tokens.colorNeutralForeground1,
+        ...workspaceTitle,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
     },
     subtitle: {
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
+        fontVariantNumeric: 'tabular-nums',
+    },
+    headerActions: {
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '6px',
     },
     toolbar: {
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '0 22px 12px 22px',
+        justifyContent: 'space-between',
+        gap: '4px 12px',
+        padding: '0 24px',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
     searchInput: {
-        flex: 1,
-        minWidth: '180px',
+        flex: '0 1 260px',
+        minWidth: '140px',
     },
     toolbarActions: {
         display: 'flex',
         alignItems: 'center',
-        gap: '6px',
+        gap: '4px',
+        marginLeft: 'auto',
         flexShrink: 0,
+        '& > button': {
+            minWidth: '32px',
+            paddingLeft: '8px',
+            paddingRight: '8px',
+        },
     },
-    tableWrap: {
-        flex: 1,
-        minHeight: 0,
-        overflowY: 'auto',
-        overflowX: 'auto',
-        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
-    },
+    tableWrap: tableViewport,
     table: {
         width: '100%',
         borderCollapse: 'collapse',
         tableLayout: 'fixed',
     },
-    thead: {
-        position: 'sticky',
-        top: 0,
-        zIndex: 2,
-        backgroundColor: 'var(--glass-card)',
-        backdropFilter: 'blur(14px)',
-        boxShadow: 'inset 0 -1px 0 var(--glass-border)',
-    },
+    thead: stickyTableHeader,
     th: {
         position: 'relative',
         textAlign: 'left',
-        padding: '8px 12px',
+        padding: '9px 12px',
         fontSize: '12px',
-        fontWeight: 600,
+        fontWeight: tokens.fontWeightMedium,
         color: tokens.colorNeutralForeground3,
         whiteSpace: 'nowrap',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         '&:first-child': {
-            paddingLeft: '20px',
+            paddingLeft: '24px',
         },
         '&:last-child': {
-            paddingRight: '20px',
+            paddingRight: '18px',
         },
-    },
-    thRight: {
-        textAlign: 'right',
     },
     row: {
         height: '50px',
-        borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+        borderBottom: '1px solid color-mix(in srgb, var(--glass-border) 55%, transparent)',
         cursor: 'pointer',
         transitionProperty: 'background-color',
-        transitionDuration: '80ms',
+        transitionDuration: '120ms',
         '&:hover': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
         },
@@ -249,15 +253,7 @@ const useStyles = makeStyles({
             outlineOffset: '-2px',
         },
     },
-    rowSelected: {
-        backgroundColor: tokens.colorNeutralBackground1Selected,
-        '&:hover': {
-            backgroundColor: tokens.colorNeutralBackground1Selected,
-        },
-        '& > td:first-child': {
-            boxShadow: `inset 3px 0 0 ${tokens.colorBrandBackground}`,
-        },
-    },
+    rowSelected: selectedTableRow,
     td: {
         padding: '6px 12px',
         fontSize: '13px',
@@ -267,20 +263,25 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
         '&:first-child': {
-            paddingLeft: '20px',
+            paddingLeft: '24px',
         },
         '&:last-child': {
-            paddingRight: '20px',
+            paddingRight: '18px',
         },
     },
-    groupPill: {
-        display: 'inline-flex',
+    groupLabel: {
+        display: 'flex',
         alignItems: 'center',
-        maxWidth: '100%',
-        padding: '1px 8px',
-        height: '22px',
-        borderRadius: tokens.borderRadiusMedium,
-        fontSize: '12px',
+        gap: '8px',
+        color: tokens.colorNeutralForeground2,
+    },
+    groupDot: {
+        width: '7px',
+        height: '7px',
+        borderRadius: tokens.borderRadiusCircular,
+        flexShrink: 0,
+    },
+    clippedLabel: {
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -302,42 +303,17 @@ const useStyles = makeStyles({
         backgroundColor: tokens.colorPaletteGreenForeground1,
         flexShrink: 0,
     },
-    nameCell: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '9px',
-        minWidth: 0,
-    },
-    profileIcon: {
-        width: '28px',
-        height: '28px',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: '8px',
-        fontSize: '17px',
-        flexShrink: 0,
-    },
-    dot: {
-        width: '8px',
-        height: '8px',
-        borderRadius: '999px',
-        flexShrink: 0,
-    },
-    dotRunning: {
-        backgroundColor: tokens.colorPaletteGreenForeground1,
-    },
-    dotStopped: {
-        backgroundColor: tokens.colorNeutralForeground4,
-    },
     nameTextWrap: {
         display: 'flex',
         flexDirection: 'column',
         minWidth: 0,
     },
     namePrimary: {
-        fontSize: '14px',
-        fontWeight: 600,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        fontSize: '15px',
+        fontWeight: tokens.fontWeightSemibold,
         color: tokens.colorNeutralForeground1,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -350,21 +326,14 @@ const useStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-    statusRunning: {
-        color: tokens.colorPaletteGreenForeground1,
-        fontWeight: 600,
-        fontSize: '13px',
-        backgroundColor: tokens.colorPaletteGreenBackground1,
-        borderRadius: '5px',
-        padding: '3px 7px',
-    },
     statusStopped: {
-        color: tokens.colorNeutralForeground2,
+        color: tokens.colorNeutralForeground3,
         fontSize: '13px',
     },
     muted: {
         color: tokens.colorNeutralForeground2,
         fontSize: '12px',
+        fontVariantNumeric: 'tabular-nums',
     },
     mono: {
         fontFamily: tokens.fontFamilyMonospace,
@@ -374,8 +343,17 @@ const useStyles = makeStyles({
     actionCell: {
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'flex-end',
-        gap: '4px',
+        justifyContent: 'flex-start',
+        gap: '2px',
+    },
+    runButton: {
+        minWidth: '48px',
+        justifyContent: 'flex-start',
+        paddingLeft: '4px',
+        fontWeight: tokens.fontWeightRegular,
+    },
+    actionsHeader: {
+        paddingLeft: '16px',
     },
     emptyState: {
         flex: 1,
@@ -393,37 +371,6 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         gap: '4px',
         minWidth: '150px',
-    },
-    statusFilterGroup: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '2px',
-        borderRadius: '8px',
-        backgroundColor: 'var(--glass-pill)',
-        border: '1px solid var(--glass-border)',
-        gap: '2px',
-        flexShrink: 0,
-    },
-    statusFilterBtn: {
-        border: 'none',
-        backgroundColor: 'transparent',
-        color: tokens.colorNeutralForeground2,
-        fontSize: '12px',
-        fontFamily: 'inherit',
-        padding: '4px 10px',
-        borderRadius: '6px',
-        cursor: 'pointer',
-        lineHeight: '16px',
-        whiteSpace: 'nowrap',
-        '&:hover': {
-            color: tokens.colorNeutralForeground1,
-        },
-    },
-    statusFilterBtnActive: {
-        backgroundColor: tokens.colorNeutralBackground1,
-        color: tokens.colorNeutralForeground1,
-        fontWeight: 600,
-        boxShadow: tokens.shadow2,
     },
     contextMenu: {
         position: 'fixed',
@@ -553,17 +500,16 @@ const useStyles = makeStyles({
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'center',
-        gap: '4px',
-        marginTop: '3px',
+        gap: '6px',
     },
     rowTagChip: {
         display: 'inline-flex',
         alignItems: 'center',
-        borderRadius: '999px',
-        padding: '0 6px',
-        fontSize: '11px',
-        lineHeight: '17px',
-        fontWeight: 500,
+        backgroundColor: 'transparent',
+        color: tokens.colorNeutralForeground3,
+        padding: 0,
+        fontSize: '12px',
+        lineHeight: '18px',
         border: 'none',
         cursor: 'pointer',
         fontFamily: 'inherit',
@@ -571,6 +517,10 @@ const useStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
+        '&:hover, &:focus-visible': {
+            textDecorationLine: 'underline',
+            color: tokens.colorBrandForeground1,
+        },
     },
     rowTagMore: {
         display: 'inline-flex',
@@ -595,7 +545,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     onSelectEnv,
     detailsOpen,
     onToggleDetails,
-    narrowWindow,
+    workspaceWidth,
     overlayDetails,
     onCreateClick,
     onLaunch,
@@ -614,9 +564,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     const { isEn, t } = useI18n();
     const { showNotification } = useNotification();
     const [search, setSearch] = useState('');
-    const [statusFilter, setStatusFilter] = useState<
-        'all' | 'running' | 'stopped'
-    >('all');
+    const [statusFilter, setStatusFilter] = useState<RunStatus>('all');
     const [selectedTags, setSelectedTags] = useState<string[]>([]);
     const [tagFilterMode, setTagFilterMode] = useState<TagFilterMode>('all');
     const [resourceStats, setResourceStats] =
@@ -896,6 +844,11 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     });
 
     // 窄窗口自动隐藏可选列与次要列，保留名称、状态与主要操作
+    // Use the remaining list width when the inspector is docked. The full
+    // table needs room for the default columns, its inset and the scrollbar.
+    const listWidth = workspaceWidth -
+        (detailsOpen && selectedEnv && !overlayDetails ? ENV_DETAILS_WIDTH : 0);
+    const narrowWindow = listWidth < 810;
     const activeOptionalCols = narrowWindow ? [] : optionalColumns;
     const showGroupCol = !narrowWindow && currentGroup === '用户分组';
     const showLastUsedCol = !narrowWindow;
@@ -936,42 +889,40 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
             >
                 <div className={styles.header}>
                     <div className={styles.headingGroup}>
-                        <h1 className={styles.title}>{headingTitle}</h1>
-                        <span className={styles.subtitle}>
-                            {isEn
-                                ? `${environments.length} profiles · ${runningCount} running${totalMemoryText ? ` · ${totalMemoryText}` : ''}`
-                                : `${environments.length} 个环境 · ${runningCount} 个运行中${totalMemoryText ? ` · 内存 ${totalMemoryText}` : ''}`}
-                        </span>
+                        <h1 className={styles.title} title={headingTitle}>{headingTitle}</h1>
+                        {totalMemoryText && (
+                            <span className={styles.subtitle}>
+                                {t('运行环境总内存', 'Total profile memory')} {totalMemoryText}
+                            </span>
+                        )}
                     </div>
-                    <div
-                        style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            flexShrink: 0,
-                        }}
-                    >
-                        {currentGroup !== '用户分组' && onRequestRenameGroup && (
-                            <Button
-                                appearance="outline"
-                                icon={<EditRegular />}
-                                onClick={() => onRequestRenameGroup(currentGroup)}
-                            >
-                                {t('重命名分组', 'Rename Group')}
-                            </Button>
+                    <Input
+                        className={styles.searchInput}
+                        aria-label={t('搜索环境', 'Search environments')}
+                        contentBefore={<SearchRegular />}
+                        contentAfter={
+                            search ? (
+                                <Button
+                                    appearance="transparent"
+                                    size="small"
+                                    icon={<DismissRegular />}
+                                    aria-label={t('清空搜索', 'Clear search')}
+                                    onClick={() => setSearch('')}
+                                />
+                            ) : undefined
+                        }
+                        placeholder={t('搜索环境', 'Search environments')}
+                        title={t(
+                            '按名称、分组、标签、代理或备注搜索',
+                            'Search by name, group, tags, proxy, or notes',
                         )}
-                        {currentGroup !== '用户分组' && onRequestDeleteGroup && (
-                            <Button
-                                appearance="outline"
-                                icon={<DeleteRegular />}
-                                onClick={() => onRequestDeleteGroup(currentGroup)}
-                            >
-                                {t('删除分组', 'Delete Group')}
-                            </Button>
-                        )}
+                        value={search}
+                        onChange={(_, data) => setSearch(data.value)}
+                    />
+                    <div className={styles.headerActions}>
                         {allRunningCount > 0 && (
                             <Button
-                                appearance="outline"
+                                appearance="subtle"
                                 icon={<StopRegular />}
                                 disabled={closingAll}
                                 onClick={() => setCloseAllConfirmOpen(true)}
@@ -992,75 +943,46 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 </div>
 
                 <div className={styles.toolbar}>
-                    <Input
-                        className={styles.searchInput}
-                        contentBefore={<SearchRegular />}
-                        contentAfter={
-                            search ? (
-                                <Button
-                                    appearance="transparent"
-                                    size="small"
-                                    icon={<DismissRegular />}
-                                    aria-label={t('清空搜索', 'Clear search')}
-                                    onClick={() => setSearch('')}
-                                />
-                            ) : undefined
-                        }
-                        placeholder={t(
-                            '搜索环境名称、分组、标签、代理或备注',
-                            'Search by name, group, tags, proxy, or notes',
-                        )}
-                        value={search}
-                        onChange={(_, data) => setSearch(data.value)}
+                    <RunStatusFilter
+                        value={statusFilter}
+                        onChange={setStatusFilter}
+                        total={environments.length}
+                        runningCount={runningCount}
+                        runningLabel={t('运行中', 'Running')}
+                        stoppedLabel={t('未运行', 'Stopped')}
                     />
-
-                    <div
-                        className={styles.statusFilterGroup}
-                        role="group"
-                        aria-label={t('按运行状态筛选', 'Filter by status')}
-                    >
-                        {(
-                            [
-                                ['all', t('全部', 'All')],
-                                [
-                                    'running',
-                                    isEn
-                                        ? `Running (${runningCount})`
-                                        : `运行中 (${runningCount})`,
-                                ],
-                                [
-                                    'stopped',
-                                    isEn
-                                        ? `Stopped (${environments.length - runningCount})`
-                                        : `未运行 (${environments.length - runningCount})`,
-                                ],
-                            ] as const
-                        ).map(([key, label]) => (
-                            <button
-                                key={key}
-                                type="button"
-                                className={mergeClasses(
-                                    styles.statusFilterBtn,
-                                    statusFilter === key &&
-                                        styles.statusFilterBtnActive,
-                                )}
-                                aria-pressed={statusFilter === key}
-                                onClick={() => setStatusFilter(key)}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-
                     <div className={styles.toolbarActions}>
+                        {currentGroup !== '用户分组' && (onRequestRenameGroup || onRequestDeleteGroup) && (
+                            <Menu positioning="below-end">
+                                <MenuTrigger disableButtonEnhancement>
+                                    <Button appearance="subtle" icon={<MoreHorizontalRegular />}>
+                                        {t('管理分组', 'Manage group')}
+                                    </Button>
+                                </MenuTrigger>
+                                <MenuPopover>
+                                    <MenuList>
+                                        {onRequestRenameGroup && (
+                                            <MenuItem icon={<EditRegular />} onClick={() => onRequestRenameGroup(currentGroup)}>
+                                                {t('重命名分组', 'Rename group')}
+                                            </MenuItem>
+                                        )}
+                                        {onRequestDeleteGroup && (
+                                            <MenuItem icon={<DeleteRegular />} onClick={() => onRequestDeleteGroup(currentGroup)}>
+                                                {t('删除分组', 'Delete group')}
+                                            </MenuItem>
+                                        )}
+                                    </MenuList>
+                                </MenuPopover>
+                            </Menu>
+                        )}
                         {(tagStats.length > 0 || selectedTags.length > 0) && (
                             <Popover positioning="below-end">
                             <PopoverTrigger disableButtonEnhancement>
                                 <Button
                                     appearance={
                                         selectedTags.length > 0
-                                            ? 'primary'
-                                            : 'outline'
+                                            ? 'secondary'
+                                            : 'subtle'
                                     }
                                     icon={<TagRegular />}
                                 >
@@ -1207,7 +1129,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             <Popover positioning="below-end">
                                 <PopoverTrigger disableButtonEnhancement>
                                     <Button
-                                        appearance="outline"
+                                        appearance="subtle"
                                         icon={<TableSettingsRegular />}
                                     >
                                         {t('列', 'Columns')}
@@ -1251,7 +1173,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     relationship="label"
                                 >
                                     <Button
-                                        appearance="outline"
+                                        appearance="subtle"
                                         icon={<ArrowSortRegular />}
                                         aria-label={t('排序方式', 'Sort by')}
                                     />
@@ -1429,7 +1351,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             aria-label={t('环境列表', 'Environments table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 480
+                                    ? 354
                                     : nameWidth +
                                       proxyWidth +
                                       292 +
@@ -1540,10 +1462,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                         </th>
                                     )}
                                     <th
-                                        className={mergeClasses(
-                                            styles.th,
-                                            styles.thRight,
-                                        )}
+                                        className={mergeClasses(styles.th, styles.actionsHeader)}
                                         style={{ width: '112px' }}
                                     >
                                         {t('操作', 'Actions')}
@@ -1628,144 +1547,56 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             }}
                                         >
                                             <td className={styles.td}>
-                                                <div
-                                                    className={styles.nameCell}
-                                                >
-                                                    <span
-                                                        className={
-                                                            styles.profileIcon
-                                                        }
-                                                        style={getGroupStyle(
-                                                            env.groupName,
-                                                        )}
-                                                        aria-hidden="true"
-                                                    >
-                                                        <WindowMultipleRegular />
-                                                    </span>
-                                                    <div
-                                                        className={
-                                                            styles.nameTextWrap
-                                                        }
-                                                    >
-                                                        <span
-                                                            className={
-                                                                styles.namePrimary
-                                                            }
-                                                            style={{
-                                                                display: 'inline-flex',
-                                                                alignItems: 'center',
-                                                                gap: '6px',
-                                                            }}
-                                                            title={env.name}
-                                                        >
-                                                            <span
-                                                                style={{
-                                                                    overflow: 'hidden',
-                                                                    textOverflow: 'ellipsis',
-                                                                }}
+                                                <div className={styles.nameTextWrap}>
+                                                    <span className={styles.namePrimary} title={env.name}>
+                                                        <span className={styles.clippedLabel}>{env.name}</span>
+                                                        {env.browserEngine === 'fingerprint-chromium' && (
+                                                            <Badge
+                                                                size="small"
+                                                                appearance="outline"
+                                                                color="brand"
+                                                                style={{ flexShrink: 0 }}
                                                             >
-                                                                {env.name}
-                                                            </span>
-                                                            {env.browserEngine ===
-                                                                'fingerprint-chromium' && (
-                                                                <Badge
-                                                                    size="small"
-                                                                    appearance="tint"
-                                                                    color="brand"
-                                                                    style={{
-                                                                        flexShrink: 0,
-                                                                        whiteSpace: 'nowrap',
+                                                                {t('防关联', 'Privacy')}
+                                                            </Badge>
+                                                        )}
+                                                    </span>
+                                                    {Array.isArray(env.tags) && env.tags.length > 0 && (
+                                                        <div className={styles.rowTagsWrap}>
+                                                            {env.tags.slice(0, 3).map((tag) => (
+                                                                <button
+                                                                    key={tag}
+                                                                    type="button"
+                                                                    className={styles.rowTagChip}
+                                                                    title={t(
+                                                                        `按标签 #${tag} 筛选`,
+                                                                        `Filter by tag #${tag}`,
+                                                                    )}
+                                                                    onClick={(event) => {
+                                                                        event.stopPropagation();
+                                                                        toggleTagFilter(tag);
                                                                     }}
                                                                 >
-                                                                    {t('防关联', 'Privacy')}
-                                                                </Badge>
-                                                            )}
-                                                        </span>
-                                                        {Array.isArray(env.tags) &&
-                                                            env.tags.length > 0 && (
-                                                                <div
-                                                                    className={
-                                                                        styles.rowTagsWrap
-                                                                    }
+                                                                    #{tag}
+                                                                </button>
+                                                            ))}
+                                                            {env.tags.length > 3 && (
+                                                                <Tooltip
+                                                                    content={env.tags.map((tag) => `#${tag}`).join(' ')}
+                                                                    relationship="label"
                                                                 >
-                                                                    {env.tags
-                                                                        .slice(0, 3)
-                                                                        .map(
-                                                                            (
-                                                                                tag,
-                                                                            ) => (
-                                                                                <button
-                                                                                    key={
-                                                                                        tag
-                                                                                    }
-                                                                                    type="button"
-                                                                                    className={
-                                                                                        styles.rowTagChip
-                                                                                    }
-                                                                                    style={getTagStyle(
-                                                                                        tag,
-                                                                                    )}
-                                                                                    title={t(
-                                                                                        `按标签 #${tag} 筛选`,
-                                                                                        `Filter by tag #${tag}`,
-                                                                                    )}
-                                                                                    onClick={(
-                                                                                        event,
-                                                                                    ) => {
-                                                                                        event.stopPropagation();
-                                                                                        toggleTagFilter(
-                                                                                            tag,
-                                                                                        );
-                                                                                    }}
-                                                                                >
-                                                                                    #{tag}
-                                                                                </button>
-                                                                            ),
-                                                                        )}
-                                                                    {env.tags
-                                                                        .length >
-                                                                        3 && (
-                                                                        <Tooltip
-                                                                            content={env.tags
-                                                                                .map(
-                                                                                    (
-                                                                                        tag,
-                                                                                    ) =>
-                                                                                        `#${tag}`,
-                                                                                )
-                                                                                .join(
-                                                                                    ' ',
-                                                                                )}
-                                                                            relationship="label"
-                                                                        >
-                                                                            <span
-                                                                                className={
-                                                                                    styles.rowTagMore
-                                                                                }
-                                                                            >
-                                                                                +
-                                                                                {env
-                                                                                    .tags
-                                                                                    .length -
-                                                                                    3}
-                                                                            </span>
-                                                                        </Tooltip>
-                                                                    )}
-                                                                </div>
+                                                                    <span className={styles.rowTagMore}>
+                                                                        +{env.tags.length - 3}
+                                                                    </span>
+                                                                </Tooltip>
                                                             )}
-                                                        {(narrowWindow ||
-                                                            env.notes) && (
-                                                            <span
-                                                                className={
-                                                                    styles.nameSub
-                                                                }
-                                                            >
-                                                                {narrowWindow
-                                                                    ? `${env.groupName} · ${proxyDisplay}`
-                                                                    : env.notes}
-                                                            </span>
-                                                        )}
-                                                    </div>
+                                                        </div>
+                                                    )}
+                                                    {(narrowWindow || env.notes) && (
+                                                        <span className={styles.nameSub}>
+                                                            {narrowWindow ? `${env.groupName} · ${proxyDisplay}` : env.notes}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className={styles.td}>
@@ -1777,17 +1608,15 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                         alignItems: 'flex-start',
                                                     }}
                                                 >
-                                                    <span
-                                                        className={
-                                                            env.isRunning
-                                                                ? styles.statusRunning
-                                                                : styles.statusStopped
-                                                        }
-                                                    >
-                                                        {env.isRunning
-                                                            ? t('运行中', 'Running')
-                                                            : t('未运行', 'Stopped')}
-                                                    </span>
+                                                    {env.isRunning ? (
+                                                        <Badge appearance="tint" color="success" size="small">
+                                                            {t('运行中', 'Running')}
+                                                        </Badge>
+                                                    ) : (
+                                                        <span className={styles.statusStopped}>
+                                                            {t('未运行', 'Stopped')}
+                                                        </span>
+                                                    )}
                                                     {env.isRunning &&
                                                         resourceStats
                                                             ?.environments?.[
@@ -1815,16 +1644,13 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             </td>
                                             {showGroupCol && (
                                                 <td className={styles.td}>
-                                                    <span
-                                                        className={
-                                                            styles.groupPill
-                                                        }
-                                                        style={getGroupStyle(
-                                                            env.groupName,
-                                                        )}
-                                                        title={env.groupName}
-                                                    >
-                                                        {env.groupName}
+                                                    <span className={styles.groupLabel} title={env.groupName}>
+                                                        <span
+                                                            aria-hidden="true"
+                                                            className={styles.groupDot}
+                                                            style={{ backgroundColor: getGroupStyle(env.groupName).color }}
+                                                        />
+                                                        <span className={styles.clippedLabel}>{env.groupName}</span>
                                                     </span>
                                                 </td>
                                             )}
@@ -1848,13 +1674,11 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                             }}
                                                         >
                                                             <span
+                                                                className={styles.clippedLabel}
                                                                 style={{
-                                                                    fontSize:
-                                                                        '13px',
-                                                                    overflow:
-                                                                        'hidden',
-                                                                    textOverflow:
-                                                                        'ellipsis',
+                                                                    color: env.proxyId || env.proxy || env.proxyLabel
+                                                                        ? undefined
+                                                                        : tokens.colorNeutralForeground3,
                                                                 }}
                                                             >
                                                                 {proxyDisplay}
@@ -1948,7 +1772,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 <td
                                                     className={mergeClasses(
                                                         styles.td,
-                                                        styles.mono,
+                                                        styles.muted,
                                                     )}
                                                     title={env.timezone || ''}
                                                 >
@@ -1961,7 +1785,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 <td
                                                     className={mergeClasses(
                                                         styles.td,
-                                                        styles.mono,
+                                                        styles.muted,
                                                     )}
                                                 >
                                                     {env.language || '-'}
@@ -2039,12 +1863,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                     }
                                                 >
                                                     <Button
+                                                        className={styles.runButton}
                                                         size="small"
-                                                        appearance={
-                                                            env.isRunning
-                                                                ? 'secondary'
-                                                                : 'outline'
-                                                        }
+                                                        appearance="subtle"
                                                         disabled={
                                                             busyId === env.id
                                                         }
@@ -2067,6 +1888,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                             <Button
                                                                 size="small"
                                                                 appearance="subtle"
+                                                                className="mc-environment-row-menu"
                                                                 icon={
                                                                     <MoreHorizontalRegular />
                                                                 }

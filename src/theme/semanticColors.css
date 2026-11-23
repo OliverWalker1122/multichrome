@@ -11,8 +11,8 @@
     --tone-amber-foreground: #895a12;
     --tone-rose-background: #fce9ee;
     --tone-rose-foreground: #a13256;
-    --glass-shell: rgba(244, 247, 253, 0.56);
-    --glass-workspace: rgba(255, 255, 255, 0.72);
+    --glass-shell: rgba(239, 240, 242, 0.84);
+    --glass-workspace: rgba(252, 252, 253, 0.90);
     --glass-card: rgba(255, 255, 255, 0.82);
     --glass-drawer: rgba(255, 255, 255, 0.96);
     --glass-card-inner: rgba(248, 250, 254, 0.72);
@@ -33,11 +33,11 @@
     --tone-amber-foreground: #eccb80;
     --tone-rose-background: #472b36;
     --tone-rose-foreground: #f2aec5;
-    --glass-shell: rgba(14, 18, 28, 0.62);
-    --glass-workspace: rgba(22, 27, 39, 0.72);
-    --glass-card: rgba(31, 38, 54, 0.68);
-    --glass-drawer: rgba(22, 27, 40, 0.96);
-    --glass-card-inner: rgba(22, 27, 39, 0.62);
+    --glass-shell: rgba(26, 27, 30, 0.86);
+    --glass-workspace: rgba(34, 35, 39, 0.92);
+    --glass-card: rgba(38, 39, 43, 0.80);
+    --glass-drawer: rgba(38, 39, 43, 0.97);
+    --glass-card-inner: rgba(32, 33, 37, 0.66);
     --glass-pill: rgba(255, 255, 255, 0.06);
     --glass-border: rgba(255, 255, 255, 0.09);
     --glass-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);

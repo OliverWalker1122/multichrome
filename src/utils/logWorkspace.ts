@@ -15,7 +15,7 @@ export function loadLogDockPreferences(
 ): LogDockPreferences {
     const defaults: LogDockPreferences = {
         environments: { open: false, height: 170 },
-        proxies: { open: true, height: 170 },
+        proxies: { open: false, height: 170 },
         trash: { open: false, height: 170 },
         settings: { open: false, height: 170 },
     };

@@ -1,17 +1,5 @@
-import React, {
-    Suspense,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
-import {
-    FluentProvider,
-    Spinner,
-    makeStyles,
-    tokens,
-} from '@fluentui/react-components';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
 import {
     BrowserEngineType,
     ChromeEnvironment,
@@ -42,13 +30,11 @@ import LogDockPanel, {
 import StatusBar from './components/StatusBar';
 import EnvironmentsPage from './components/EnvironmentsPage';
 import CreateEnvironmentModal from './components/CreateEnvironmentModal';
-
-const ApplicationLogsPanel = React.lazy(
-    () => import('./components/ApplicationLogsPanel'),
-);
-const ProxiesPage = React.lazy(() => import('./components/ProxiesPage'));
-const TrashPage = React.lazy(() => import('./components/TrashPage'));
-const SettingsPage = React.lazy(() => import('./components/SettingsPage'));
+// A file:// window can outlive a rebuild that removes the previous renderer assets.
+import ApplicationLogsPanel from './components/ApplicationLogsPanel';
+import ProxiesPage from './components/ProxiesPage';
+import TrashPage from './components/TrashPage';
+import SettingsPage from './components/SettingsPage';
 import DeleteGroupDialog from './components/DeleteGroupDialog';
 import RenameGroupDialog from './components/RenameGroupDialog';
 import LaunchGuardDialog from './components/LaunchGuardDialog';
@@ -99,14 +85,6 @@ const useStyles = makeStyles({
         display: 'flex',
         overflow: 'hidden',
         position: 'relative',
-    },
-    lazyFallback: {
-        flex: 1,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: 0,
-        minWidth: 0,
     },
 });
 
@@ -847,6 +825,7 @@ const AppShell: React.FC = () => {
                     activeSection={activeSection}
                     onSelectSection={(section) => setActiveSection(section)}
                     collapsed={navCollapsed}
+                    canToggleCollapsed={windowWidth >= 880}
                     onToggleCollapsed={() =>
                         setSidebarManualCollapsed((prev) => !prev)
                     }
@@ -888,7 +867,7 @@ const AppShell: React.FC = () => {
                                             : !prev,
                                     )
                                 }
-                                narrowWindow={narrowWindow}
+                                workspaceWidth={contentWidth}
                                 overlayDetails={overlayDetails}
                                 onCreateClick={() => setCreateModalOpen(true)}
                                 onLaunch={handleLaunchWithGuard}
@@ -911,74 +890,54 @@ const AppShell: React.FC = () => {
                             />
                         )}
 
-                        {(activeSection === 'proxies' ||
-                            activeSection === 'trash' ||
-                            activeSection === 'settings') && (
-                            <Suspense
-                                fallback={
-                                    <div className={styles.lazyFallback}>
-                                        <Spinner size="small" />
-                                    </div>
+                        {activeSection === 'proxies' && (
+                            <ProxiesPage
+                                proxies={managedProxies}
+                                environments={state.environments}
+                                coreInfo={coreInfo}
+                                loading={proxiesLoading}
+                                loadError={proxiesLoadError}
+                                selectedProxyId={selectedProxyId}
+                                onSelectProxy={setSelectedProxyId}
+                                detailsOpen={proxyDetailsOpen}
+                                onToggleDetails={(open) =>
+                                    setProxyDetailsOpen((prev) =>
+                                        typeof open === 'boolean' ? open : !prev,
+                                    )
                                 }
-                            >
-                                {activeSection === 'proxies' && (
-                                    <ProxiesPage
-                                        proxies={managedProxies}
-                                        environments={state.environments}
-                                        coreInfo={coreInfo}
-                                        loading={proxiesLoading}
-                                        loadError={proxiesLoadError}
-                                        selectedProxyId={selectedProxyId}
-                                        onSelectProxy={setSelectedProxyId}
-                                        detailsOpen={proxyDetailsOpen}
-                                        onToggleDetails={(open) =>
-                                            setProxyDetailsOpen((prev) =>
-                                                typeof open === 'boolean'
-                                                    ? open
-                                                    : !prev,
-                                            )
-                                        }
-                                        narrowWindow={contentWidth < 920}
-                                        overlayDetails={overlayDetails}
-                                        onRefreshProxies={() =>
-                                            setProxyRefreshTick((v) => v + 1)
-                                        }
-                                        onEnvironmentChanged={
-                                            actions.refreshEnvironments
-                                        }
-                                        onInspectLogs={handleInspectProxyLogs}
-                                    />
-                                )}
+                                narrowWindow={contentWidth < 920}
+                                overlayDetails={overlayDetails}
+                                onRefreshProxies={() =>
+                                    setProxyRefreshTick((v) => v + 1)
+                                }
+                                onEnvironmentChanged={actions.refreshEnvironments}
+                                onInspectLogs={handleInspectProxyLogs}
+                            />
+                        )}
 
-                                {activeSection === 'trash' && (
-                                    <TrashPage
-                                        onEnvironmentRestored={
-                                            actions.refreshEnvironments
-                                        }
-                                        onCountChange={setTrashCount}
-                                        narrowWindow={narrowWindow}
-                                    />
-                                )}
+                        {activeSection === 'trash' && (
+                            <TrashPage
+                                onEnvironmentRestored={actions.refreshEnvironments}
+                                onCountChange={setTrashCount}
+                                narrowWindow={narrowWindow}
+                            />
+                        )}
 
-                                {activeSection === 'settings' && (
-                                    <SettingsPage
-                                        currentSettings={settings}
-                                        onSave={settingsActions.saveSettings}
-                                        onThemePreview={
-                                            settingsActions.setThemeMode
-                                        }
-                                        coreInfo={coreInfo}
-                                        appVersion={appVersion}
-                                        managedProxies={managedProxies}
-                                        groups={groupsForModal}
-                                        kernelStatus={kernelStatus}
-                                        onKernelStatusChange={(nextStatus) => {
-                                            setKernelStatus(nextStatus);
-                                            setProxyRefreshTick((v) => v + 1);
-                                        }}
-                                    />
-                                )}
-                            </Suspense>
+                        {activeSection === 'settings' && (
+                            <SettingsPage
+                                currentSettings={settings}
+                                onSave={settingsActions.saveSettings}
+                                onThemePreview={settingsActions.setThemeMode}
+                                coreInfo={coreInfo}
+                                appVersion={appVersion}
+                                managedProxies={managedProxies}
+                                groups={groupsForModal}
+                                kernelStatus={kernelStatus}
+                                onKernelStatusChange={(nextStatus) => {
+                                    setKernelStatus(nextStatus);
+                                    setProxyRefreshTick((v) => v + 1);
+                                }}
+                            />
                         )}
                     </div>
 
@@ -1033,11 +992,7 @@ const AppShell: React.FC = () => {
             </div>
 
             {appLogsOpen && (
-                <Suspense fallback={null}>
-                    <ApplicationLogsPanel
-                        onClose={() => setAppLogsOpen(false)}
-                    />
-                </Suspense>
+                <ApplicationLogsPanel onClose={() => setAppLogsOpen(false)} />
             )}
 
             <CreateEnvironmentModal

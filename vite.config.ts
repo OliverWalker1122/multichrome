@@ -1,12 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { devNull } from 'node:os';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    // The renderer has no environment-file configuration. Keep builds and UI
-    // checks independent from local credentials.
-    envDir: false,
+    // Vite 5 falls back to the project root for a falsy envDir. The null
+    // device cannot contain env files, on either Windows or Unix.
+    envDir: devNull,
+    envPrefix: [],
     plugins: [react()],
     resolve: {
         alias: {

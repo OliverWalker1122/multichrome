@@ -47,6 +47,13 @@ pre,
     -webkit-app-region: no-drag;
 }
 
+@media (hover: hover) and (pointer: fine) {
+    tr[aria-selected='false']:not(:hover):not(:focus-within)
+        .mc-environment-row-menu:not([aria-expanded='true']) {
+        opacity: 0;
+    }
+}
+
 /* Windows 11 纤细滚动条 */
 ::-webkit-scrollbar {
     width: 8px;
