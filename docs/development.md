@@ -51,10 +51,11 @@ npm run test:e2e
 # 可选：指定外部本地代理执行 L2 线上模式（数据隔离在临时目录，结束后自动清理）
 npm run test:e2e -- --live --proxy-a=http://127.0.0.1:10808 --proxy-b=http://127.0.0.1:10809
 
-# L3 界面主流程冒烟测试（独立临时 userData）
+# L3 界面主流程冒烟测试（独立临时 userData；附加 -- --screenshots 可输出浅深主页对比截图）
 npm run test:ui
 
-# L4 外网真站指纹抽检（手动按需执行，不进 CI）
+# L4 外网真站双内核指纹抽检（手动按需执行，不进 CI；--proxy 默认分别实测 C++ 隐私内核与系统 Chrome 内核）
+npm run audit:live -- --proxy="MyProxy"
 npm run audit:live -- --env="Profile-1"
 ```
 

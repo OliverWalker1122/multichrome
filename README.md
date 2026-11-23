@@ -25,11 +25,11 @@ MultiChrome 是一款基于 Electron 与 Fluent UI 构建的桌面端浏览器�
 
 ## 主要功能
 
-- **双浏览器引擎支持**：支持按环境选择系统官方 Google Chrome，或按需下载的开源 `fingerprint-chromium` 内核。
-- **独立代理隔离**：基于 `sing-box` 提供托管代理管理，支持常见代理协议、批量导入、出口测活与复用提醒，代理异常时自动阻断直连回退。
-- **环境一致性检查**：支持根据代理出口自动对齐时区、语言与地理位置，提供启动前一致性检查与健康自检面板。
-- **多环境生命周期管理**：支持分组管理、环境克隆、回收站保护、运行态内存统计、缓存清理与模板分发。
-- **标准 CDP 守卫与 MCP 接入**：内置默认关闭的本地 `127.0.0.1` 受保护 CDP 入口与极简环境启停 MCP，原生兼容 `@playwright/mcp`、`chrome-devtools-mcp` 与 Playwright，自动拦截外部对窗口尺寸、UA 与代理时区的误覆盖。
+- **双浏览器引擎支持**：支持按环境选择系统官方 Google Chrome，或按需下载的开源 `fingerprint-chromium` C++ 隐私指纹内核，默认纯原生零扩展、零 JS Hook 隐匿。
+- **独立代理隔离与多协议导入**：基于 `sing-box` 提供托管代理管理，支持 `http`/`https`/`socks5` 与 `vless://`、`vmess://`、`trojan://`、`ss://`、`hy2://`、`hysteria2://`、`tuic://` 分享链接及批量导入；提供分阶段出口测活、多环境复用查重提醒、REALITY/TLS 错误诊断，以及休眠恢复/长时间闲置/异常后启动前自动重建通道；代理异常时强制 Fail-Closed 阻断直连回退。
+- **环境一致性检查**：支持根据代理出口自动对齐时区、语言与地理位置，提供启动前「防呆一致性护栏」与一键健康自检面板。
+- **多环境生命周期与桌面体验**：采用 Windows 11 Fluent 2 亚克力毛玻璃界面，支持分组色标与重命名、运行状态筛选、多标签分类、环境克隆、30 天回收站保护、运行态内存统计、缓存清理、书签/扩展模板分发与按页记忆的日志抽屉。
+- **标准 CDP 守卫与 MCP 接入**：内置默认关闭的本地 `127.0.0.1` 受保护 CDP 入口（默认端口 `18922`，强制 `Host` 白名单与 `Origin` 拦截防 DNS Rebinding）与 4 项极简环境编排 MCP（Streamable HTTP `/mcp` 与 `stdio` 桥接），100% 兼容 `@playwright/mcp`、`chrome-devtools-mcp`、Playwright 与 Puppeteer，自动忽略外部对窗口尺寸、UA、语言与时区的误覆盖，拦截误创建无痕上下文并在代理断开时同步断开 CDP。
 - **全本地存储与双语界面**：代理凭据经系统安全存储加密保存，内置实时外联日志审计，支持简体中文与英文即时切换，适配 Windows、macOS 与 Linux。
 
 ## 安装与使用
@@ -49,11 +49,14 @@ npm install
 npm run dev
 ```
 
-## 本地 UI 验证
+## 本地测试与验证
 
-运行 `npm run build` 后，用 `npm run test:ui` 在临时用户目录中启动真实 Electron 窗口，检查主要页面、交互流程，以及浅深主题在标准、降低透明度和强制颜色模式下的界面材质。
+MultiChrome 提供四层验证体系（详见 [docs/verification.md](docs/verification.md)）：
 
-运行 `npm run test:ui -- --screenshots` 可额外保存浅色和深色主页到 `.tmp/ui-screenshots/home-light.png` 和 `home-dark.png`。两张图使用合成测试环境和固定底色，便于对照。
+- **L1 单元测试**：`npm test`（纯业务逻辑、代理协议解析、CDP 守卫/MCP 与真实 `sing-box` 隔离集成测试）。
+- **L2 核心底盘与本地对抗 E2E**：`npm run test:e2e`（离线双引擎 Fail-Closed 零直连、WebRTC 零泄露、反 Hook `lies=0` 与启动闸门验证）。
+- **L3 界面冒烟测试**：运行 `npm run build` 后执行 `npm run test:ui`，在隔离临时目录启动真实 Electron 窗口，验证核心页面、关键交互、标准 CDP 守卫面板，以及浅深主题在标准、降低透明度和强制颜色模式下的界面材质。附加 `-- --screenshots` 可保存浅色和深色主页到 `.tmp/ui-screenshots/home-light.png` 与 `home-dark.png` 便于对照。
+- **L4 外网真站双内核抽检（按需手动）**：`npm run audit:live -- --proxy="<内置代理名>"` 默认创建隔离临时环境，分别实测 **C++ 隐私指纹内核（`fingerprint-chromium`）** 与 **系统 Chrome 内核（`system-chrome`）** 在 CreepJS、BrowserScan、BrowserLeaks WebRTC 与 PixelScan 上的表现（也支持 `--env="<环境名>"` 或 `--engine=fingerprint-chromium|system-chrome`）。
 
 ## 文档
 
