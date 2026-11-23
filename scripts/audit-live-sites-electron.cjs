@@ -20,11 +20,49 @@ const WebSocket = require('ws');
 const projectRoot = path.resolve(__dirname, '..');
 const distElectron = path.join(projectRoot, 'dist', 'electron');
 
+const ENGINE_META = {
+    'fingerprint-chromium': {
+        id: 'fingerprint-chromium',
+        tag: 'cpp',
+        label: 'C++ 隐私指纹内核 (fingerprint-chromium)',
+    },
+    'system-chrome': {
+        id: 'system-chrome',
+        tag: 'chrome',
+        label: '系统 Chrome 内核 (system-chrome)',
+    },
+};
+
+function getEngineLabel(engineId) {
+    return ENGINE_META[engineId]?.label || String(engineId || 'unknown');
+}
+
+function parseEngines(raw) {
+    const tokens = raw
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    const resolved = [];
+    for (const token of tokens) {
+        if (token === 'both' || token === 'all') {
+            resolved.push('fingerprint-chromium', 'system-chrome');
+        } else if (token === 'fingerprint-chromium' || token === 'cpp') {
+            resolved.push('fingerprint-chromium');
+        } else if (token === 'system-chrome' || token === 'chrome') {
+            resolved.push('system-chrome');
+        } else {
+            return { engines: [], invalid: token };
+        }
+    }
+    return { engines: [...new Set(resolved)], invalid: '' };
+}
+
 function parseArgs(argv) {
     const opts = {
         envs: [],
         proxies: [],
-        engine: 'fingerprint-chromium',
+        engines: ['fingerprint-chromium', 'system-chrome'],
+        invalidEngine: '',
         sites: ['creepjs', 'browserscan', 'browserleaks', 'pixelscan'],
     };
     for (const arg of argv) {
@@ -42,8 +80,11 @@ function parseArgs(argv) {
                 .filter(Boolean);
         } else if (arg.startsWith('--engine=')) {
             const raw = arg.slice('--engine='.length).trim();
-            if (raw === 'fingerprint-chromium' || raw === 'system-chrome') {
-                opts.engine = raw;
+            const parsed = parseEngines(raw);
+            if (parsed.invalid || parsed.engines.length === 0) {
+                opts.invalidEngine = parsed.invalid || raw || '(empty)';
+            } else {
+                opts.engines = parsed.engines;
             }
         } else if (arg.startsWith('--sites=')) {
             const raw = arg.slice('--sites='.length).trim().toLowerCase();
@@ -97,7 +138,10 @@ async function waitForDevToolsWs(chromeManager, envId, timeoutMs = 15000) {
                     });
                 });
                 if (version?.webSocketDebuggerUrl) {
-                    return version.webSocketDebuggerUrl;
+                    return {
+                        wsUrl: version.webSocketDebuggerUrl,
+                        browserVersion: version.Browser || 'unknown',
+                    };
                 }
             } catch {
                 // retry
@@ -321,22 +365,75 @@ function disposeChromeManager(manager) {
     }
 }
 
-async function auditEnvironment(chromeManager, env, label) {
+function summarizeSiteResult(siteKey, res) {
+    if (!res) return 'no-result';
+    if (res.blocked) return `BLOCKED (${res.blocked})`;
+    if (res.error) return `ERROR (${res.error})`;
+    if (siteKey === 'creepjs') {
+        const lies = Array.isArray(res.lies) ? res.lies.length : '?';
+        const trash = Array.isArray(res.trash) ? res.trash.length : '?';
+        const headless = (res.headless || []).find((l) => /% headless/i.test(l)) || '';
+        const stealth = (res.headless || []).find((l) => /% stealth/i.test(l)) || '';
+        const tz = (res.timezone || [])[2] || (res.timezone || [])[1] || '';
+        const intl = (res.intl || [])[1] || '';
+        return `ready=${Boolean(res.ready)}, lies=${lies}, trash=${trash}, ${headless}, ${stealth}, tz=${tz}, intl=${intl}`;
+    }
+    if (siteKey === 'browserscan') {
+        const auth =
+            (res.highlights || []).find((l) => /authenticity/i.test(l)) || '';
+        const snippet = String(res.snippet || '');
+        const botMatch = snippet.match(/Bot Detection:\s*\|\s*([^|]+)/i);
+        const webrtcMatch = snippet.match(/WebRTC\s*\|\s*([^|]+)/i);
+        const tzMatch = snippet.match(/IP Time Zone:\s*\|\s*([^|]+)/i);
+        return [
+            auth || 'authenticity=unknown',
+            `bot=${botMatch ? botMatch[1].trim() : 'unknown'}`,
+            `webrtc=${webrtcMatch ? webrtcMatch[1].trim() : 'unknown'}`,
+            `tz=${tzMatch ? tzMatch[1].trim() : 'unknown'}`,
+        ].join(', ');
+    }
+    if (siteKey === 'browserleaks') {
+        const lines = Array.isArray(res.webrtcLines) ? res.webrtcLines : [];
+        const noLeak = lines.some((l) => /No Leak/i.test(l));
+        const localIp = lines.find((l) => /Local IP/i.test(l)) || '';
+        const publicIp = lines.find((l) => /Public IP/i.test(l)) || '';
+        return `noLeak=${noLeak}, ${localIp.replace(/\t/g, '=')}, ${publicIp.replace(/\t/g, '=')}`;
+    }
+    if (siteKey === 'pixelscan') {
+        return res.title ? `title=${res.title}` : 'loaded';
+    }
+    return 'ok';
+}
+
+async function auditEnvironment(chromeManager, env, label, reports) {
+    const engineLabel = getEngineLabel(env.browserEngine);
     console.log(
-        `\n==================== LIVE AUDIT: ${label} (${env.browserEngine}) ====================`,
+        `\n==================== LIVE AUDIT: ${label} ====================\n` +
+            `内核类型: ${engineLabel}`,
     );
+    const report = {
+        label,
+        engine: env.browserEngine,
+        engineLabel,
+        browserVersion: 'unknown',
+        sites: {},
+        error: null,
+    };
+    reports.push(report);
     let cdp;
     try {
         await chromeManager.launchEnvironment(env.id);
-        const wsUrl = await waitForDevToolsWs(chromeManager, env.id, 20000);
-        cdp = new CDPClient(wsUrl);
+        const devTools = await waitForDevToolsWs(chromeManager, env.id, 20000);
+        report.browserVersion = devTools.browserVersion;
+        console.log(`浏览器版本: ${devTools.browserVersion}`);
+        cdp = new CDPClient(devTools.wsUrl);
         await cdp.connect();
         await sleep(2000);
 
         for (const siteKey of OPTS.sites) {
             const spec = SITE_SPECS[siteKey];
             if (!spec) continue;
-            console.log(`\n--- [${spec.label}] ${spec.url} ---`);
+            console.log(`\n--- [${engineLabel}] [${spec.label}] ${spec.url} ---`);
             const res = await visitAndInspect(
                 cdp,
                 spec.url,
@@ -344,10 +441,12 @@ async function auditEnvironment(chromeManager, env, label) {
                 spec.extractJs,
                 spec.pollMs,
             );
+            report.sites[siteKey] = res;
             console.log(JSON.stringify(res, null, 2));
         }
     } catch (err) {
-        console.error(`[audit:live] ${label} 异常:`, err.message);
+        report.error = err.message;
+        console.error(`[audit:live] ${label} (${engineLabel}) 异常:`, err.message);
         process.exitCode = 1;
     } finally {
         cdp?.close();
@@ -361,12 +460,20 @@ app.whenReady().then(async () => {
     let realChromeManager;
     let tempChromeManager;
     let tempAuditRoot = '';
+    const reports = [];
     try {
+        if (OPTS.invalidEngine) {
+            console.error(
+                `[audit:live] 不支持的 --engine 参数: ${OPTS.invalidEngine}（可选: both, fingerprint-chromium, system-chrome）`,
+            );
+            process.exitCode = 1;
+            return;
+        }
         if (OPTS.envs.length === 0 && OPTS.proxies.length === 0) {
             console.log(
                 'Usage:\n' +
                     '  npm run audit:live -- --env="<环境名称1>,<环境名称2>" [--sites=creepjs,browserscan,browserleaks,pixelscan]\n' +
-                    '  npm run audit:live -- --proxy="<内置代理名称>" [--engine=fingerprint-chromium] [--sites=creepjs,browserscan,browserleaks,pixelscan]',
+                    '  npm run audit:live -- --proxy="<内置代理名称>" [--engine=both|fingerprint-chromium|system-chrome] [--sites=creepjs,browserscan,browserleaks,pixelscan]',
             );
             process.exitCode = 1;
             return;
@@ -429,7 +536,12 @@ app.whenReady().then(async () => {
                 process.exitCode = 1;
             } else {
                 for (const env of targets) {
-                    await auditEnvironment(realChromeManager, env, env.name);
+                    await auditEnvironment(
+                        realChromeManager,
+                        env,
+                        env.name,
+                        reports,
+                    );
                     auditedCount += 1;
                 }
             }
@@ -472,23 +584,90 @@ app.whenReady().then(async () => {
                 );
 
                 for (const proxy of matchedProxies) {
-                    const ephemeralEnv = await tempChromeManager.createEnvironment(
-                        `LiveAudit-${proxy.name}`,
-                        '用户分组',
-                        'ephemeral L4 audit profile',
-                        {
-                            browserEngine: OPTS.engine,
-                            proxyId: proxy.id,
-                        },
-                    );
-                    await auditEnvironment(
-                        tempChromeManager,
-                        ephemeralEnv,
-                        `${ephemeralEnv.name} [proxy:${proxy.name}]`,
-                    );
-                    auditedCount += 1;
+                    for (const engineId of OPTS.engines) {
+                        const meta = ENGINE_META[engineId];
+                        if (engineId === 'fingerprint-chromium') {
+                            const activeKernel = kernelManager.getActiveKernel();
+                            if (!activeKernel) {
+                                const msg =
+                                    '未安装或未激活 C++ 隐私指纹内核 (fingerprint-chromium)，无法执行该内核抽检';
+                                console.error(`[audit:live] ${msg}`);
+                                reports.push({
+                                    label: `LiveAudit-${proxy.name}-${meta.tag} [proxy:${proxy.name}]`,
+                                    engine: engineId,
+                                    engineLabel: meta.label,
+                                    browserVersion: 'missing',
+                                    sites: {},
+                                    error: msg,
+                                });
+                                process.exitCode = 1;
+                                continue;
+                            }
+                        } else if (engineId === 'system-chrome') {
+                            const chromePath =
+                                tempChromeManager.getSystemChromePath();
+                            if (!chromePath || !fs.existsSync(chromePath)) {
+                                const msg =
+                                    '未检测到系统 Chrome 可执行文件 (system-chrome)，无法执行该内核抽检';
+                                console.error(`[audit:live] ${msg}`);
+                                reports.push({
+                                    label: `LiveAudit-${proxy.name}-${meta.tag} [proxy:${proxy.name}]`,
+                                    engine: engineId,
+                                    engineLabel: meta.label,
+                                    browserVersion: 'missing',
+                                    sites: {},
+                                    error: msg,
+                                });
+                                process.exitCode = 1;
+                                continue;
+                            }
+                        }
+
+                        const ephemeralEnv =
+                            await tempChromeManager.createEnvironment(
+                                `LiveAudit-${proxy.name}-${meta.tag}`,
+                                '用户分组',
+                                `ephemeral L4 audit profile (${engineId})`,
+                                {
+                                    browserEngine: engineId,
+                                    proxyId: proxy.id,
+                                },
+                            );
+                        await auditEnvironment(
+                            tempChromeManager,
+                            ephemeralEnv,
+                            `${ephemeralEnv.name} [proxy:${proxy.name}]`,
+                            reports,
+                        );
+                        auditedCount += 1;
+                    }
                 }
             }
+        }
+
+        if (reports.length > 0) {
+            console.log(
+                '\n==================== LIVE AUDIT DUAL-ENGINE SUMMARY ====================',
+            );
+            for (const item of reports) {
+                console.log(
+                    `\n[${item.engineLabel}] ${item.label} | version=${item.browserVersion}`,
+                );
+                if (item.error) {
+                    console.log(`  ERROR: ${item.error}`);
+                    continue;
+                }
+                for (const siteKey of OPTS.sites) {
+                    const spec = SITE_SPECS[siteKey];
+                    if (!spec) continue;
+                    console.log(
+                        `  - ${spec.label}: ${summarizeSiteResult(siteKey, item.sites[siteKey])}`,
+                    );
+                }
+            }
+            console.log(
+                '========================================================================',
+            );
         }
 
         if (auditedCount === 0) {

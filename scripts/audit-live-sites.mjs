@@ -9,7 +9,9 @@
  *
  * Usage:
  *   npm run audit:live -- --env="Profile-1,Profile-2"
- *   npm run audit:live -- --proxy="MyProxy"
+ *   npm run audit:live -- --proxy="MyProxy"                          # 默认双内核分别测试（C++ 隐私内核 + 系统 Chrome 内核）
+ *   npm run audit:live -- --proxy="MyProxy" --engine=fingerprint-chromium
+ *   npm run audit:live -- --proxy="MyProxy" --engine=system-chrome
  *   npm run audit:live -- --proxy="MyProxy" --sites=creepjs,browserscan,browserleaks
  */
 
