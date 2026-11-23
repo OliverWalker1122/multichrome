@@ -134,7 +134,7 @@ const AppShell: React.FC = () => {
     const [coreInfo, setCoreInfo] = useState<ProxyCoreInfo | null>(null);
     const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null);
     const [trashCount, setTrashCount] = useState(0);
-    const [appVersion, setAppVersion] = useState('1.3.0');
+    const [appVersion, setAppVersion] = useState('1.4.0');
     const [proxyRefreshTick, setProxyRefreshTick] = useState(0);
     const proxiesSigRef = useRef('');
     const coreInfoSigRef = useRef('');

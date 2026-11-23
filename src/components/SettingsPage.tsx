@@ -3039,7 +3039,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                     {t('当前版本', 'Version')}
                                 </span>
                                 <span className={styles.infoVal}>
-                                    v{appVersion || '1.3.0'}
+                                    v{appVersion || '1.4.0'}
                                 </span>
 
                                 <span className={styles.infoKey}>
