@@ -8,6 +8,8 @@
  * Never attempts to solve or bypass CAPTCHAs — reports CAPTCHA/Challenge transparently.
  */
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const http = require('http');
 const { pathToFileURL } = require('url');
@@ -21,6 +23,8 @@ const distElectron = path.join(projectRoot, 'dist', 'electron');
 function parseArgs(argv) {
     const opts = {
         envs: [],
+        proxies: [],
+        engine: 'fingerprint-chromium',
         sites: ['creepjs', 'browserscan', 'browserleaks', 'pixelscan'],
     };
     for (const arg of argv) {
@@ -30,6 +34,17 @@ function parseArgs(argv) {
                 .split(',')
                 .map((s) => s.trim())
                 .filter(Boolean);
+        } else if (arg.startsWith('--proxy=')) {
+            const raw = arg.slice('--proxy='.length).trim();
+            opts.proxies = raw
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+        } else if (arg.startsWith('--engine=')) {
+            const raw = arg.slice('--engine='.length).trim();
+            if (raw === 'fingerprint-chromium' || raw === 'system-chrome') {
+                opts.engine = raw;
+            }
         } else if (arg.startsWith('--sites=')) {
             const raw = arg.slice('--sites='.length).trim().toLowerCase();
             opts.sites = raw
@@ -234,16 +249,19 @@ const SITE_SPECS = {
         label: 'BrowserScan',
         url: 'https://www.browserscan.net/',
         waitMs: 12000,
-        pollMs: 0,
+        pollMs: 18000,
         extractJs: `(() => {
             const text = (document.body?.innerText || '').trim();
             if (/verify you are human|just a moment|turnstile|captcha/i.test(text)) {
                 return { blocked: 'CAPTCHA/Challenge' };
             }
             const lines = text.split('\\n').map(s => s.trim()).filter(Boolean);
+            const highlights = lines.filter(l => /authenticity|Bot Detection|WebRTC|IP Time Zone|language:|\\d+%/i.test(l)).slice(0, 15);
+            const ready = text.length > 600 && /authenticity|Bot Detection/i.test(text) && !/checking\\.\\.\\.|loading\\.\\.\\./i.test(text.slice(0, 400));
             return {
+                ready,
                 title: document.title,
-                highlights: lines.filter(l => /authenticity|Bot Detection|WebRTC|IP Time Zone|language:/i.test(l)).slice(0, 12),
+                highlights,
                 snippet: lines.slice(0, 45).join(' | '),
             };
         })()`,
@@ -252,16 +270,18 @@ const SITE_SPECS = {
         label: 'BrowserLeaks WebRTC',
         url: 'https://browserleaks.com/webrtc',
         waitMs: 10000,
-        pollMs: 0,
+        pollMs: 12000,
         extractJs: `(() => {
             const text = (document.body?.innerText || '').trim();
             if (/verify you are human|just a moment|captcha/i.test(text)) {
                 return { blocked: 'CAPTCHA/Challenge' };
             }
             const lines = text.split('\\n').map(s => s.trim()).filter(Boolean);
+            const webrtcLines = lines.filter(l => /No Leak|Local IP|Public IP|IPv4|IPv6|RTCPeerConnection/i.test(l)).slice(0, 12);
             return {
+                ready: webrtcLines.length >= 2,
                 title: document.title,
-                webrtcLines: lines.filter(l => /No Leak|Local IP|Public IP|IPv4|IPv6|RTCPeerConnection/i.test(l)).slice(0, 10),
+                webrtcLines,
             };
         })()`,
     },
@@ -284,13 +304,69 @@ const SITE_SPECS = {
     },
 };
 
+function disposeChromeManager(manager) {
+    if (!manager) return;
+    try {
+        if (manager.statusCheckInterval) {
+            clearInterval(manager.statusCheckInterval);
+            manager.statusCheckInterval = null;
+        }
+    } catch {
+        // ignore
+    }
+    try {
+        manager.db?.close?.();
+    } catch {
+        // ignore
+    }
+}
+
+async function auditEnvironment(chromeManager, env, label) {
+    console.log(
+        `\n==================== LIVE AUDIT: ${label} (${env.browserEngine}) ====================`,
+    );
+    let cdp;
+    try {
+        await chromeManager.launchEnvironment(env.id);
+        const wsUrl = await waitForDevToolsWs(chromeManager, env.id, 20000);
+        cdp = new CDPClient(wsUrl);
+        await cdp.connect();
+        await sleep(2000);
+
+        for (const siteKey of OPTS.sites) {
+            const spec = SITE_SPECS[siteKey];
+            if (!spec) continue;
+            console.log(`\n--- [${spec.label}] ${spec.url} ---`);
+            const res = await visitAndInspect(
+                cdp,
+                spec.url,
+                spec.waitMs,
+                spec.extractJs,
+                spec.pollMs,
+            );
+            console.log(JSON.stringify(res, null, 2));
+        }
+    } catch (err) {
+        console.error(`[audit:live] ${label} 异常:`, err.message);
+        process.exitCode = 1;
+    } finally {
+        cdp?.close();
+        await chromeManager.closeEnvironment(env.id).catch(() => {});
+        await sleep(1500);
+    }
+}
+
 app.whenReady().then(async () => {
     let proxyManager;
-    let chromeManager;
+    let realChromeManager;
+    let tempChromeManager;
+    let tempAuditRoot = '';
     try {
-        if (OPTS.envs.length === 0) {
+        if (OPTS.envs.length === 0 && OPTS.proxies.length === 0) {
             console.log(
-                'Usage: npm run audit:live -- --env="<环境名称1>,<环境名称2>" [--sites=creepjs,browserscan,browserleaks,pixelscan]',
+                'Usage:\n' +
+                    '  npm run audit:live -- --env="<环境名称1>,<环境名称2>" [--sites=creepjs,browserscan,browserleaks,pixelscan]\n' +
+                    '  npm run audit:live -- --proxy="<内置代理名称>" [--engine=fingerprint-chromium] [--sites=creepjs,browserscan,browserleaks,pixelscan]',
             );
             process.exitCode = 1;
             return;
@@ -310,12 +386,13 @@ app.whenReady().then(async () => {
         );
 
         const settingsManager = new SettingsManager();
+        const realDataPath =
+            settingsManager.getSettings().dataPath || app.getPath('userData');
         const kernelManager = new KernelManager({
-            getDataPath: () =>
-                settingsManager.getSettings().dataPath || app.getPath('userData'),
+            getDataPath: () => realDataPath,
         });
         proxyManager = new ProxyManager({
-            store: new Store({ name: 'managed-proxies' }),
+            store: new Store({ name: 'managed-proxies', cwd: realUserData }),
             secretStorage: safeStorage,
             resolveBinary: () => {
                 const active = kernelManager.getActiveSingbox();
@@ -331,61 +408,104 @@ app.whenReady().then(async () => {
             ),
             configDirectory: realUserData,
         });
-        chromeManager = new ChromeManager(
-            proxyManager,
-            settingsManager,
-            kernelManager,
-        );
 
-        const allEnvs = await chromeManager.getAllEnvironments();
-        const targets = OPTS.envs
-            .map((name) => allEnvs.find((e) => e.name === name))
-            .filter(Boolean);
+        let auditedCount = 0;
 
-        if (targets.length === 0) {
-            console.error(
-                `[audit:live] 未找到指定环境: ${OPTS.envs.join(', ')}`,
+        if (OPTS.envs.length > 0) {
+            realChromeManager = new ChromeManager(
+                proxyManager,
+                settingsManager,
+                kernelManager,
             );
-            process.exitCode = 1;
-            return;
-        }
+            const allEnvs = await realChromeManager.getAllEnvironments();
+            const targets = OPTS.envs
+                .map((name) => allEnvs.find((e) => e.name === name))
+                .filter(Boolean);
 
-        for (const env of targets) {
-            console.log(
-                `\n==================== LIVE AUDIT: ${env.name} (${env.browserEngine}) ====================`,
-            );
-            let cdp;
-            try {
-                await chromeManager.launchEnvironment(env.id);
-                const wsUrl = await waitForDevToolsWs(chromeManager, env.id, 15000);
-                cdp = new CDPClient(wsUrl);
-                await cdp.connect();
-                await sleep(2000);
-
-                for (const siteKey of OPTS.sites) {
-                    const spec = SITE_SPECS[siteKey];
-                    if (!spec) continue;
-                    console.log(`\n--- [${spec.label}] ${spec.url} ---`);
-                    const res = await visitAndInspect(
-                        cdp,
-                        spec.url,
-                        spec.waitMs,
-                        spec.extractJs,
-                        spec.pollMs,
-                    );
-                    console.log(JSON.stringify(res, null, 2));
+            if (targets.length === 0) {
+                console.error(
+                    `[audit:live] 未找到指定环境: ${OPTS.envs.join(', ')}`,
+                );
+                process.exitCode = 1;
+            } else {
+                for (const env of targets) {
+                    await auditEnvironment(realChromeManager, env, env.name);
+                    auditedCount += 1;
                 }
-            } catch (err) {
-                console.error(`[audit:live] ${env.name} 异常:`, err.message);
-            } finally {
-                cdp?.close();
-                await chromeManager.closeEnvironment(env.id).catch(() => {});
-                await sleep(1500);
             }
         }
+
+        if (OPTS.proxies.length > 0) {
+            const allProxies = proxyManager.list();
+            const matchedProxies = OPTS.proxies
+                .map((name) => {
+                    const lower = name.toLowerCase();
+                    return (
+                        allProxies.find((p) => p.name === name) ||
+                        allProxies.find(
+                            (p) => String(p.name || '').trim().toLowerCase() === lower,
+                        )
+                    );
+                })
+                .filter(Boolean);
+
+            if (matchedProxies.length === 0) {
+                console.error(
+                    `[audit:live] 未找到指定内置代理: ${OPTS.proxies.join(', ')}`,
+                );
+                process.exitCode = 1;
+            } else {
+                tempAuditRoot = fs.mkdtempSync(
+                    path.join(os.tmpdir(), 'multichrome-live-audit-'),
+                );
+                const tempSettingsManager = Object.create(settingsManager);
+                tempSettingsManager.getSettings = () => ({
+                    ...settingsManager.getSettings(),
+                    dataPath: tempAuditRoot,
+                    requireHealthCheckOnLaunch: false,
+                });
+
+                tempChromeManager = new ChromeManager(
+                    proxyManager,
+                    tempSettingsManager,
+                    kernelManager,
+                );
+
+                for (const proxy of matchedProxies) {
+                    const ephemeralEnv = await tempChromeManager.createEnvironment(
+                        `LiveAudit-${proxy.name}`,
+                        '用户分组',
+                        'ephemeral L4 audit profile',
+                        {
+                            browserEngine: OPTS.engine,
+                            proxyId: proxy.id,
+                        },
+                    );
+                    await auditEnvironment(
+                        tempChromeManager,
+                        ephemeralEnv,
+                        `${ephemeralEnv.name} [proxy:${proxy.name}]`,
+                    );
+                    auditedCount += 1;
+                }
+            }
+        }
+
+        if (auditedCount === 0) {
+            process.exitCode = 1;
+        }
     } finally {
+        disposeChromeManager(tempChromeManager);
+        disposeChromeManager(realChromeManager);
         if (proxyManager) {
             await proxyManager.closeAll().catch(() => {});
+        }
+        if (tempAuditRoot) {
+            try {
+                fs.rmSync(tempAuditRoot, { recursive: true, force: true });
+            } catch {
+                // ignore best-effort cleanup
+            }
         }
         app.quit();
     }

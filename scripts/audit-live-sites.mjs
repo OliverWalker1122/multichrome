@@ -9,7 +9,8 @@
  *
  * Usage:
  *   npm run audit:live -- --env="Profile-1,Profile-2"
- *   npm run audit:live -- --env="Profile-1" --sites=creepjs,browserscan,browserleaks
+ *   npm run audit:live -- --proxy="MyProxy"
+ *   npm run audit:live -- --proxy="MyProxy" --sites=creepjs,browserscan,browserleaks
  */
 
 import path from 'node:path';

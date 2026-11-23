@@ -55,10 +55,10 @@ MultiChrome 确立了统一、克制、原生级的 **Windows 11 Fluent 2 + 轻�
 | **L1 单元测试（主力）** | `npm test` | `tests/*.test.js` | 验证纯业务逻辑、边界条件、数据解析与安全规则（秒级完成）。**90% 的新功能逻辑应下沉为纯 JS 模块（`electron/*.js`）并在此覆盖** | 每次修改必跑 |
 | **L2 核心底盘 + 本地对抗 E2E** | `npm run test:e2e` | [scripts/e2e-verify.mjs](scripts/e2e-verify.mjs) + [scripts/e2e-electron.cjs](scripts/e2e-electron.cjs) | 离线验证**安全红线 + 类 CreepJS/BotD 本地对抗算法**：双代理零直连、Fail-Closed 断网阻断、WebRTC 零泄露、跨 `iframe` 原型链反 Hook（`lies=0`）、Canvas/Audio/DOMRect 同会话确定性、跨维度自洽、C++ 指纹隔离与持久化、默认 Google 搜索 | 修改代理、内核、CDP、指纹参数、启动逻辑或发版前必跑 |
 | **L3 界面冒烟测试（UI Test）** | `npm run test:ui` | [scripts/e2e-ui-suite.mjs](scripts/e2e-ui-suite.mjs) | 隔离临时 `userData`（`MULTICHROME_USER_DATA`）拉起真实 Electron 窗口，验证核心页面渲染、关键交互弹窗、前后端状态同步与 0 未捕获 React/控制台异常 | 大改前端页面/交互、新增核心面板或发版前运行 |
-| **L4 外网真站指纹抽检** | `npm run audit:live -- --env="<环境名>"` | [scripts/audit-live-sites.mjs](scripts/audit-live-sites.mjs) + [scripts/audit-live-sites-electron.cjs](scripts/audit-live-sites-electron.cjs) | 用真实本地环境走代理访问 **CreepJS、BrowserScan、BrowserLeaks WebRTC、PixelScan** 四大权威外部检测站，核验真站打分与实际风控表现（**不进离线 CI**） | 升级 Chromium 指纹内核 / sing-box 版本、改动 WebRTC/语言/时区/指纹策略、或发大版本前手动按需抽检 |
+| **L4 外网真站指纹抽检** | `npm run audit:live -- --env="<环境名>"` 或 `--proxy="<代理名>"` | [scripts/audit-live-sites.mjs](scripts/audit-live-sites.mjs) + [scripts/audit-live-sites-electron.cjs](scripts/audit-live-sites-electron.cjs) | 用指定本地环境或基于指定内置代理创建隔离临时环境，走代理访问 **CreepJS、BrowserScan、BrowserLeaks WebRTC、PixelScan** 四大权威外部检测站，核验真站打分与实际风控表现（**不进离线 CI**） | 升级 Chromium 指纹内核 / sing-box 版本、改动 WebRTC/语言/时区/指纹策略、或发大版本前手动按需抽检 |
 
 ### 测试边界与安全红线
-- L4 脚本禁止硬编码个人环境名或代理凭据（一律通过 `--env` 传参）；遇到 Cloudflare/Turnstile 等人机验证（如 PixelScan）必须如实报告 `CAPTCHA/Challenge` 并停止，**严禁自动绕过验证码**。
+- L4 脚本禁止硬编码个人环境名、内置代理名或代理凭据（一律通过 `--env` / `--proxy` 传参）；遇到 Cloudflare/Turnstile 等人机验证（如 PixelScan）必须如实报告 `CAPTCHA/Challenge` 并停止，**严禁自动绕过验证码**。
 
 ---
 
