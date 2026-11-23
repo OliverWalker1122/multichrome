@@ -23,6 +23,7 @@ import {
 
 const MAX_LOGS = 1000;
 const EXIT_PROBE_COOLDOWN_MS = 15000;
+const DEFAULT_IDLE_RECYCLE_MS = 2 * 60 * 1000;
 const BATCH_CHECK_CONCURRENCY = 4;
 const GENERIC_START_ERROR = 'sing-box 启动失败，请检查核心、配置和本地端口';
 
@@ -142,6 +143,7 @@ export class ProxyManager {
      *   exitProbe?: any,
      *   now?: () => number,
      *   getLocale?: (() => string) | null,
+     *   idleRecycleMs?: number,
      * }} options
      */
     constructor({
@@ -155,12 +157,19 @@ export class ProxyManager {
         exitProbe = probeProxyExit,
         now = Date.now,
         getLocale = null,
+        idleRecycleMs = DEFAULT_IDLE_RECYCLE_MS,
     }) {
         this.store = store;
         this.secretStorage = secretStorage;
         this.exitProbe = exitProbe;
         this.now = now;
         this.getLocale = typeof getLocale === 'function' ? getLocale : null;
+        this.idleRecycleMs =
+            typeof idleRecycleMs === 'number' &&
+            Number.isFinite(idleRecycleMs) &&
+            idleRecycleMs >= 0
+                ? idleRecycleMs
+                : DEFAULT_IDLE_RECYCLE_MS;
         this.core =
             core ||
             new SingboxCore({
@@ -181,6 +190,8 @@ export class ProxyManager {
         this.sourcePath =
             store.path || path.join(configDirectory, 'managed-proxies.json');
         this.runtimes = new Map();
+        this.recyclingPromises = new Map();
+        this.stopGenerations = new Map();
         // In-memory cache of redacted summary metadata only (never persisted,
         // never stores passwords, UUIDs, or full sing-box JSON configs).
         this.summaryCache = new Map();
@@ -348,7 +359,12 @@ export class ProxyManager {
 
     assertStopped(id) {
         const runtime = this.runtimes.get(id);
-        if (runtime?.handle || runtime?.starting || runtime?.stopping) {
+        if (
+            runtime?.handle ||
+            runtime?.starting ||
+            runtime?.stopping ||
+            this.recyclingPromises.has(id)
+        ) {
             throw new Error('请先停止此代理，再修改或删除');
         }
     }
@@ -619,6 +635,7 @@ export class ProxyManager {
         this.persist(this.records.filter((item) => item.id !== id));
         this.summaryCache.delete(id);
         this.runtimes.delete(id);
+        this.stopGenerations.delete(id);
         this.clearLogs(id);
         this.notifyChange('state', id);
     }
@@ -699,6 +716,13 @@ export class ProxyManager {
                         status: 'ready',
                         checkedAt: new Date(finishedAt).toISOString(),
                     };
+                    runtime.lastActiveAt = finishedAt;
+                    if (runtime.staleReason === 'upstream-error') {
+                        runtime.staleReason = null;
+                    }
+                    if (runtime.lastError) {
+                        runtime.lastError = undefined;
+                    }
                     this.addLog(
                         id,
                         'info',
@@ -715,6 +739,9 @@ export class ProxyManager {
                         error: '出口检测失败，请稍后重试',
                         checkedAt: new Date(this.now()).toISOString(),
                     };
+                    if (!runtime.staleReason) {
+                        runtime.staleReason = 'upstream-error';
+                    }
                     this.addLog(
                         id,
                         'error',
@@ -734,16 +761,166 @@ export class ProxyManager {
         return pending;
     }
 
+    touchActivity(id) {
+        const runtime = this.runtimes.get(id);
+        if (runtime?.handle && !runtime.stopping) {
+            runtime.lastActiveAt = this.now();
+        }
+    }
+
+    markAllStale(reason = 'system-resume') {
+        for (const runtime of this.runtimes.values()) {
+            if (runtime?.handle && !runtime.stopping) {
+                runtime.staleReason = reason;
+            }
+        }
+    }
+
+    getStaleReason(id) {
+        const runtime = this.runtimes.get(id);
+        if (!runtime?.handle || runtime.stopping) return null;
+        if (runtime.staleReason) return runtime.staleReason;
+        const baseline = runtime.lastActiveAt || runtime.startedAt || 0;
+        if (
+            this.idleRecycleMs > 0 &&
+            baseline > 0 &&
+            this.now() - baseline >= this.idleRecycleMs
+        ) {
+            return 'idle-timeout';
+        }
+        return null;
+    }
+
+    /**
+     * Ensure the proxy is started and — if no browser is currently bound to its
+     * local listener — transparently recycle an idle/sleep-stale/errored
+     * sing-box process onto a fresh local TCP + UDP port before browser launch.
+     *
+     * @param {string} id
+     * @param {{ isInUse?: (proxyId: string) => boolean | Promise<boolean> }} [options]
+     */
+    async ensureFresh(id, { isInUse } = {}) {
+        if (this.closed) throw new Error('代理服务正在退出');
+        this.find(id);
+        const stopGen = this.stopGenerations.get(id) || 0;
+
+        const inflightRecycle = this.recyclingPromises.get(id);
+        if (inflightRecycle) return inflightRecycle;
+
+        const runtime = this.runtimes.get(id);
+        if (runtime?.stopping) {
+            await runtime.stopping;
+            if (
+                this.closed ||
+                (this.stopGenerations.get(id) || 0) !== stopGen
+            ) {
+                throw new Error('代理服务启动已取消');
+            }
+            return this.ensureFresh(id, { isInUse });
+        }
+        if (runtime?.starting) return runtime.starting;
+        if (!runtime?.handle) return this.ensureStartedInternal(id);
+
+        const staleReason = this.getStaleReason(id);
+        if (!staleReason) {
+            this.touchActivity(id);
+            return runtime.localAddress;
+        }
+
+        let inUse = false;
+        if (typeof isInUse === 'function') {
+            try {
+                inUse = Boolean(await isInUse(id));
+            } catch {
+                // Fail-safe: never tear down a listener if active browser usage cannot be verified.
+                inUse = true;
+            }
+        }
+
+        if (this.closed) throw new Error('代理服务正在退出');
+        if ((this.stopGenerations.get(id) || 0) !== stopGen) {
+            throw new Error('代理服务启动已取消');
+        }
+        const concurrentRecycle = this.recyclingPromises.get(id);
+        if (concurrentRecycle) return concurrentRecycle;
+
+        const current = this.runtimes.get(id);
+        if (current?.stopping) {
+            await current.stopping;
+            if (
+                this.closed ||
+                (this.stopGenerations.get(id) || 0) !== stopGen
+            ) {
+                throw new Error('代理服务启动已取消');
+            }
+            return this.ensureFresh(id, { isInUse });
+        }
+        if (current?.starting) return current.starting;
+        if (!current?.handle) return this.ensureStartedInternal(id);
+
+        if (inUse) {
+            this.touchActivity(id);
+            return current.localAddress;
+        }
+
+        const currentReason = this.getStaleReason(id);
+        if (!currentReason) {
+            this.touchActivity(id);
+            return current.localAddress;
+        }
+
+        let startRecycle;
+        const recycleTask = new Promise((resolve, reject) => {
+            startRecycle = () =>
+                (async () => {
+                    const logMessage =
+                        currentReason === 'system-resume'
+                            ? '检测到系统从休眠恢复，正在重建 sing-box 通道'
+                            : currentReason === 'upstream-error'
+                              ? '检测到代理先前出现连接异常，正在重建 sing-box 通道'
+                              : '检测到代理长时间闲置，正在重建 sing-box 通道以避免首开卡顿';
+                    this.addLog(id, 'info', logMessage);
+                    await this.stopInternal(id);
+                    if (this.closed) throw new Error('代理服务正在退出');
+                    if ((this.stopGenerations.get(id) || 0) !== stopGen) {
+                        throw new Error('代理服务启动已取消');
+                    }
+                    return await this.ensureStartedInternal(id);
+                })().then(resolve, reject);
+        });
+
+        this.recyclingPromises.set(id, recycleTask);
+        startRecycle();
+        try {
+            return await recycleTask;
+        } finally {
+            if (this.recyclingPromises.get(id) === recycleTask) {
+                this.recyclingPromises.delete(id);
+            }
+        }
+    }
+
     async ensureStarted(id) {
+        if (this.closed) throw new Error('代理服务正在退出');
+        this.find(id);
+        const inflightRecycle = this.recyclingPromises.get(id);
+        if (inflightRecycle) return inflightRecycle;
+        return this.ensureStartedInternal(id);
+    }
+
+    async ensureStartedInternal(id) {
         if (this.closed) throw new Error('代理服务正在退出');
         const record = this.find(id);
         let runtime = this.runtimes.get(id);
         if (runtime?.stopping) {
             await runtime.stopping;
-            return this.ensureStarted(id);
+            return this.ensureStartedInternal(id);
         }
         if (runtime?.starting) return runtime.starting;
-        if (runtime?.handle) return runtime.localAddress;
+        if (runtime?.handle) {
+            runtime.lastActiveAt = this.now();
+            return runtime.localAddress;
+        }
         runtime = {
             handle: null,
             starting: null,
@@ -752,6 +929,9 @@ export class ProxyManager {
             port: 0,
             localAddress: undefined,
             config: null,
+            startedAt: 0,
+            lastActiveAt: 0,
+            staleReason: null,
             exitInfo: { status: 'idle' },
             exitProbePromise: null,
             exitAbort: null,
@@ -780,6 +960,9 @@ export class ProxyManager {
                     this.addLog(record.id, level, message);
                     if (level === 'error') {
                         runtime.lastError = message;
+                        if (!runtime.staleReason) {
+                            runtime.staleReason = 'upstream-error';
+                        }
                         this.notifyChange('state', record.id);
                     }
                 },
@@ -789,6 +972,9 @@ export class ProxyManager {
                     runtime.handle = null;
                     runtime.localAddress = undefined;
                     runtime.config = null;
+                    runtime.startedAt = 0;
+                    runtime.lastActiveAt = 0;
+                    runtime.staleReason = null;
                     if (unexpected) {
                         runtime.lastError =
                             'sing-box 意外退出，浏览器代理连接已中断；请关闭环境后重新启动';
@@ -801,8 +987,13 @@ export class ProxyManager {
                 await handle.stop();
                 throw new Error('代理服务启动已取消');
             }
+            const startedAt = this.now();
             runtime.handle = handle;
             runtime.localAddress = `http://127.0.0.1:${runtime.port}`;
+            runtime.startedAt = startedAt;
+            runtime.lastActiveAt = startedAt;
+            runtime.staleReason = null;
+            runtime.lastError = undefined;
             this.addLog(
                 record.id,
                 'info',
@@ -823,6 +1014,16 @@ export class ProxyManager {
 
     async stop(id) {
         this.find(id);
+        this.stopGenerations.set(id, (this.stopGenerations.get(id) || 0) + 1);
+        const inflightRecycle = this.recyclingPromises.get(id);
+        if (inflightRecycle) {
+            await inflightRecycle.catch(() => {});
+        }
+        return this.stopInternal(id);
+    }
+
+    async stopInternal(id) {
+        this.find(id);
         const runtime = this.runtimes.get(id);
         if (!runtime) return;
         if (runtime.stopping) return runtime.stopping;
@@ -835,6 +1036,9 @@ export class ProxyManager {
                 runtime.handle = null;
                 runtime.localAddress = undefined;
                 runtime.config = null;
+                runtime.startedAt = 0;
+                runtime.lastActiveAt = 0;
+                runtime.staleReason = null;
                 this.addLog(id, 'info', 'sing-box 已停止');
             }
             runtime.lastError = undefined;

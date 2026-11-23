@@ -7,6 +7,7 @@ import {
     screen,
     safeStorage,
     nativeTheme,
+    powerMonitor,
     Tray,
     Menu,
     nativeImage,
@@ -565,6 +566,12 @@ app.whenReady().then(() => {
             });
     }
 
+    // 系统从休眠/睡眠恢复后，旧 UDP NAT 映射与长连接可能已失效，标记空闲内置代理在下次启动前重建通道
+    powerMonitor.on('resume', () => {
+        log.info('检测到系统从休眠恢复，将在下次启动时自动重建空闲 sing-box 通道');
+        proxyManager.markAllStale('system-resume');
+    });
+
     // macOS下点击dock图标时重新创建窗口
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -816,7 +823,9 @@ function setupIpcHandlers() {
     ipcMain.handle('inspect-environment-health', async (_, id: unknown) => {
         try {
             const validId = validateId(id);
-            return await chromeManager.inspectEnvironmentHealth(validId);
+            return await proxyIntegration.runLaunch(() =>
+                chromeManager.inspectEnvironmentHealth(validId),
+            );
         } catch (error) {
             log.error('环境健康自检失败:', error);
             throw error;

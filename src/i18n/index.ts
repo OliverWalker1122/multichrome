@@ -69,6 +69,12 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
     '代理服务启动已取消': 'Proxy service startup canceled',
     'sing-box 已启动': 'sing-box started',
     'sing-box 已停止': 'sing-box stopped',
+    '检测到系统从休眠恢复，正在重建 sing-box 通道':
+        'System resumed from sleep; rebuilding sing-box tunnel',
+    '检测到代理先前出现连接异常，正在重建 sing-box 通道':
+        'Previous proxy connection error detected; rebuilding sing-box tunnel',
+    '检测到代理长时间闲置，正在重建 sing-box 通道以避免首开卡顿':
+        'Idle proxy detected; rebuilding sing-box tunnel for reliable startup',
 
     // SingboxCore
     'sing-box 配置无法序列化': 'sing-box configuration cannot be serialized',
