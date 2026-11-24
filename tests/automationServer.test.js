@@ -781,3 +781,192 @@ test('By-name HTTP start/stop (/api/v1/profiles/start), self-discoverable 503 hi
     assert.equal(stopByName.status, 200);
     assert.equal(stopByName.json.data.stopped, true);
 });
+
+test('Encrypted access token protection: safeStorage encryption, Fail-Closed plaintext refusal, 401 block, Bearer & /t/<token> pass-through, zero echo, and live rotation disconnect', async (t) => {
+    // 1. Fail-Closed when OS encryption is unavailable
+    const unavailableSecretStorage = {
+        isEncryptionAvailable: () => false,
+        encryptString: (s) => Buffer.from(s, 'utf8'),
+        decryptString: (b) => b.toString('utf8'),
+    };
+    const brokenStore = createMemoryStore();
+    const brokenMgr = new AutomationConfigManager({
+        store: brokenStore,
+        secretStorage: unavailableSecretStorage,
+    });
+    assert.throws(
+        () => brokenMgr.updateConfig({ enabled: true }),
+        /加密|secure storage/i,
+    );
+
+    // 2. Encrypted persistence (zero plaintext mc_live_ in JSON store)
+    const xorKey = 0x5a;
+    const mockSecretStorage = {
+        isEncryptionAvailable: () => true,
+        encryptString: (plain) =>
+            Buffer.from([...Buffer.from(plain, 'utf8')].map((b) => b ^ xorKey)),
+        decryptString: (buf) =>
+            Buffer.from([...buf].map((b) => b ^ xorKey)).toString('utf8'),
+    };
+    const rawMap = new Map();
+    const encryptedStore = {
+        get: (k, fb) => (rawMap.has(k) ? rawMap.get(k) : fb),
+        set: (k, v) => rawMap.set(k, structuredClone(v)),
+    };
+
+    const configManager = new AutomationConfigManager({
+        store: encryptedStore,
+        secretStorage: mockSecretStorage,
+    });
+    const initialToken = configManager.getToken();
+    assert.match(initialToken, /^mc_live_[A-Za-z0-9_-]{24,}$/);
+    const persistedRaw = JSON.stringify(rawMap.get('automation'));
+    assert.equal(
+        persistedRaw.includes(initialToken),
+        false,
+        'Plaintext token must never be written to store',
+    );
+    assert.equal(
+        persistedRaw.includes('mc_live_'),
+        false,
+        'Token prefix must not appear in encrypted ciphertext',
+    );
+
+    const chrome = await createFakeUpstreamChrome();
+    let integration = null;
+    t.after(async () => {
+        await integration?.shutdown();
+        await chrome.close();
+    });
+
+    const freePort = await new Promise((resolve, reject) => {
+        const probe = net.createServer();
+        probe.once('error', reject);
+        probe.listen({ host: '127.0.0.1', port: 0 }, () => {
+            const addr = probe.address();
+            const chosen = typeof addr === 'object' && addr ? addr.port : 18999;
+            probe.close(() => resolve(chosen));
+        });
+    });
+
+    const profile = {
+        id: PROFILE_1,
+        name: 'GuardedAuthProfile',
+        groupName: 'work',
+        tags: [],
+        browserEngine: 'fingerprint-chromium',
+        isRunning: true,
+    };
+    const runningProcesses = new Map([[PROFILE_1, { debugPort: chrome.port }]]);
+    const backend = createAutomationBackend({
+        chromeManager: {
+            runningProcesses,
+            getAllEnvironments: async () => [structuredClone(profile)],
+            getRunningEnvironmentSummary: () => ({
+                count: 1,
+                ids: [PROFILE_1],
+                names: [profile.name],
+            }),
+            launchEnvironment: async () => true,
+            closeEnvironment: async () => true,
+            getAutomationConnectionInfo: async () => ({
+                debugPort: chrome.port,
+                wsEndpoint: chrome.wsEndpoint,
+            }),
+        },
+    });
+    const server = new AutomationServer({
+        backend,
+        getRequiredToken: () => configManager.getToken(),
+    });
+    integration = new AutomationIntegration({ configManager, server });
+    const status = await integration.updateConfig({
+        enabled: true,
+        port: freePort,
+    });
+    const port = server.getBoundPort();
+    assert.equal(status.authRequired, true);
+    // Broadcast status must NEVER contain the raw token
+    assert.equal(JSON.stringify(status).includes(initialToken), false);
+
+    // 3. Unauthenticated & wrong-token requests to REST, MCP, CDP HTTP, and CDP WebSocket MUST return 401
+    const noAuthRest = await httpRequest({ port, path: '/api/v1/status' });
+    assert.equal(noAuthRest.status, 401);
+    const noAuthMcp = await httpRequest({
+        port,
+        method: 'POST',
+        path: '/mcp',
+        headers: { 'Content-Type': 'application/json' },
+        body: { jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} },
+    });
+    assert.equal(noAuthMcp.status, 401);
+    const noAuthCdp = await httpRequest({ port, path: '/json/version' });
+    assert.equal(noAuthCdp.status, 401);
+    const wrongPathToken = await httpRequest({
+        port,
+        path: '/t/mc_live_wrong_token_value_1234567890/json/version',
+    });
+    assert.equal(wrongPathToken.status, 401);
+
+    await assert.rejects(
+        () =>
+            new Promise((resolve, reject) => {
+                const unauthWs = new WebSocket(
+                    `ws://127.0.0.1:${port}/devtools/browser/${PROFILE_1}`,
+                );
+                unauthWs.once('open', resolve);
+                unauthWs.once('error', reject);
+            }),
+    );
+
+    // 4. Valid token works via BOTH `/t/<token>/...` path capability AND `Authorization: Bearer <token>`
+    const pathMcpRes = await httpRequest({
+        port,
+        method: 'POST',
+        path: `/t/${initialToken}/mcp`,
+        headers: { 'Content-Type': 'application/json' },
+        body: { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+    });
+    assert.equal(pathMcpRes.status, 200);
+    assert.equal(pathMcpRes.json.result.tools.length, 4);
+    assert.equal(pathMcpRes.text.includes(initialToken), false);
+
+    const bearerVerRes = await httpRequest({
+        port,
+        path: '/json/version',
+        headers: { Authorization: `Bearer ${initialToken}` },
+    });
+    assert.equal(bearerVerRes.status, 200);
+    assert.equal(bearerVerRes.text.includes(initialToken), false);
+
+    // Connect WebSocket via `/t/<token>/devtools/browser` (exact format used by @playwright/mcp & chrome-devtools-mcp!)
+    const authedWs = new WebSocket(
+        `ws://127.0.0.1:${port}/t/${initialToken}/devtools/browser`,
+    );
+    await new Promise((resolve, reject) => {
+        authedWs.once('open', resolve);
+        authedWs.once('error', reject);
+    });
+
+    // 5. Rotating token disconnects active WebSocket immediately, invalidates old token (401), and activates new token
+    const closedOnRotate = new Promise((resolve) =>
+        authedWs.once('close', (code) => resolve(code)),
+    );
+    const rotatedToken = integration.rotateToken();
+    assert.notEqual(rotatedToken, initialToken);
+    const rotatedCloseCode = await closedOnRotate;
+    assert.equal(rotatedCloseCode, 1001);
+
+    const oldTokenAfterRotate = await httpRequest({
+        port,
+        path: `/t/${initialToken}/api/v1/status`,
+    });
+    assert.equal(oldTokenAfterRotate.status, 401);
+
+    const newTokenAfterRotate = await httpRequest({
+        port,
+        path: '/api/v1/status',
+        headers: { Authorization: `Bearer ${rotatedToken}` },
+    });
+    assert.equal(newTokenAfterRotate.status, 200);
+});

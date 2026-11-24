@@ -205,11 +205,13 @@ export type WindowArrangeMode =
     | 'stack'
     | 'cascade'
     | 'minimize'
-    | 'restore';
+    | 'restore'
+    | 'reset-app-window';
 
 export interface WindowArrangeResult {
     mode?: WindowArrangeMode | string;
     tiledCount: number;
+    consoleDocked?: boolean;
     consoleBounds?: {
         x: number;
         y: number;
@@ -503,6 +505,7 @@ export interface AutomationStatus {
     enabled: boolean;
     localApiEnabled: boolean;
     mcpEnabled: boolean;
+    authRequired?: boolean;
     port: number;
     baseUrl: string;
     cdpEndpoint?: string;
@@ -689,6 +692,8 @@ export interface ElectronAPI {
         setActiveProfile?: (
             profileId: string | null,
         ) => Promise<AutomationStatus>;
+        getToken?: () => Promise<string | null>;
+        rotateToken?: () => Promise<string | null>;
     };
     app?: {
         getInfo: () => Promise<AppInfo>;

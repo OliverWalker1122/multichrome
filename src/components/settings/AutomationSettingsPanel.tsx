@@ -15,11 +15,14 @@ import {
     tokens,
 } from '@fluentui/react-components';
 import {
+    ArrowClockwiseRegular,
     CheckmarkRegular,
     ChevronDownRegular,
     ChevronUpRegular,
     CodeRegular,
     CopyRegular,
+    EyeOffRegular,
+    EyeRegular,
     PlugConnectedRegular,
 } from '@fluentui/react-icons';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -38,11 +41,13 @@ export type { AutomationConfigPatch, AutomationStatus, RunningProfileOption };
 type SnippetTab = 'mcpJson' | 'claudeCli' | 'devtoolsMcp' | 'playwrightCode';
 
 const DEFAULT_PORT = 18922;
+const MASKED_TOKEN_PLACEHOLDER = '••••••••••••';
 
 const FALLBACK_STATUS: AutomationStatus = {
     enabled: false,
     localApiEnabled: false,
     mcpEnabled: false,
+    authRequired: true,
     port: DEFAULT_PORT,
     baseUrl: `http://127.0.0.1:${DEFAULT_PORT}`,
     cdpEndpoint: `http://127.0.0.1:${DEFAULT_PORT}`,
@@ -71,22 +76,32 @@ function cleanIpcError(err: unknown, fallback: string): string {
     return fallback;
 }
 
-function buildSnippets(port: number): Record<SnippetTab, string> {
+function buildSnippets(
+    port: number,
+    tokenSegment: string,
+): Record<SnippetTab, string> {
     const baseUrl = `http://127.0.0.1:${port}`;
+    const hasToken = Boolean(tokenSegment);
+    const mcpUrl = hasToken
+        ? `${baseUrl}/t/${tokenSegment}/mcp`
+        : `${baseUrl}/mcp`;
+    const cdpWsUrl = hasToken
+        ? `ws://127.0.0.1:${port}/t/${tokenSegment}/devtools/browser`
+        : baseUrl;
 
     return {
         mcpJson: JSON.stringify(
             {
                 mcpServers: {
                     multichrome: {
-                        url: `${baseUrl}/mcp`,
+                        url: mcpUrl,
                     },
                     playwright: {
                         command: 'npx',
                         args: [
                             '@playwright/mcp@latest',
                             '--cdp-endpoint',
-                            baseUrl,
+                            cdpWsUrl,
                         ],
                     },
                 },
@@ -95,25 +110,43 @@ function buildSnippets(port: number): Record<SnippetTab, string> {
             2,
         ),
         claudeCli: [
-            `claude mcp add --transport http multichrome ${baseUrl}/mcp`,
-            `claude mcp add playwright -- npx @playwright/mcp@latest --cdp-endpoint ${baseUrl}`,
+            `claude mcp add --transport http multichrome ${mcpUrl}`,
+            `claude mcp add playwright -- npx @playwright/mcp@latest --cdp-endpoint ${cdpWsUrl}`,
         ].join('\n'),
         devtoolsMcp: [
-            `claude mcp add --transport http multichrome ${baseUrl}/mcp`,
-            `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest --browserUrl=${baseUrl}`,
+            `claude mcp add --transport http multichrome ${mcpUrl}`,
+            hasToken
+                ? `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest --wsEndpoint=${cdpWsUrl}`
+                : `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest --browserUrl=${baseUrl}`,
         ].join('\n'),
-        playwrightCode: [
-            "import { chromium } from 'playwright';",
-            '',
-            `const res = await fetch('${baseUrl}/api/v1/profiles/start', {`,
-            "  method: 'POST',",
-            "  headers: { 'Content-Type': 'application/json' },",
-            "  body: JSON.stringify({ name: 'Profile-1' }),",
-            '});',
-            'const { data } = await res.json();',
-            'const browser = await chromium.connectOverCDP(data.wsEndpoint);',
-            'const context = browser.contexts()[0];',
-        ].join('\n'),
+        playwrightCode: hasToken
+            ? [
+                  "import { chromium } from 'playwright';",
+                  '',
+                  `const token = '${tokenSegment}';`,
+                  `const res = await fetch('${baseUrl}/api/v1/profiles/start', {`,
+                  "  method: 'POST',",
+                  "  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },",
+                  "  body: JSON.stringify({ name: 'Profile-1' }),",
+                  '});',
+                  'const { data } = await res.json();',
+                  'const browser = await chromium.connectOverCDP(data.wsEndpoint, {',
+                  '  headers: { Authorization: `Bearer ${token}` },',
+                  '});',
+                  'const context = browser.contexts()[0];',
+              ].join('\n')
+            : [
+                  "import { chromium } from 'playwright';",
+                  '',
+                  `const res = await fetch('${baseUrl}/api/v1/profiles/start', {`,
+                  "  method: 'POST',",
+                  "  headers: { 'Content-Type': 'application/json' },",
+                  "  body: JSON.stringify({ name: 'Profile-1' }),",
+                  '});',
+                  'const { data } = await res.json();',
+                  'const browser = await chromium.connectOverCDP(data.wsEndpoint);',
+                  'const context = browser.contexts()[0];',
+              ].join('\n'),
     };
 }
 
@@ -220,6 +253,20 @@ const useStyles = makeStyles({
         paddingLeft: '8px',
         paddingRight: '8px',
     },
+    tokenBadge: {
+        padding: '3px 8px',
+        borderRadius: '6px',
+        backgroundColor: 'var(--glass-card-inner)',
+        border: '1px solid var(--glass-border)',
+        fontFamily: tokens.fontFamilyMonospace,
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground2,
+        maxWidth: '210px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        userSelect: 'text',
+    },
     snippetToolbar: {
         display: 'flex',
         alignItems: 'center',
@@ -314,6 +361,8 @@ const AutomationSettingsPanel: React.FC = () => {
     const [snippetsOpen, setSnippetsOpen] = useState(false);
     const [snippetTab, setSnippetTab] = useState<SnippetTab>('mcpJson');
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
+    const [tokenValue, setTokenValue] = useState<string>('');
+    const [tokenRevealed, setTokenRevealed] = useState(false);
 
     const applyStatus = useCallback((next: AutomationStatus) => {
         if (!mountedRef.current) return;
@@ -533,9 +582,98 @@ const AutomationSettingsPanel: React.FC = () => {
         }
     };
 
+    const ensureTokenLoaded = useCallback(async (): Promise<string> => {
+        if (tokenValue) return tokenValue;
+        const fetched = await automationApi.getToken();
+        if (fetched && mountedRef.current) {
+            setTokenValue(fetched);
+        }
+        return fetched || '';
+    }, [tokenValue]);
+
+    const handleToggleRevealToken = async () => {
+        if (tokenRevealed) {
+            setTokenRevealed(false);
+            return;
+        }
+        try {
+            const loaded = await ensureTokenLoaded();
+            if (loaded && mountedRef.current) {
+                setTokenRevealed(true);
+            }
+        } catch (err) {
+            reportActionError(
+                err,
+                '读取访问密钥失败',
+                'Failed to read access token',
+            );
+        }
+    };
+
+    const handleCopyToken = async () => {
+        try {
+            const loaded = await ensureTokenLoaded();
+            if (!loaded) return;
+            await navigator.clipboard.writeText(loaded);
+            setCopiedKey('token');
+            if (copyTimerRef.current !== null) {
+                window.clearTimeout(copyTimerRef.current);
+            }
+            copyTimerRef.current = window.setTimeout(() => {
+                if (mountedRef.current) {
+                    setCopiedKey(null);
+                }
+            }, 1800);
+            showNotification(
+                'success',
+                t('访问密钥已复制', 'Access token copied to clipboard'),
+            );
+        } catch {
+            showNotification(
+                'error',
+                t('复制访问密钥失败', 'Failed to copy access token'),
+            );
+        }
+    };
+
+    const handleRotateToken = async () => {
+        if (!bridgeAvailable || busy) return;
+        try {
+            setBusy(true);
+            setActionError('');
+            const nextToken = await automationApi.rotateToken();
+            if (nextToken && mountedRef.current) {
+                setTokenValue(nextToken);
+            }
+            showNotification(
+                'success',
+                t(
+                    '访问密钥已重置，旧连接已自动断开',
+                    'Access token reset; previous connections disconnected',
+                ),
+            );
+        } catch (err) {
+            reportActionError(
+                err,
+                '重置访问密钥失败',
+                'Failed to reset access token',
+            );
+        } finally {
+            if (mountedRef.current) {
+                setBusy(false);
+            }
+        }
+    };
+
     const handleCopySnippet = async () => {
         try {
-            await navigator.clipboard.writeText(snippets[snippetTab]);
+            const authActive = status.authRequired !== false;
+            const liveTok = authActive ? await ensureTokenLoaded() : '';
+            const liveSnippets = buildSnippets(
+                status.port || DEFAULT_PORT,
+                liveTok,
+            );
+            await navigator.clipboard.writeText(liveSnippets[snippetTab]);
             setCopiedKey(snippetTab);
             if (copyTimerRef.current !== null) {
                 window.clearTimeout(copyTimerRef.current);
@@ -560,9 +698,17 @@ const AutomationSettingsPanel: React.FC = () => {
         }
     };
 
+    const authRequired = status.authRequired !== false;
+    const visibleTokenSegment = !authRequired
+        ? ''
+        : tokenRevealed && tokenValue
+          ? tokenValue
+          : MASKED_TOKEN_PLACEHOLDER;
+
     const snippets = useMemo(
-        () => buildSnippets(status.port || DEFAULT_PORT),
-        [status.port],
+        () =>
+            buildSnippets(status.port || DEFAULT_PORT, visibleTokenSegment),
+        [status.port, visibleTokenSegment],
     );
 
     const isEnabled = Boolean(
@@ -851,6 +997,107 @@ const AutomationSettingsPanel: React.FC = () => {
                         )}
                     </div>
                 </div>
+
+                {authRequired && (
+                    <>
+                        <div className={styles.divider} />
+
+                        <div className={styles.row}>
+                            <span className={styles.rowLabel}>
+                                {t('访问密钥', 'Access Token')}
+                                <InfoTip
+                                    content={t(
+                                        '本地 CDP 与 MCP 接口强制校验随机访问密钥（经系统密钥链加密保存、恒定时间比对），防止本机未授权进程接管浏览器会话；点击下方快速接入的复制按钮会自动填入真实密钥。',
+                                        'Local CDP and MCP endpoints require an encrypted random access token verified in constant time so unauthorized local processes cannot hijack browser sessions. Copying a snippet below fills in the active token automatically.',
+                                    )}
+                                />
+                            </span>
+                            <div
+                                className={styles.inlineControls}
+                                data-testid="automation-token-controls"
+                            >
+                                <code
+                                    className={styles.tokenBadge}
+                                    data-testid="automation-token-display"
+                                >
+                                    {tokenRevealed && tokenValue
+                                        ? tokenValue
+                                        : MASKED_TOKEN_PLACEHOLDER}
+                                </code>
+                                <Tooltip
+                                    content={
+                                        tokenRevealed
+                                            ? t('隐藏密钥', 'Hide token')
+                                            : t('显示密钥', 'Show token')
+                                    }
+                                    relationship="label"
+                                >
+                                    <Button
+                                        type="button"
+                                        size="small"
+                                        appearance="subtle"
+                                        data-testid="automation-toggle-token"
+                                        icon={
+                                            tokenRevealed ? (
+                                                <EyeOffRegular />
+                                            ) : (
+                                                <EyeRegular />
+                                            )
+                                        }
+                                        aria-label={
+                                            tokenRevealed
+                                                ? t('隐藏密钥', 'Hide token')
+                                                : t('显示密钥', 'Show token')
+                                        }
+                                        disabled={controlsDisabled}
+                                        onClick={() =>
+                                            void handleToggleRevealToken()
+                                        }
+                                    />
+                                </Tooltip>
+                                <Tooltip
+                                    content={t('复制密钥', 'Copy token')}
+                                    relationship="label"
+                                >
+                                    <Button
+                                        type="button"
+                                        size="small"
+                                        appearance="subtle"
+                                        data-testid="automation-copy-token"
+                                        icon={
+                                            copiedKey === 'token' ? (
+                                                <CheckmarkRegular />
+                                            ) : (
+                                                <CopyRegular />
+                                            )
+                                        }
+                                        aria-label={t('复制密钥', 'Copy token')}
+                                        disabled={controlsDisabled}
+                                        onClick={() => void handleCopyToken()}
+                                    />
+                                </Tooltip>
+                                <Tooltip
+                                    content={t(
+                                        '重置密钥并立即断开旧连接',
+                                        'Reset token and disconnect existing sessions',
+                                    )}
+                                    relationship="label"
+                                >
+                                    <Button
+                                        type="button"
+                                        size="small"
+                                        appearance="subtle"
+                                        data-testid="automation-rotate-token"
+                                        icon={<ArrowClockwiseRegular />}
+                                        aria-label={t('重置密钥', 'Reset token')}
+                                        disabled={controlsDisabled}
+                                        onClick={() => void handleRotateToken()}
+                                    />
+                                </Tooltip>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
 
             {/* 2. 快速接入（默认折叠） */}

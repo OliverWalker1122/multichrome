@@ -208,6 +208,8 @@ try {
                 ipcRenderer.invoke('automation:pick-available-port'),
             setActiveProfile: (profileId) =>
                 ipcRenderer.invoke('automation:set-active-profile', profileId),
+            getToken: () => ipcRenderer.invoke('automation:get-token'),
+            rotateToken: () => ipcRenderer.invoke('automation:rotate-token'),
         },
 
         // 应用与窗口API

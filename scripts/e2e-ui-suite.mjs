@@ -1314,14 +1314,21 @@ async function main() {
             5000,
         );
 
-        // Expand Quick Connect snippets and verify 2-in-1 multichrome (/mcp) + @playwright/mcp config
+        // Expand Quick Connect snippets and verify 2-in-1 multichrome (/mcp) + @playwright/mcp config + screenshot-safe token masking
         await cdp.eval(`document.querySelector('[data-testid="automation-snippets-toggle"]')?.click()`);
         const standardSnippetsOk = Boolean(
             await waitUntil(
                 () =>
                     cdp.eval(`(() => {
                         const code = document.querySelector('[data-testid="automation-snippet-code"]')?.textContent || '';
-                        return code.includes('/mcp') && code.includes('@playwright/mcp@latest') && code.includes('--cdp-endpoint');
+                        const tokDisp = (document.querySelector('[data-testid="automation-token-display"]')?.textContent || '').trim();
+                        return (
+                            tokDisp === '••••••••••••' &&
+                            code.includes('••••••••••••/mcp') &&
+                            !code.includes('mc_live_') &&
+                            code.includes('@playwright/mcp@latest') &&
+                            code.includes('--cdp-endpoint')
+                        );
                     })()`),
                 3000,
             ),
@@ -1330,6 +1337,7 @@ async function main() {
         let restStatusOk = false;
         let mcpInitOk = false;
         let mcpToolsOk = false;
+        let tokenAuthGuardOk = false;
         let origin403Ok = false;
         let portConflictUiOk = false;
         let disabledCleanlyOk = false;
@@ -1348,8 +1356,87 @@ async function main() {
 
         try {
             if (serverReady) {
+                // 0) Verify Token UI Show/Hide + Unauthenticated 401 Block + UI Token Reset Invalidating Old Token!
+                await cdp.eval(`document.querySelector('[data-testid="automation-toggle-token"]')?.click()`);
+                const firstToken = await waitUntil(
+                    () =>
+                        cdp.eval(`(() => {
+                            const txt = (document.querySelector('[data-testid="automation-token-display"]')?.textContent || '').trim();
+                            return txt.startsWith('mc_live_') ? txt : '';
+                        })()`),
+                    3000,
+                );
+                await cdp.eval(`document.querySelector('[data-testid="automation-toggle-token"]')?.click()`);
+                const reMaskedOk = await waitUntil(
+                    () =>
+                        cdp.eval(`(document.querySelector('[data-testid="automation-token-display"]')?.textContent || '').trim() === '••••••••••••'`),
+                    3000,
+                );
+
+                // Unauthenticated requests MUST be rejected with 401
+                const unauthRest = await httpRequest({
+                    port: automationPort,
+                    method: 'GET',
+                    path: '/api/v1/status',
+                    headers: { Host: `127.0.0.1:${automationPort}` },
+                });
+                const unauthMcp = await httpRequest({
+                    port: automationPort,
+                    method: 'POST',
+                    path: '/mcp',
+                    headers: {
+                        Host: `127.0.0.1:${automationPort}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+                });
+                const unauthCdp = await httpRequest({
+                    port: automationPort,
+                    method: 'GET',
+                    path: '/json/version',
+                    headers: { Host: `127.0.0.1:${automationPort}` },
+                });
+
+                // Click UI Reset Token button -> old token MUST become 401 and new token becomes active!
+                await cdp.eval(`document.querySelector('[data-testid="automation-rotate-token"]')?.click()`);
+                await sleep(250);
+                const activeToken = await cdp.eval(`window.electronAPI.automation.getToken()`);
+                const oldTokenAfterReset = await httpRequest({
+                    port: automationPort,
+                    method: 'GET',
+                    path: '/api/v1/status',
+                    headers: {
+                        Host: `127.0.0.1:${automationPort}`,
+                        Authorization: `Bearer ${firstToken}`,
+                    },
+                });
+                const pathCapMcpCheck = await httpRequest({
+                    port: automationPort,
+                    method: 'POST',
+                    path: `/t/${activeToken}/mcp`,
+                    headers: {
+                        Host: `127.0.0.1:${automationPort}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 77, method: 'tools/list', params: {} }),
+                });
+                tokenAuthGuardOk = Boolean(
+                    firstToken &&
+                        reMaskedOk &&
+                        unauthRest.status === 401 &&
+                        unauthMcp.status === 401 &&
+                        unauthCdp.status === 401 &&
+                        activeToken &&
+                        activeToken !== firstToken &&
+                        oldTokenAfterReset.status === 401 &&
+                        pathCapMcpCheck.status === 200 &&
+                        pathCapMcpCheck.json?.result?.tools?.length === 4,
+                );
+
+                const authHeader = { Authorization: `Bearer ${activeToken}` };
                 const reqHeaders = {
                     Host: `127.0.0.1:${automationPort}`,
+                    Authorization: `Bearer ${activeToken}`,
                     'Content-Type': 'application/json',
                     Accept: 'application/json, text/event-stream',
                 };
@@ -1384,7 +1471,10 @@ async function main() {
                     port: automationPort,
                     method: 'GET',
                     path: '/api/v1/status',
-                    headers: { Host: `127.0.0.1:${automationPort}` },
+                    headers: {
+                        Host: `127.0.0.1:${automationPort}`,
+                        ...authHeader,
+                    },
                 });
                 restStatusOk =
                     statusRes.status === 200 &&
@@ -1472,11 +1562,11 @@ async function main() {
                         startedA.data?.wsEndpoint === `ws://127.0.0.1:${automationPort}/devtools/browser/${envA.id}` &&
                         !JSON.stringify(startedA.data).includes(String(internalPortA));
 
-                    // 2) Standard CDP discovery (/json/version) just like @playwright/mcp & chrome-devtools-mcp
+                    // 2) Standard CDP discovery (/json/version) authenticated via URL capability prefix (/t/<token>/...)
                     const verRes = await httpRequest({
                         port: automationPort,
                         method: 'GET',
-                        path: '/json/version',
+                        path: `/t/${activeToken}/json/version`,
                         headers: { Host: `127.0.0.1:${automationPort}` },
                     });
                     const browserWsUrl = verRes.json?.webSocketDebuggerUrl || '';
@@ -1499,12 +1589,31 @@ async function main() {
                             ws.send(JSON.stringify(msg));
                         });
 
-                    const guardWs = new WebSocket(browserWsUrl);
+                    const guardWs = new WebSocket(browserWsUrl, {
+                        headers: authHeader,
+                    });
                     openGuardSockets.push(guardWs);
                     await new Promise((resolve, reject) => {
                         guardWs.once('open', resolve);
                         guardWs.once('error', reject);
                     });
+
+                    // Also verify headerless URL-prefix WebSocket (`ws://127.0.0.1:<port>/t/<token>/devtools/browser`) for CLI tools (`@playwright/mcp` / `chrome-devtools-mcp`)
+                    const pathTokenWs = new WebSocket(
+                        `ws://127.0.0.1:${automationPort}/t/${activeToken}/devtools/browser`,
+                    );
+                    openGuardSockets.push(pathTokenWs);
+                    await new Promise((resolve, reject) => {
+                        pathTokenWs.once('open', resolve);
+                        pathTokenWs.once('error', reject);
+                    });
+                    const pathTokenVer = await sendGuardCdp(pathTokenWs, {
+                        id: 9001,
+                        method: 'Browser.getVersion',
+                        params: {},
+                    });
+                    pathTokenWs.close();
+                    const pathTokenWsOk = Boolean(pathTokenVer.result?.product);
 
                     let cid = 1;
                     // Verify Target.createBrowserContext is blocked with foolproof hint
@@ -1588,6 +1697,7 @@ async function main() {
                     realDiscoveryAndPassThroughOk =
                         verRes.status === 200 &&
                         browserWsUrl.startsWith(`ws://127.0.0.1:${automationPort}/devtools/browser/active/`) &&
+                        pathTokenWsOk &&
                         liveState.otp === '739184';
 
                     realOverrideShieldOk =
@@ -1609,6 +1719,7 @@ async function main() {
                                 env: {
                                     ...process.env,
                                     MULTICHROME_API_URL: `http://127.0.0.1:${automationPort}`,
+                                    MULTICHROME_API_TOKEN: activeToken,
                                 },
                                 stdio: ['pipe', 'pipe', 'pipe'],
                             },
@@ -1709,9 +1820,17 @@ async function main() {
                         `window.electronAPI.chromeEnvironments.tileWindows()`,
                     );
 
-                    // Connect 3 explicit guarded CDP WebSockets concurrently across all 3 open browser windows
-                    const openExplicitWs = async (wsUrl) => {
-                        const sock = new WebSocket(wsUrl);
+                    // Connect 3 explicit guarded CDP WebSockets concurrently (testing both /t/<token> path capability & Bearer header!)
+                    const openExplicitWs = async (wsUrl, usePathToken = false) => {
+                        const targetUrl = usePathToken
+                            ? wsUrl.replace(
+                                  `ws://127.0.0.1:${automationPort}/devtools/`,
+                                  `ws://127.0.0.1:${automationPort}/t/${activeToken}/devtools/`,
+                              )
+                            : wsUrl;
+                        const sock = usePathToken
+                            ? new WebSocket(targetUrl)
+                            : new WebSocket(targetUrl, { headers: authHeader });
                         openGuardSockets.push(sock);
                         await new Promise((resolve, reject) => {
                             sock.once('open', resolve);
@@ -1720,9 +1839,9 @@ async function main() {
                         return sock;
                     };
                     const [wsAlpha, wsBeta, wsGamma] = await Promise.all([
-                        openExplicitWs(startedA.data.wsEndpoint),
-                        openExplicitWs(startedClone.data.wsEndpoint),
-                        openExplicitWs(startedGamma.data.wsEndpoint),
+                        openExplicitWs(startedA.data.wsEndpoint, true),
+                        openExplicitWs(startedClone.data.wsEndpoint, false),
+                        openExplicitWs(startedGamma.data.wsEndpoint, true),
                     ]);
 
                     const inspectLiveWindowViaGuard = async (sock, expectedPath) => {
@@ -1799,7 +1918,10 @@ async function main() {
                         port: automationPort,
                         method: 'GET',
                         path: '/json/version',
-                        headers: { Host: `127.0.0.1:${automationPort}` },
+                        headers: {
+                            Host: `127.0.0.1:${automationPort}`,
+                            ...authHeader,
+                        },
                     });
                     realActiveSwitchAndParallelOk =
                         switched.data?.activeProfileId === cloned.id &&
@@ -2069,6 +2191,7 @@ async function main() {
         let uiBulkCreateOk = false;
         let simultaneousLaunch3Ok = false;
         let uiTile3Ok = false;
+        let uiTile3SubDetail = '';
         let uiCookieTransferOk = false;
         let simultaneousStop3Ok = false;
         let healthQueueBatchOk = false;
@@ -2136,22 +2259,66 @@ async function main() {
                 300,
             );
 
-            // 3) Verify Multi-Window Layouts: Seamless Grid -> Uniform Stack -> Cascade -> Focus Window + Native Profile Name
-            const tileBtnVisible = await waitUntil(() =>
-                cdp.eval(`window.__e2e.clickExact('排列窗口', 'main button')`),
+            // 3) Verify Single '窗口布局' Dropdown (no accidental direct tile), Split-Grid Dock + Reset App Window Size, Uniform Stack, Cascade & Pure-CDP Locate Window!
+            const singleLayoutDropdownOk = await waitUntil(() =>
+                cdp.eval(`(() => {
+                    const layoutBtn = document.querySelector('button[aria-label="窗口布局"]');
+                    const legacySplitChevron = document.querySelector('button[aria-label="更多窗口布局"]');
+                    return Boolean(layoutBtn && !legacySplitChevron);
+                })()`),
                 5000,
             );
+            let noMisfireOnOpenOk = false;
+            let splitAndResetSizeOk = false;
             let stackUniformOk = false;
             let cascadeUniformOk = false;
             let focusLocateOk = false;
-            if (tileBtnVisible) {
+            let fallbackZeroRunningResetOk = false;
+
+            if (singleLayoutDropdownOk) {
+                const initialOuterW = await cdp.eval(`window.outerWidth`);
+
+                // Clicking '窗口布局' MUST only open the menu without triggering an immediate tile toast!
+                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                const menuOpened = await waitUntil(
+                    () => cdp.eval(`Boolean(document.querySelector('[role="menu"]'))`),
+                    3000,
+                );
+                await sleep(250);
+                const prematureToast = await cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已宫格排列')`);
+                noMisfireOnOpenOk = Boolean(menuOpened && !prematureToast);
+
+                // Click '无缝宫格平铺' inside the open menu
+                await cdp.eval(`window.__e2e.clickByText('无缝宫格平铺', '[role="menuitem"]')`);
                 const gridToastOk = await waitUntil(() =>
                     cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已宫格排列 3 个运行中窗口')`),
                     8000,
                 );
 
-                // Open layout dropdown menu -> Uniform Stack ('统一尺寸堆叠')
-                await cdp.eval(`document.querySelector('button[aria-label="更多窗口布局"]')?.click()`);
+                // Open '窗口布局' -> '分屏并排平铺' (docks MultiChrome narrow on left) -> then '恢复主窗口大小' (restores MultiChrome default size!)
+                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await waitUntil(() =>
+                    cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
+                    4000,
+                );
+                const dockedNarrowOk = await waitUntil(
+                    () => cdp.eval(`window.outerWidth <= 580`),
+                    5000,
+                );
+
+                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await waitUntil(() =>
+                    cdp.eval(`window.__e2e.clickByText('恢复主窗口大小', '[role="menuitem"]')`),
+                    4000,
+                );
+                const restoredWideOk = await waitUntil(
+                    () => cdp.eval(`window.outerWidth >= Math.min(980, ${Number(initialOuterW) || 1000})`),
+                    5000,
+                );
+                splitAndResetSizeOk = Boolean(dockedNarrowOk && restoredWideOk);
+
+                // Open '窗口布局' -> Uniform Stack ('统一尺寸堆叠')
+                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('统一尺寸堆叠', '[role="menuitem"]')`),
                     4000,
@@ -2161,8 +2328,8 @@ async function main() {
                     8000,
                 );
 
-                // Open layout dropdown menu -> Cascade ('阶梯错位层叠')
-                await cdp.eval(`document.querySelector('button[aria-label="更多窗口布局"]')?.click()`);
+                // Open '窗口布局' -> Cascade ('阶梯错位层叠')
+                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('阶梯错位层叠', '[role="menuitem"]')`),
                     4000,
@@ -2172,7 +2339,7 @@ async function main() {
                     8000,
                 );
 
-                // Test explicit '定位窗口' icon button on MultiWin 02 + direct focusWindow IPC
+                // Test explicit '定位窗口' icon button on MultiWin 02 + direct pure-CDP focusWindow IPC
                 const locateBtnClicked = await cdp.eval(`(() => {
                     const btn = document.querySelector('button[aria-label="定位窗口 MultiWin 02"]');
                     if (!btn) return false;
@@ -2188,7 +2355,9 @@ async function main() {
                 focusLocateOk = Boolean(locateBtnClicked && ipcFocusRes);
 
                 uiTile3Ok = Boolean(
-                    gridToastOk &&
+                    noMisfireOnOpenOk &&
+                        gridToastOk &&
+                        splitAndResetSizeOk &&
                         stackUniformOk &&
                         cascadeUniformOk &&
                         focusLocateOk,
@@ -2251,13 +2420,40 @@ async function main() {
             await waitUntil(() => cdp.eval(`!document.querySelector('[role="dialog"]')`));
             await cdp.eval(`document.querySelector('[data-details-panel] button[aria-label="关闭详情面板"]')?.click()`);
 
-            // 5) Simultaneous Batch Stop via real Batch Bar button
+            // 5) Dock narrow via Split-Grid -> Simultaneous Batch Stop -> Verify zero-running fallback '恢复主窗口' restores App Window!
+            const preStopNormalW = await cdp.eval(`window.outerWidth`);
+            await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
+                4000,
+            );
+            await waitUntil(() => cdp.eval(`window.outerWidth <= 580`), 5000);
+
             await cdp.eval(`window.__e2e.clickByText('批量关闭', '[aria-label="批量操作栏"] button')`);
             simultaneousStop3Ok = await waitUntil(
                 () =>
                     cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 0)`),
                 15000,
             );
+
+            const zeroRunningResetBtnVisible = await waitUntil(
+                () => cdp.eval(`Boolean(document.querySelector('button[aria-label="恢复主窗口"]'))`),
+                5000,
+            );
+            if (zeroRunningResetBtnVisible) {
+                await cdp.eval(`document.querySelector('button[aria-label="恢复主窗口"]')?.click()`);
+                const restoredFromZeroRunning = await waitUntil(
+                    () => cdp.eval(`window.outerWidth >= Math.min(980, ${Number(preStopNormalW) || 1000})`),
+                    5000,
+                );
+                const resetBtnCleared = await waitUntil(
+                    () => cdp.eval(`!document.querySelector('button[aria-label="恢复主窗口"]')`),
+                    3000,
+                );
+                fallbackZeroRunningResetOk = Boolean(restoredFromZeroRunning && resetBtnCleared);
+            }
+            uiTile3Ok = Boolean(uiTile3Ok && fallbackZeroRunningResetOk);
+            uiTile3SubDetail = `(noMisfire=${noMisfireOnOpenOk},splitReset=${splitAndResetSizeOk},zeroReset=${fallbackZeroRunningResetOk},stack=${stackUniformOk},cascade=${cascadeUniformOk},focus=${focusLocateOk})`;
 
             // 6) Enable Pre-Launch Check in Settings -> verify ALL 3 pre-checks are visible simultaneously in Batch Health Dialog & "启动全部（3）" launches & auto-tiles all 3 windows!
             await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);
@@ -2402,13 +2598,14 @@ async function main() {
 
         record(
             'E2E-11',
-            '极简本地 CDP 守卫与 MCP 面板（默认端口 18922 / 标准接入命令 / 4 项环境工具 / Origin 403 / 端口冲突一键恢复 / 干净停机）',
+            '极简本地 CDP 守卫与 MCP 面板（默认端口 18922 / 访问密钥 401 保护与脱敏轮换 / 标准接入命令 / 4 项环境工具 / Origin 403 / 端口冲突一键恢复 / 干净停机）',
             Boolean(
                 defaultPortBootOk &&
                     autoTabReady &&
                     autoPanelReady &&
                     portApplied &&
                     serverReady &&
+                    tokenAuthGuardOk &&
                     standardSnippetsOk &&
                     restStatusOk &&
                     mcpInitOk &&
@@ -2417,7 +2614,7 @@ async function main() {
                     portConflictUiOk &&
                     disabledCleanlyOk,
             ),
-            `defaultPort=${defaultPortBootOk}, ui=${Boolean(autoTabReady && autoPanelReady)}, snippets=${standardSnippetsOk}, rest=${restStatusOk}, mcpInit=${mcpInitOk}, mcpTools4=${mcpToolsOk}, 403=${origin403Ok}, portConflictUi=${portConflictUiOk}, stopped=${disabledCleanlyOk}${e2e11Error ? `, err=${e2e11Error}` : ''}`,
+            `defaultPort=${defaultPortBootOk}, ui=${Boolean(autoTabReady && autoPanelReady)}, tokenAuth=${tokenAuthGuardOk}, snippets=${standardSnippetsOk}, rest=${restStatusOk}, mcpInit=${mcpInitOk}, mcpTools4=${mcpToolsOk}, 403=${origin403Ok}, portConflictUi=${portConflictUiOk}, stopped=${disabledCleanlyOk}${e2e11Error ? `, err=${e2e11Error}` : ''}`,
         );
 
         record(
@@ -2449,7 +2646,7 @@ async function main() {
 
         record(
             'E2E-14',
-            '真实界面批量新建（3 环境）+ 多选同时 3 窗口并发启动 + 宫格平铺 + UI Cookie 导入导出 + 并发批量关闭 + 3 窗口同屏批量预检全启',
+            '真实界面批量新建（3 环境）+ 3 窗口并发启动 + 单一窗口布局菜单（防误触/无缝宫格/分屏与主窗口恢复/堆叠/层叠/纯 CDP 定位）+ Cookie 导入导出 + 3 窗口同屏预检全启',
             Boolean(
                 uiBulkCreateOk &&
                     simultaneousLaunch3Ok &&
@@ -2459,7 +2656,7 @@ async function main() {
                     healthQueueBatchOk &&
                     backupValidationOk,
             ),
-            `bulkCreate=${uiBulkCreateOk}, launch3=${simultaneousLaunch3Ok}, tile3=${uiTile3Ok}, cookieUI=${uiCookieTransferOk}, stop3=${simultaneousStop3Ok}, batchHealth3=${healthQueueBatchOk}, backupPwdCheck=${backupValidationOk}${e2e14Error ? `, err=${e2e14Error}` : ''}`,
+            `bulkCreate=${uiBulkCreateOk}, launch3=${simultaneousLaunch3Ok}, layoutAndFocus=${uiTile3Ok}${uiTile3SubDetail}, cookieUI=${uiCookieTransferOk}, stop3=${simultaneousStop3Ok}, batchHealth3=${healthQueueBatchOk}, backupPwdCheck=${backupValidationOk}${e2e14Error ? `, err=${e2e14Error}` : ''}`,
         );
     } finally {
         cdp?.close();

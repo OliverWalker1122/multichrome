@@ -19,6 +19,7 @@ import {
 import {
     AddRegular,
     ArrowMinimizeRegular,
+    ArrowResetRegular,
     ArrowSortRegular,
     ChevronDownRegular,
     DeleteRegular,
@@ -62,6 +63,7 @@ export interface EnvironmentsToolbarProps {
     allRunningCount: number;
     closingAll: boolean;
     tilingWindows?: boolean;
+    consoleDocked?: boolean;
     search: string;
     onSearchChange: (value: string) => void;
     statusFilter: RunStatus;
@@ -96,6 +98,7 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
     allRunningCount,
     closingAll,
     tilingWindows = false,
+    consoleDocked = false,
     search,
     onSearchChange,
     statusFilter,
@@ -158,116 +161,96 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     onChange={(_, data) => onSearchChange(data.value)}
                 />
                 <div className={styles.headerActions}>
-                    {allRunningCount > 0 && onTileWindows && (
-                        <div
-                            style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                            }}
+                    {allRunningCount === 0 && consoleDocked && onTileWindows && (
+                        <Button
+                            appearance="subtle"
+                            icon={<ArrowResetRegular />}
+                            disabled={tilingWindows}
+                            aria-label={t('恢复主窗口', 'Reset Window')}
+                            onClick={() => onTileWindows('reset-app-window')}
                         >
-                            <Tooltip
-                                content={t(
-                                    '零间隙无缝铺满当前屏幕工作区',
-                                    'Tile all running browser windows seamlessly with zero gap',
-                                )}
-                                relationship="label"
-                            >
+                            {t('恢复主窗口', 'Reset Window')}
+                        </Button>
+                    )}
+                    {allRunningCount > 0 && onTileWindows && (
+                        <Menu positioning="below-end">
+                            <MenuTrigger disableButtonEnhancement>
                                 <Button
                                     appearance="subtle"
                                     icon={<GridRegular />}
                                     disabled={tilingWindows || closingAll}
-                                    onClick={() => onTileWindows('grid')}
+                                    aria-label={t('窗口布局', 'Window Layout')}
                                 >
-                                    {t('排列窗口', 'Tile Windows')}
-                                </Button>
-                            </Tooltip>
-                            <Menu positioning="below-end">
-                                <MenuTrigger disableButtonEnhancement>
-                                    <Button
-                                        appearance="subtle"
-                                        size="small"
-                                        icon={<ChevronDownRegular />}
-                                        disabled={tilingWindows || closingAll}
-                                        aria-label={t(
-                                            '更多窗口布局',
-                                            'More window layouts',
-                                        )}
-                                        title={t(
-                                            '切换平铺、分屏、统一尺寸堆叠或层叠布局',
-                                            'Switch between seamless grid, console split, uniform stack, or cascade',
-                                        )}
+                                    {t('窗口布局', 'Window Layout')}
+                                    <ChevronDownRegular
+                                        style={{
+                                            marginLeft: '4px',
+                                            fontSize: '12px',
+                                        }}
                                     />
-                                </MenuTrigger>
-                                <MenuPopover>
-                                    <MenuList>
-                                        <MenuItem
-                                            icon={<GridRegular />}
-                                            onClick={() =>
-                                                onTileWindows('grid')
-                                            }
-                                        >
-                                            {t(
-                                                '无缝宫格平铺',
-                                                'Seamless Grid',
-                                            )}
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<SplitVerticalRegular />}
-                                            onClick={() =>
-                                                onTileWindows('split-grid')
-                                            }
-                                        >
-                                            {t(
-                                                '分屏并排平铺',
-                                                'Split Beside Console',
-                                            )}
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<SquareMultipleRegular />}
-                                            onClick={() =>
-                                                onTileWindows('stack')
-                                            }
-                                        >
-                                            {t(
-                                                '统一尺寸堆叠',
-                                                'Uniform Stack',
-                                            )}
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<WindowNewRegular />}
-                                            onClick={() =>
-                                                onTileWindows('cascade')
-                                            }
-                                        >
-                                            {t(
-                                                '阶梯错位层叠',
-                                                'Cascade Windows',
-                                            )}
-                                        </MenuItem>
-                                        <MenuDivider />
-                                        <MenuItem
-                                            icon={<ArrowMinimizeRegular />}
-                                            onClick={() =>
-                                                onTileWindows('minimize')
-                                            }
-                                        >
-                                            {t(
-                                                '最小化全部窗口',
-                                                'Minimize All',
-                                            )}
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<MaximizeRegular />}
-                                            onClick={() =>
-                                                onTileWindows('restore')
-                                            }
-                                        >
-                                            {t('恢复全部窗口', 'Restore All')}
-                                        </MenuItem>
-                                    </MenuList>
-                                </MenuPopover>
-                            </Menu>
-                        </div>
+                                </Button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                                <MenuList>
+                                    <MenuItem
+                                        icon={<GridRegular />}
+                                        onClick={() => onTileWindows('grid')}
+                                    >
+                                        {t('无缝宫格平铺', 'Seamless Grid')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<SplitVerticalRegular />}
+                                        onClick={() =>
+                                            onTileWindows('split-grid')
+                                        }
+                                    >
+                                        {t(
+                                            '分屏并排平铺',
+                                            'Split Beside Console',
+                                        )}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<SquareMultipleRegular />}
+                                        onClick={() => onTileWindows('stack')}
+                                    >
+                                        {t('统一尺寸堆叠', 'Uniform Stack')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<WindowNewRegular />}
+                                        onClick={() => onTileWindows('cascade')}
+                                    >
+                                        {t('阶梯错位层叠', 'Cascade Windows')}
+                                    </MenuItem>
+                                    <MenuDivider />
+                                    <MenuItem
+                                        icon={<ArrowMinimizeRegular />}
+                                        onClick={() =>
+                                            onTileWindows('minimize')
+                                        }
+                                    >
+                                        {t('最小化全部窗口', 'Minimize All')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<MaximizeRegular />}
+                                        onClick={() => onTileWindows('restore')}
+                                    >
+                                        {t('恢复全部窗口', 'Restore All')}
+                                    </MenuItem>
+                                    <MenuDivider />
+                                    <MenuItem
+                                        icon={<ArrowResetRegular />}
+                                        onClick={() =>
+                                            onTileWindows('reset-app-window')
+                                        }
+                                    >
+                                        {t(
+                                            '恢复主窗口大小',
+                                            'Reset App Window',
+                                        )}
+                                    </MenuItem>
+                                </MenuList>
+                            </MenuPopover>
+                        </Menu>
                     )}
                     {allRunningCount > 0 && (
                         <Button

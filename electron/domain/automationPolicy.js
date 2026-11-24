@@ -1,8 +1,117 @@
+import crypto from 'node:crypto';
 import { isIP } from 'node:net';
 
 export const DEFAULT_AUTOMATION_PORT = 18922;
 export const MIN_AUTOMATION_PORT = 1024;
 export const MAX_AUTOMATION_PORT = 65535;
+export const AUTOMATION_TOKEN_PREFIX = 'mc_live_';
+
+export function generateAutomationToken() {
+    return `${AUTOMATION_TOKEN_PREFIX}${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+export function isValidAutomationTokenFormat(token) {
+    return (
+        typeof token === 'string' &&
+        /^mc_live_[A-Za-z0-9_-]{20,128}$/.test(token.trim())
+    );
+}
+
+export function verifyAutomationTokenConstantTime(candidate, expectedToken) {
+    if (
+        typeof candidate !== 'string' ||
+        !candidate ||
+        typeof expectedToken !== 'string' ||
+        !expectedToken
+    ) {
+        return false;
+    }
+    const hashCandidate = crypto
+        .createHash('sha256')
+        .update(candidate, 'utf8')
+        .digest();
+    const hashExpected = crypto
+        .createHash('sha256')
+        .update(expectedToken, 'utf8')
+        .digest();
+    return crypto.timingSafeEqual(hashCandidate, hashExpected);
+}
+
+export function authenticateAutomationRequest(req, expectedToken, basePort = DEFAULT_AUTOMATION_PORT) {
+    let urlObj;
+    try {
+        urlObj = new URL(
+            req?.url || '/',
+            `http://127.0.0.1:${basePort || DEFAULT_AUTOMATION_PORT}`,
+        );
+    } catch {
+        return {
+            ok: false,
+            status: 400,
+            code: 'INVALID_URL',
+            message: 'Malformed request URL',
+            pathname: '/',
+            urlObj: null,
+        };
+    }
+
+    let pathname = urlObj.pathname || '/';
+    let pathToken = '';
+    const pathCapMatch = pathname.match(/^\/t\/([^/]+)(\/.*)?$/);
+    if (pathCapMatch) {
+        try {
+            pathToken = decodeURIComponent(pathCapMatch[1]);
+        } catch {
+            pathToken = '';
+        }
+        pathname = pathCapMatch[2] || '/';
+        urlObj.pathname = pathname;
+    }
+
+    if (typeof expectedToken !== 'string' || !expectedToken.trim()) {
+        return {
+            ok: true,
+            pathname,
+            urlObj,
+        };
+    }
+
+    const headers = req && typeof req === 'object' ? req.headers || {} : {};
+    let headerToken = '';
+    const rawAuth =
+        typeof headers.authorization === 'string'
+            ? headers.authorization.trim()
+            : '';
+    if (/^Bearer\s+/i.test(rawAuth)) {
+        headerToken = rawAuth.replace(/^Bearer\s+/i, '').trim();
+    } else if (
+        typeof headers['x-multichrome-token'] === 'string' &&
+        headers['x-multichrome-token'].trim()
+    ) {
+        headerToken = headers['x-multichrome-token'].trim();
+    }
+
+    const queryToken = (urlObj.searchParams.get('token') || '').trim();
+    const candidate = pathToken || headerToken || queryToken;
+
+    if (!verifyAutomationTokenConstantTime(candidate, expectedToken)) {
+        return {
+            ok: false,
+            status: 401,
+            code: 'UNAUTHORIZED',
+            message:
+                'Missing or invalid MultiChrome access token. Copy the current token or integration snippet from Settings -> Automation & MCP.',
+            pathname,
+            urlObj,
+        };
+    }
+
+    return {
+        ok: true,
+        pathname,
+        urlObj,
+    };
+}
 
 export function formatAutomationBindError(error, port) {
     const code = error && typeof error === 'object' ? error.code : undefined;
@@ -297,6 +406,7 @@ export function sanitizeAutomationErrorMessage(
         return fallbackMessage;
     }
     return firstLine
+        .replace(/\/t\/[^/\s"'?#]+/g, '/t/[redacted]')
         .replace(/mc_live_[A-Za-z0-9_-]+/g, 'mc_live_[redacted]')
         .replace(
             /Bearer[ \t]+(?!token\b|auth(?:orization)?\b|header\b)[^\s]+/gi,

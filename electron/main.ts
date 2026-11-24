@@ -85,6 +85,7 @@ const proxyRepository = new ProxyRepository({
 
 const automationConfigRepository = new AutomationConfigRepository({
     store: new Store({ name: 'automation-settings' }),
+    secretStorage: safeStorage,
     getLocale: () => settingsRepository.getSettings().locale || 'en-US',
 });
 
@@ -214,6 +215,7 @@ const automationBackend = buildAutomationBackend({
 const automationServer = new AutomationServer({
     backend: automationBackend,
     serverVersion: automationAppVersion,
+    getRequiredToken: () => automationConfigRepository.getToken(),
     logger: log,
 });
 

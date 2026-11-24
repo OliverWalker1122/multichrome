@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { buildBulkEnvironmentSpecs } from '../electron/domain/bulkEnvironmentPolicy.js';
 import {
     computeConsoleSplitWorkArea,
@@ -7,6 +9,7 @@ import {
     computeWindowCascadeBounds,
     computeWindowGridBounds,
     computeWindowUniformStackBounds,
+    normalizeWindowArrangeMode,
     sanitizeWindowTitleTag,
 } from '../electron/domain/windowTiling.js';
 import { DebugPortReservationPool } from '../electron/drivers/portAllocator.js';
@@ -155,6 +158,32 @@ test('computeWindowArrangement supports console split, uniform stack, cascade, a
     assert.equal(sanitizeWindowTitleTag('iphone-claude'), '[iphone-claude]');
     assert.equal(sanitizeWindowTitleTag('  美国2\n"test"  '), '[美国2 test]');
     assert.equal(sanitizeWindowTitleTag('   '), '');
+    assert.equal(
+        normalizeWindowArrangeMode('reset-app-window'),
+        'reset-app-window',
+    );
+});
+
+test('Window locating strictly uses pure loopback CDP with zero AV-sensitive shell/WScript subprocesses', () => {
+    assert.equal(
+        fs.existsSync(path.resolve('electron/drivers/windowFocusDriver.js')),
+        false,
+        'windowFocusDriver.js must not exist',
+    );
+    const filesToCheck = [
+        'electron/drivers/cdpManager.ts',
+        'electron/services/browserLaunchService.ts',
+        'electron/services/environmentService.ts',
+        'electron/ipc/environmentIpc.ts',
+    ];
+    for (const rel of filesToCheck) {
+        const src = fs.readFileSync(path.resolve(rel), 'utf8');
+        assert.equal(
+            /WScript\.Shell|AppActivate|powershell\.exe/i.test(src),
+            false,
+            `${rel} must not invoke PowerShell or WScript.Shell for window focus`,
+        );
+    }
 });
 
 test('DebugPortReservationPool yields distinct ports under concurrent acquire()', async () => {

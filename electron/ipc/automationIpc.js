@@ -15,4 +15,6 @@ export function registerAutomationIpc({ ipcMain, integration }) {
     ipcMain.handle('automation:set-active-profile', (_, profileId) =>
         integration.setActiveProfile(profileId),
     );
+    ipcMain.handle('automation:get-token', () => integration.getToken());
+    ipcMain.handle('automation:rotate-token', () => integration.rotateToken());
 }

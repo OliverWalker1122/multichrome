@@ -153,11 +153,12 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-function httpJsonRequest({ port, method = 'GET', pathname = '/', body = undefined, timeoutMs = 45000 }) {
+function httpJsonRequest({ port, method = 'GET', pathname = '/', token = '', body = undefined, timeoutMs = 45000 }) {
     return new Promise((resolve, reject) => {
         const headers = {
             Host: `127.0.0.1:${port}`,
             Accept: 'application/json, text/event-stream',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
         };
         let payloadBuf = null;
         if (body !== undefined) {
@@ -202,6 +203,9 @@ function httpJsonRequest({ port, method = 'GET', pathname = '/', body = undefine
 }
 
 async function createLoopbackMcpHarness(chromeManager, proxyManager) {
+    const { generateAutomationToken } = await import(
+        pathToFileURL(path.join(distElectron, 'domain', 'automationPolicy.js')).href
+    );
     const { createAutomationBackend } = await import(
         pathToFileURL(path.join(distElectron, 'services', 'automationService.js')).href
     );
@@ -209,6 +213,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
         pathToFileURL(path.join(distElectron, 'transport', 'automationServer.js')).href
     );
 
+    const mcpToken = generateAutomationToken();
     const automationBackend = createAutomationBackend({
         chromeManager,
         proxyManager,
@@ -216,6 +221,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
     const server = new AutomationServer({
         backend: automationBackend,
         serverVersion: '1.6.0',
+        getRequiredToken: () => mcpToken,
     });
     await server.start({ port: 0 });
     const port = server.getBoundPort();
@@ -226,6 +232,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
             port,
             method: 'POST',
             pathname: '/mcp',
+            token: mcpToken,
             body: {
                 jsonrpc: '2.0',
                 id: rpcSeq++,
@@ -269,6 +276,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
                     ...process.env,
                     ELECTRON_RUN_AS_NODE: '1',
                     MULTICHROME_API_URL: `http://127.0.0.1:${port}`,
+                    MULTICHROME_API_TOKEN: mcpToken,
                 },
                 stdio: ['pipe', 'pipe', 'ignore'],
             },
@@ -307,6 +315,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
 
     return {
         port,
+        token: mcpToken,
         serverName: initRes?.serverInfo?.name || 'unknown',
         toolNames: (toolsRes?.tools || []).map((t) => t.name),
         stdioSmokeOk,
@@ -316,6 +325,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
                 port,
                 method: 'GET',
                 pathname: `/cdp/${encodeURIComponent(profileId)}/json/version`,
+                token: mcpToken,
             });
             return res.json || {};
         },
@@ -324,6 +334,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
                 port,
                 method: 'GET',
                 pathname: '/json/version',
+                token: mcpToken,
             });
             return res.json || {};
         },
@@ -381,14 +392,17 @@ async function waitForDevToolsWs(chromeManager, envId, timeoutMs = 20000) {
 }
 
 class CDPClient {
-    constructor(wsUrl) {
+    constructor(wsUrl, headers = undefined) {
         this.wsUrl = wsUrl;
+        this.headers = headers;
         this.ws = null;
         this.id = 0;
         this.pending = new Map();
     }
     async connect() {
-        this.ws = new WebSocket(this.wsUrl);
+        this.ws = this.headers
+            ? new WebSocket(this.wsUrl, { headers: this.headers })
+            : new WebSocket(this.wsUrl);
         await new Promise((resolve, reject) => {
             this.ws.once('open', resolve);
             this.ws.once('error', reject);
@@ -832,7 +846,12 @@ async function runAuditGroup({
                             browserVersion = devTools.browserVersion;
                         }
                         report.browserVersion = browserVersion;
-                        const cdp = new CDPClient(wsUrl);
+                        const cdp = new CDPClient(
+                            wsUrl,
+                            mcpHarness
+                                ? { Authorization: `Bearer ${mcpHarness.token}` }
+                                : undefined,
+                        );
                         await cdp.connect();
                         return { target, report, cdp, ok: true };
                     } catch (err) {

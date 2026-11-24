@@ -21,7 +21,7 @@ function isAllowedTechnicalSlashString(text) {
     if (/^(?:https?|socks5?|vless|vmess|trojan|ss|hy2|hysteria2|tuic|file|multichrome|devtools|chrome):\/\//i.test(text)) {
         return true;
     }
-    if (/^(?:\.\.?\/|\/api\/|\/json|\/devtools\/|\/mcp\b|\/Applications\/|\/oliverwalker1122|\/start\b|\/ip\b|\/\?fields=)/i.test(text)) {
+    if (/^(?:\.\.?\/|\/api\/|\/json|\/devtools\/|\/mcp\b|\/t\/|\/Applications\/|\/oliverwalker1122|\/start\b|\/ip\b|\/\?fields=)/i.test(text)) {
         return true;
     }
     if (/^(?:America|Europe|Asia|Australia|Pacific|Africa|Atlantic)\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/.test(text)) {

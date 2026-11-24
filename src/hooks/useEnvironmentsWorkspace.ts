@@ -107,6 +107,7 @@ export function useEnvironmentsWorkspace({
         useState<RunningResourceStats | null>(null);
     const [closeAllConfirmOpen, setCloseAllConfirmOpen] = useState(false);
     const [closingAll, setClosingAll] = useState(false);
+    const [consoleDocked, setConsoleDocked] = useState(false);
     const [contextMenu, setContextMenu] =
         useState<EnvContextMenuState | null>(null);
 
@@ -558,10 +559,29 @@ export function useEnvironmentsWorkspace({
         mode: WindowArrangeMode = 'grid',
         envIds?: string[],
     ) => {
-        if (tilingWindows || allRunningCount === 0) return;
+        if (
+            tilingWindows ||
+            (allRunningCount === 0 && mode !== 'reset-app-window')
+        ) {
+            return;
+        }
         setTilingWindows(true);
         try {
             const res = await environmentApi.tileWindows({ mode, envIds });
+            if (typeof res.consoleDocked === 'boolean') {
+                setConsoleDocked(res.consoleDocked);
+            }
+            if (mode === 'reset-app-window') {
+                setConsoleDocked(false);
+                showNotification(
+                    'success',
+                    t(
+                        '已恢复主窗口默认尺寸与居中位置',
+                        'Restored main window to default centered size',
+                    ),
+                );
+                return;
+            }
             const n = res.tiledCount;
             const successText = (() => {
                 if (mode === 'split-grid') {
@@ -665,6 +685,7 @@ export function useEnvironmentsWorkspace({
         handleBatchStopSelected,
         handleBatchAction,
         tilingWindows,
+        consoleDocked,
         handleTileWindows,
         handleFocusWindow,
         busyId,

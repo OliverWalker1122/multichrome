@@ -10,7 +10,6 @@ import { findSystemChromeExecutable } from '../drivers/chromeDiscovery.js';
 import { loadExtensionsViaCdpPipe } from '../drivers/extensionPipeLoader.js';
 import { writeNativeStealthPreferences } from '../drivers/nativePreferences.js';
 import { isProfileRunningLocally } from '../drivers/profileLock.js';
-import { bringProcessWindowToFront } from '../drivers/windowFocusDriver.js';
 import {
     hasSavedChromeSession,
     resolveExtensionTemplatePaths,
@@ -1602,10 +1601,7 @@ export class BrowserLaunchService {
         } catch (err) {
             log.warn(`[${id.substring(0, 8)}] CDP 定位窗口异常:`, err);
         }
-        const osScheduled = record.pid
-            ? bringProcessWindowToFront(record.pid)
-            : false;
-        return Boolean(cdpFocused || osScheduled);
+        return cdpFocused;
     }
 
     public async closeAllEnvironments(): Promise<{

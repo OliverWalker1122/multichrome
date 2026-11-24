@@ -199,6 +199,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     allRunningCount={ws.allRunningCount}
                     closingAll={ws.closingAll}
                     tilingWindows={ws.tilingWindows}
+                    consoleDocked={ws.consoleDocked}
                     search={ws.search}
                     onSearchChange={ws.setSearch}
                     statusFilter={ws.statusFilter}

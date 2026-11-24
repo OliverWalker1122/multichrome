@@ -39,6 +39,20 @@ export const automationApi = {
         return api.setActiveProfile(profileId);
     },
 
+    getToken: async (): Promise<string | null> => {
+        const api = getElectronApi()?.automation;
+        if (!api?.getToken) return null;
+        return api.getToken();
+    },
+
+    rotateToken: async (): Promise<string | null> => {
+        const api = getElectronApi()?.automation;
+        if (!api?.rotateToken) {
+            throw new Error('Automation token rotation unavailable');
+        }
+        return api.rotateToken();
+    },
+
     onStateChanged: (
         handler: (status: AutomationStatus) => void,
     ): (() => void) =>

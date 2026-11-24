@@ -5,6 +5,7 @@ export const VALID_WINDOW_ARRANGE_MODES = new Set([
     'cascade',
     'minimize',
     'restore',
+    'reset-app-window',
 ]);
 
 export function normalizeWindowArrangeMode(mode) {

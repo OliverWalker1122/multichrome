@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {
     DEFAULT_AUTOMATION_PORT,
+    authenticateAutomationRequest,
     formatAutomationBindError,
     sanitizeAutomationErrorMessage,
     validateAutomationPort,
@@ -156,6 +157,7 @@ export class AutomationServer {
      *   serverVersion?: string,
      *   logger?: { info?: (...args: any[]) => void, warn?: (...args: any[]) => void, error?: (...args: any[]) => void },
      *   maxBodyBytes?: number,
+     *   getRequiredToken?: () => string | null,
      *   cdpGuardOptions?: Record<string, any>,
      * }} options
      */
@@ -164,6 +166,7 @@ export class AutomationServer {
         serverVersion = '1.6.0',
         logger = console,
         maxBodyBytes = MAX_AUTOMATION_BODY_BYTES,
+        getRequiredToken = () => null,
         cdpGuardOptions = {},
     }) {
         if (!backend || typeof backend !== 'object') {
@@ -172,6 +175,10 @@ export class AutomationServer {
         this.backend = backend;
         this.logger = logger;
         this.maxBodyBytes = maxBodyBytes;
+        this.getRequiredToken =
+            typeof getRequiredToken === 'function'
+                ? getRequiredToken
+                : () => null;
         this.server = null;
         this.sockets = new Set();
         this.boundPort = 0;
@@ -186,6 +193,7 @@ export class AutomationServer {
         this.cdpGuard = createCdpGuard({
             backend,
             getBoundPort: () => this.boundPort || DEFAULT_AUTOMATION_PORT,
+            getRequiredToken: this.getRequiredToken,
             logger,
             ...cdpGuardOptions,
         });
@@ -210,6 +218,10 @@ export class AutomationServer {
 
     getLastError() {
         return this.lastError;
+    }
+
+    disconnectAllSessions() {
+        this.cdpGuard.closeAll();
     }
 
     async syncConfig({
@@ -368,18 +380,30 @@ export class AutomationServer {
                 return;
             }
 
-            let urlObj;
-            try {
-                urlObj = new URL(
-                    req.url || '/',
-                    `http://127.0.0.1:${this.boundPort || DEFAULT_AUTOMATION_PORT}`,
+            const requiredToken = this.getRequiredToken();
+            const authCheck = authenticateAutomationRequest(
+                req,
+                requiredToken,
+                this.boundPort || DEFAULT_AUTOMATION_PORT,
+            );
+            if (!authCheck.ok) {
+                sendError(
+                    res,
+                    authCheck.status,
+                    authCheck.code,
+                    authCheck.message,
+                    authCheck.status === 401
+                        ? {
+                              'WWW-Authenticate':
+                                  'Bearer realm="MultiChrome Local Automation"',
+                          }
+                        : {},
                 );
-            } catch {
-                sendError(res, 400, 'INVALID_URL', 'Malformed request URL');
                 return;
             }
 
-            const pathname = urlObj.pathname;
+            const urlObj = authCheck.urlObj;
+            const pathname = authCheck.pathname;
 
             // 1. Standard Chrome DevTools Protocol discovery (/json/version, /json/list, /json, /cdp/<id>/json/...)
             if (parseCdpHttpRoute(pathname)) {

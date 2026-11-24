@@ -856,6 +856,22 @@ export class AutomationIntegration {
         return status;
     }
 
+    getToken() {
+        return typeof this.configManager.getToken === 'function'
+            ? this.configManager.getToken()
+            : null;
+    }
+
+    rotateToken() {
+        if (typeof this.configManager.rotateToken !== 'function') {
+            return null;
+        }
+        const nextToken = this.configManager.rotateToken();
+        this.server?.disconnectAllSessions?.();
+        this.emitStateChange();
+        return nextToken;
+    }
+
     async pickAvailablePort({ probe } = {}) {
         const cfg = this.configManager.getConfig();
         const locale =

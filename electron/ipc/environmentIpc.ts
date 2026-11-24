@@ -425,6 +425,58 @@ export function registerEnvironmentIpc({
         },
     );
 
+    let isConsoleDocked = false;
+    let savedNormalBounds: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    } | null = null;
+
+    const computeDefaultMainWindowBounds = (workArea: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }) => {
+        const width = Math.min(1200, Math.max(1000, workArea.width - 120));
+        const height = Math.min(760, Math.max(650, workArea.height - 100));
+        const x = Math.round(workArea.x + (workArea.width - width) / 2);
+        const y = Math.round(workArea.y + (workArea.height - height) / 2);
+        return { x, y, width, height };
+    };
+
+    const NORMAL_MAIN_MIN_WIDTH = 740;
+    const NORMAL_MAIN_MIN_HEIGHT = 540;
+
+    const applyMainWindowBounds = (
+        mainWin: BrowserWindow,
+        targetBounds: { x: number; y: number; width: number; height: number },
+        dockedNarrow = false,
+    ) => {
+        if (mainWin.isDestroyed()) return;
+        if (mainWin.isMinimized()) {
+            mainWin.restore();
+        }
+        if (mainWin.isMaximized()) {
+            mainWin.unmaximize();
+        }
+        if (dockedNarrow) {
+            mainWin.setMinimumSize(
+                Math.min(380, Math.max(320, targetBounds.width)),
+                Math.min(NORMAL_MAIN_MIN_HEIGHT, Math.max(420, targetBounds.height)),
+            );
+            mainWin.setBounds(targetBounds);
+        } else {
+            mainWin.setBounds(targetBounds);
+            mainWin.setMinimumSize(
+                NORMAL_MAIN_MIN_WIDTH,
+                NORMAL_MAIN_MIN_HEIGHT,
+            );
+        }
+        mainWin.focus();
+    };
+
     ipcMain.handle(
         'tile-chrome-windows',
         async (_, rawOptions: unknown = undefined) => {
@@ -447,6 +499,23 @@ export function registerEnvironmentIpc({
                         : {};
                 const mode =
                     typeof opts.mode === 'string' ? opts.mode : 'grid';
+
+                if (mode === 'reset-app-window') {
+                    const defaultBounds =
+                        computeDefaultMainWindowBounds(workArea);
+                    if (mainWin) {
+                        applyMainWindowBounds(mainWin, defaultBounds, false);
+                    }
+                    isConsoleDocked = false;
+                    savedNormalBounds = null;
+                    return {
+                        mode: 'reset-app-window',
+                        tiledCount: 0,
+                        consoleBounds: defaultBounds,
+                        consoleDocked: false,
+                    };
+                }
+
                 const envIds = Array.isArray(opts.envIds)
                     ? opts.envIds
                           .filter(
@@ -463,17 +532,29 @@ export function registerEnvironmentIpc({
                 });
 
                 if (res.consoleBounds && mainWin && !mainWin.isDestroyed()) {
-                    if (mainWin.isMinimized()) {
-                        mainWin.restore();
+                    if (!isConsoleDocked && !mainWin.isMaximized()) {
+                        savedNormalBounds = mainWin.getBounds();
                     }
-                    if (mainWin.isMaximized()) {
-                        mainWin.unmaximize();
-                    }
-                    mainWin.setBounds(res.consoleBounds);
-                    mainWin.focus();
+                    applyMainWindowBounds(mainWin, res.consoleBounds, true);
+                    isConsoleDocked = true;
+                } else if (
+                    isConsoleDocked &&
+                    mainWin &&
+                    !mainWin.isDestroyed() &&
+                    (mode === 'grid' || mode === 'stack' || mode === 'cascade')
+                ) {
+                    const fallbackBounds =
+                        savedNormalBounds ||
+                        computeDefaultMainWindowBounds(workArea);
+                    applyMainWindowBounds(mainWin, fallbackBounds, false);
+                    isConsoleDocked = false;
+                    savedNormalBounds = null;
                 }
 
-                return res;
+                return {
+                    ...res,
+                    consoleDocked: isConsoleDocked,
+                };
             } catch (error) {
                 log.error('排列浏览器窗口失败:', error);
                 throw error;

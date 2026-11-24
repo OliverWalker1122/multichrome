@@ -1,6 +1,7 @@
 import http from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 import {
+    authenticateAutomationRequest,
     sanitizeAutomationErrorMessage,
     verifyLoopbackRequestSecurity,
 } from '../domain/automationPolicy.js';
@@ -88,6 +89,7 @@ function writeUpgradeError(socket, statusCode, statusText, message) {
 export function createCdpGuard({
     backend,
     getBoundPort,
+    getRequiredToken = () => null,
     fetchJson = fetchInternalJson,
     WebSocketImpl = WebSocket,
     logger = console,
@@ -235,13 +237,24 @@ export function createCdpGuard({
             return;
         }
 
-        let pathname = '/';
-        try {
-            pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
-        } catch {
-            writeUpgradeError(socket, 400, 'Bad Request', 'Malformed URL');
+        const requiredToken =
+            typeof getRequiredToken === 'function' ? getRequiredToken() : null;
+        const authCheck = authenticateAutomationRequest(
+            req,
+            requiredToken,
+            boundPort,
+        );
+        if (!authCheck.ok) {
+            writeUpgradeError(
+                socket,
+                authCheck.status,
+                authCheck.status === 401 ? 'Unauthorized' : 'Bad Request',
+                authCheck.message,
+            );
             return;
         }
+
+        const pathname = authCheck.pathname;
 
         const wsRoute = parseCdpWsRoute(pathname);
         if (!wsRoute) {
