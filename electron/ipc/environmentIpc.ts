@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { BrowserWindow, screen, shell, type IpcMain } from 'electron';
 import log from 'electron-log';
+import { computeDefaultMainWindowBounds } from '../domain/windowTiling.js';
 import type { EnvironmentService } from '../services/environmentService.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
 import type { ProxyCoordinator } from '../services/proxyCoordinator.js';
@@ -432,19 +433,6 @@ export function registerEnvironmentIpc({
         width: number;
         height: number;
     } | null = null;
-
-    const computeDefaultMainWindowBounds = (workArea: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    }) => {
-        const width = Math.min(1200, Math.max(1000, workArea.width - 120));
-        const height = Math.min(760, Math.max(650, workArea.height - 100));
-        const x = Math.round(workArea.x + (workArea.width - width) / 2);
-        const y = Math.round(workArea.y + (workArea.height - height) / 2);
-        return { x, y, width, height };
-    };
 
     const NORMAL_MAIN_MIN_WIDTH = 740;
     const NORMAL_MAIN_MIN_HEIGHT = 540;

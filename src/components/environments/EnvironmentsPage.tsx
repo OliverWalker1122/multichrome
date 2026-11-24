@@ -17,10 +17,7 @@ import {
     DismissRegular,
     FolderSwapRegular,
     GlobeRegular,
-    GridRegular,
     PlayRegular,
-    SquareMultipleRegular,
-    StopRegular,
     WindowMultipleRegular,
 } from '@fluentui/react-icons';
 import type {
@@ -132,7 +129,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     });
 
     const optionalColWidths: Record<OptionalEnvColumn, number> = {
-        timezone: 176,
+        timezone: 152,
         language: 84,
         notes: 150,
         createdAt: 116,
@@ -178,9 +175,6 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         Boolean(ws.search.trim()) ||
         ws.selectedTags.length > 0 ||
         ws.statusFilter !== 'all';
-    const selectedRunningIds = environments
-        .filter((item) => ws.selectedIds.has(item.id) && item.isRunning)
-        .map((item) => item.id);
 
     return (
         <div className={styles.workspace}>
@@ -250,44 +244,18 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                         <Button
                             size="small"
                             appearance="subtle"
-                            icon={<StopRegular />}
+                            icon={
+                                <DismissRegular
+                                    style={{
+                                        color: tokens.colorPaletteRedForeground1,
+                                    }}
+                                />
+                            }
                             disabled={ws.batchBusy}
                             onClick={() => void ws.handleBatchStopSelected()}
                         >
                             {t('批量关闭', 'Stop')}
                         </Button>
-                        {selectedRunningIds.length >= 2 && (
-                            <>
-                                <Button
-                                    size="small"
-                                    appearance="subtle"
-                                    icon={<GridRegular />}
-                                    disabled={ws.batchBusy || ws.tilingWindows}
-                                    onClick={() =>
-                                        void ws.handleTileWindows(
-                                            'grid',
-                                            selectedRunningIds,
-                                        )
-                                    }
-                                >
-                                    {t('平铺所选', 'Tile Selected')}
-                                </Button>
-                                <Button
-                                    size="small"
-                                    appearance="subtle"
-                                    icon={<SquareMultipleRegular />}
-                                    disabled={ws.batchBusy || ws.tilingWindows}
-                                    onClick={() =>
-                                        void ws.handleTileWindows(
-                                            'stack',
-                                            selectedRunningIds,
-                                        )
-                                    }
-                                >
-                                    {t('堆叠所选', 'Stack Selected')}
-                                </Button>
-                            </>
-                        )}
                         <Menu positioning="below-start">
                             <MenuTrigger disableButtonEnhancement>
                                 <Button
@@ -458,7 +426,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                       (showProxyCol ? ws.proxyWidth : 0) +
                                       optionalColsWidth +
                                       (showLastUsedCol ? 100 : 0) +
-                                      176,
+                                      160,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -540,7 +508,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     ) && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: '176px' }}
+                                            style={{ width: '152px' }}
                                         >
                                             {t('时区', 'Timezone')}
                                         </th>
@@ -594,7 +562,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: '176px' }}
+                                        style={{ width: '160px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>

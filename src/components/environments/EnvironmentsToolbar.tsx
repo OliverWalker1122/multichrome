@@ -31,7 +31,6 @@ import {
     SearchRegular,
     SplitVerticalRegular,
     SquareMultipleRegular,
-    StopRegular,
     TableSettingsRegular,
     TagRegular,
     WindowNewRegular,
@@ -255,7 +254,13 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     {allRunningCount > 0 && (
                         <Button
                             appearance="subtle"
-                            icon={<StopRegular />}
+                            icon={
+                                <DismissRegular
+                                    style={{
+                                        color: tokens.colorPaletteRedForeground1,
+                                    }}
+                                />
+                            }
                             disabled={closingAll}
                             onClick={onOpenCloseAllConfirm}
                         >

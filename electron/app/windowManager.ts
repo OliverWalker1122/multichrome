@@ -8,6 +8,7 @@ import {
     shell,
 } from 'electron';
 import log from 'electron-log';
+import { computeDefaultMainWindowBounds } from '../domain/windowTiling.js';
 import { parseSafeExternalUrl } from '../drivers/githubProxyTransport.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
 
@@ -83,20 +84,19 @@ export class MainWindowManager {
 
     public create(): BrowserWindow {
         const primaryDisplay = screen.getPrimaryDisplay();
-        const { width: screenWidth, height: screenHeight } =
-            primaryDisplay.workAreaSize;
-
-        const windowWidth = Math.min(1200, Math.max(1000, screenWidth - 120));
-        const windowHeight = Math.min(760, Math.max(650, screenHeight - 100));
+        const defaultBounds = computeDefaultMainWindowBounds(
+            primaryDisplay.workArea,
+        );
         const isDark = this.resolveInitialDarkMode();
         const savedTheme =
             this.options.settingsRepository.getSettings().theme || 'system';
         nativeTheme.themeSource = savedTheme;
 
         const win = new BrowserWindow({
-            width: windowWidth,
-            height: windowHeight,
-            center: true,
+            x: defaultBounds.x,
+            y: defaultBounds.y,
+            width: defaultBounds.width,
+            height: defaultBounds.height,
             minWidth: 740,
             minHeight: 540,
             show: false,

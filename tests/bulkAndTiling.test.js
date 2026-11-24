@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildBulkEnvironmentSpecs } from '../electron/domain/bulkEnvironmentPolicy.js';
 import {
     computeConsoleSplitWorkArea,
+    computeDefaultMainWindowBounds,
     computeWindowArrangement,
     computeWindowCascadeBounds,
     computeWindowGridBounds,
@@ -161,6 +162,55 @@ test('computeWindowArrangement supports console split, uniform stack, cascade, a
     assert.equal(
         normalizeWindowArrangeMode('reset-app-window'),
         'reset-app-window',
+    );
+
+    // Unified default main window bounds (startup & reset share exact 1340x820 spec)
+    const fhdDefault = computeDefaultMainWindowBounds({
+        x: 0,
+        y: 0,
+        width: 1920,
+        height: 1040,
+    });
+    assert.deepEqual(fhdDefault, {
+        x: 290,
+        y: 110,
+        width: 1340,
+        height: 820,
+    });
+    const laptopDefault = computeDefaultMainWindowBounds({
+        x: 0,
+        y: 0,
+        width: 1366,
+        height: 728,
+    });
+    assert.equal(laptopDefault.width, 1286);
+    assert.equal(laptopDefault.height, 660);
+    assert.ok(laptopDefault.x >= 0 && laptopDefault.y >= 0);
+});
+
+test('Batch bar has no duplicate tiling buttons and close actions use red cross instead of checkbox-like StopRegular', () => {
+    const pageSrc = fs.readFileSync(
+        path.resolve('src/components/environments/EnvironmentsPage.tsx'),
+        'utf8',
+    );
+    const toolbarSrc = fs.readFileSync(
+        path.resolve('src/components/environments/EnvironmentsToolbar.tsx'),
+        'utf8',
+    );
+    assert.equal(
+        /平铺所选|堆叠所选|Tile Selected|Stack Selected/.test(pageSrc),
+        false,
+        'EnvironmentsPage batch bar must not duplicate window layout buttons',
+    );
+    assert.equal(
+        /StopRegular/.test(pageSrc),
+        false,
+        'EnvironmentsPage batch stop must not use hollow checkbox-like StopRegular',
+    );
+    assert.equal(
+        /StopRegular/.test(toolbarSrc),
+        false,
+        'EnvironmentsToolbar Stop All must not use hollow checkbox-like StopRegular',
     );
 });
 

@@ -2122,24 +2122,46 @@ async function main() {
                 const lRect = launchBtn.getBoundingClientRect();
                 const mRect = menuBtn.getBoundingClientRect();
 
-                wrap.scrollLeft = wrap.scrollWidth;
                 const wrapRect = wrap.getBoundingClientRect();
+                const unclippedWithoutScroll =
+                    window.outerWidth >= 1260
+                        ? mRect.right <= wrapRect.right + 0.5 &&
+                          wrap.scrollWidth <= wrap.clientWidth + 1
+                        : true;
+
+                wrap.scrollLeft = wrap.scrollWidth;
                 const mAfterScroll = menuBtn.getBoundingClientRect();
+                wrap.scrollLeft = 0;
 
                 const filterRect = document.querySelector('[aria-label="按运行状态筛选"]').getBoundingClientRect();
                 const batchRect = document.querySelector('[aria-label="批量操作栏"]').getBoundingClientRect();
+                const batchStopBtn = Array.from(document.querySelectorAll('[aria-label="批量操作栏"] button')).find(b => (b.innerText || '').includes('批量关闭'));
+                const batchStopSvg = batchStopBtn?.querySelector('svg');
+                const batchStopColor = batchStopSvg ? getComputedStyle(batchStopSvg).color : '';
 
                 return {
                     hdr,
                     rowCb,
-                    actionsOk: lRect.left >= tdRect.left - 0.5 && mRect.right <= tdRect.right + 0.5 && mRect.width >= 24 && mAfterScroll.right <= wrapRect.right + 0.5,
+                    actionsOk:
+                        lRect.left >= tdRect.left - 0.5 &&
+                        mRect.right <= tdRect.right + 0.5 &&
+                        mRect.width >= 24 &&
+                        mAfterScroll.right <= wrapRect.right + 0.5 &&
+                        unclippedWithoutScroll,
                     batchGap: batchRect.top - filterRect.bottom,
+                    batchStopColor,
                 };
             })()`);
 
+            const batchStopRgb = String(envGeom?.batchStopColor || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            const batchStopRedOk = Boolean(
+                batchStopRgb &&
+                    Number(batchStopRgb[1]) > Number(batchStopRgb[2]) + 50 &&
+                    Number(batchStopRgb[1]) > Number(batchStopRgb[3]) + 50,
+            );
             envCheckboxesUnclipped = Boolean(envGeom?.hdr?.ok && envGeom?.rowCb?.ok);
             envActionsUnclipped = Boolean(envGeom?.actionsOk);
-            batchBarGapOk = Number(envGeom?.batchGap) >= 4;
+            batchBarGapOk = Number(envGeom?.batchGap) >= 4 && batchStopRedOk;
 
             // Clear selection & toggle "时区" OFF cleanly
             await cdp.eval(`window.__e2e.clickByText('取消选择', '[aria-label="批量操作栏"] button')`);
@@ -2274,9 +2296,28 @@ async function main() {
             let cascadeUniformOk = false;
             let focusLocateOk = false;
             let fallbackZeroRunningResetOk = false;
+            let noDupBatchLayoutOk = false;
+            let redCloseAllIconOk = false;
 
             if (singleLayoutDropdownOk) {
                 const initialOuterW = await cdp.eval(`window.outerWidth`);
+
+                // Verify batch bar does NOT duplicate '平铺所选'/'堆叠所选' and header '关闭全部' uses red cross icon
+                const batchAndHeaderChecks = await cdp.eval(`(() => {
+                    const batchText = document.querySelector('[aria-label="批量操作栏"]')?.innerText || '';
+                    const noDup = !batchText.includes('平铺所选') && !batchText.includes('堆叠所选');
+                    const closeAllBtn = Array.from(document.querySelectorAll('main button')).find(b => (b.innerText || '').includes('关闭全部'));
+                    const svg = closeAllBtn?.querySelector('svg');
+                    const closeAllColor = svg ? getComputedStyle(svg).color : '';
+                    return { noDup, closeAllColor };
+                })()`);
+                const closeAllRgb = String(batchAndHeaderChecks?.closeAllColor || '').match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                noDupBatchLayoutOk = Boolean(batchAndHeaderChecks?.noDup);
+                redCloseAllIconOk = Boolean(
+                    closeAllRgb &&
+                        Number(closeAllRgb[1]) > Number(closeAllRgb[2]) + 50 &&
+                        Number(closeAllRgb[1]) > Number(closeAllRgb[3]) + 50,
+                );
 
                 // Clicking '窗口布局' MUST only open the menu without triggering an immediate tile toast!
                 await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
@@ -2312,10 +2353,26 @@ async function main() {
                     4000,
                 );
                 const restoredWideOk = await waitUntil(
-                    () => cdp.eval(`window.outerWidth >= Math.min(980, ${Number(initialOuterW) || 1000})`),
+                    () => cdp.eval(`window.outerWidth >= Math.min(1260, ${Number(initialOuterW) || 1260})`),
                     5000,
                 );
-                splitAndResetSizeOk = Boolean(dockedNarrowOk && restoredWideOk);
+                // Verify running row's full Actions cell ([关闭][定位][⋯]) is NOT clipped at the right edge after restoring default size!
+                const runningRowActionsUnclipped = await cdp.eval(`(() => {
+                    const table = document.querySelector('table[aria-label="环境列表"]');
+                    const wrap = table?.parentElement;
+                    const row = Array.from(document.querySelectorAll('table[aria-label="环境列表"] tbody tr')).find(r => (r.innerText || '').includes('MultiWin 02'));
+                    if (!wrap || !row) return false;
+                    const wrapRect = wrap.getBoundingClientRect();
+                    const locateBtn = row.querySelector('button[aria-label="定位窗口 MultiWin 02"]');
+                    const menuBtn = row.querySelector('.mc-environment-row-menu');
+                    if (!locateBtn || !menuBtn) return false;
+                    const locR = locateBtn.getBoundingClientRect();
+                    const menR = menuBtn.getBoundingClientRect();
+                    return locR.right <= wrapRect.right + 0.5 && menR.right <= wrapRect.right + 0.5;
+                })()`);
+                splitAndResetSizeOk = Boolean(
+                    dockedNarrowOk && restoredWideOk && runningRowActionsUnclipped,
+                );
 
                 // Open '窗口布局' -> Uniform Stack ('统一尺寸堆叠')
                 await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
@@ -2356,6 +2413,8 @@ async function main() {
 
                 uiTile3Ok = Boolean(
                     noMisfireOnOpenOk &&
+                        noDupBatchLayoutOk &&
+                        redCloseAllIconOk &&
                         gridToastOk &&
                         splitAndResetSizeOk &&
                         stackUniformOk &&
@@ -2453,7 +2512,7 @@ async function main() {
                 fallbackZeroRunningResetOk = Boolean(restoredFromZeroRunning && resetBtnCleared);
             }
             uiTile3Ok = Boolean(uiTile3Ok && fallbackZeroRunningResetOk);
-            uiTile3SubDetail = `(noMisfire=${noMisfireOnOpenOk},splitReset=${splitAndResetSizeOk},zeroReset=${fallbackZeroRunningResetOk},stack=${stackUniformOk},cascade=${cascadeUniformOk},focus=${focusLocateOk})`;
+            uiTile3SubDetail = `(noMisfire=${noMisfireOnOpenOk},noDupBatch=${noDupBatchLayoutOk},redClose=${redCloseAllIconOk},splitReset=${splitAndResetSizeOk},zeroReset=${fallbackZeroRunningResetOk},stack=${stackUniformOk},cascade=${cascadeUniformOk},focus=${focusLocateOk})`;
 
             // 6) Enable Pre-Launch Check in Settings -> verify ALL 3 pre-checks are visible simultaneously in Batch Health Dialog & "启动全部（3）" launches & auto-tiles all 3 windows!
             await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);

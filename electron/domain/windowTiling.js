@@ -16,6 +16,32 @@ export function normalizeWindowArrangeMode(mode) {
 }
 
 /**
+ * Single source of truth for MultiChrome's default main window size & centered bounds,
+ * shared by initial BrowserWindow creation and "Reset App Window".
+ * Sized generously (up to 1340×820) so the full 8-column table (including optional
+ * Timezone column and running-row Launch/Stop + Locate + More buttons) renders with
+ * zero right-edge clipping while gracefully adapting to smaller laptop displays.
+ */
+export function computeDefaultMainWindowBounds(workArea) {
+    const areaW = Math.max(740, Math.round(Number(workArea?.width) || 1280));
+    const areaH = Math.max(540, Math.round(Number(workArea?.height) || 800));
+    const originX = Number.isFinite(workArea?.x) ? Math.round(workArea.x) : 0;
+    const originY = Number.isFinite(workArea?.y) ? Math.round(workArea.y) : 0;
+
+    const width = Math.min(
+        areaW,
+        Math.min(1340, Math.max(1000, areaW - 80)),
+    );
+    const height = Math.min(
+        areaH,
+        Math.min(820, Math.max(660, areaH - 80)),
+    );
+    const x = Math.round(originX + (areaW - width) / 2);
+    const y = Math.round(originY + (areaH - height) / 2);
+    return { x, y, width, height };
+}
+
+/**
  * Windows 10/11 standard resizable top-level windows (`WS_THICKFRAME`) include an
  * invisible ~7px DWM resize shadow border on left, right, and bottom (`GetWindowRect`
  * vs `DWMWA_EXTENDED_FRAME_BOUNDS`). Compensating outward makes visible window edges
