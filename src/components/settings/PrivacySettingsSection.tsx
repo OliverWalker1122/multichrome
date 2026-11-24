@@ -82,7 +82,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                     <InfoTip
                         content={t(
                             '绑定代理的环境默认启用全链路防泄露：代理断开时自动断网绝不暴露本机 IP，并阻断 WebRTC 与本地 DNS 泄露',
-                            'Proxied profiles enforce strict anti-leak protection: never fall back to direct IP on disconnect and block WebRTC/DNS leaks.',
+                            'Proxied profiles enforce strict anti-leak protection: never fall back to direct IP on disconnect and block WebRTC and DNS leaks.',
                         )}
                     />
                 </div>

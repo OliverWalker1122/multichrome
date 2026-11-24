@@ -763,7 +763,7 @@ export class KernelManager {
             const executablePath = findChromeExecutableInDir(installDir, 5);
             if (!executablePath) {
                 throw new Error(
-                    '解压后未找到浏览器可执行文件（chrome.exe / Chromium / chrome），压缩包结构可能不兼容',
+                    '解压后未找到浏览器可执行文件（chrome.exe、Chromium 或 chrome），压缩包结构可能不兼容',
                 );
             }
             if (process.platform !== 'win32') {
@@ -1072,7 +1072,7 @@ export class KernelManager {
         } else if (stat.isFile()) {
             const base = path.basename(selectedPath).toLowerCase();
             if (process.platform === 'win32' && base !== 'sing-box.exe') {
-                throw new Error('请选择 sing-box.exe 或官方 .zip/.tar.gz 压缩包');
+                throw new Error('请选择 sing-box.exe 或官方压缩包');
             }
             executablePath = selectedPath;
             installDir = path.dirname(selectedPath);

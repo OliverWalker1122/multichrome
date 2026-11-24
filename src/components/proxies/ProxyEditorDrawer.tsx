@@ -230,8 +230,8 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                     required
                                     value={editor.line}
                                     placeholder={t(
-                                        'http://用户名:密码@服务器:端口 或 vless:// / vmess:// / trojan:// / ss:// / hy2:// / tuic://',
-                                        'http://user:pass@host:port or vless:// / vmess:// / trojan:// / ss:// / hy2:// / tuic://',
+                                        'http://用户名:密码@服务器:端口',
+                                        'http://user:pass@host:port',
                                     )}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -359,7 +359,7 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                         {t('代理配置 (JSON)', 'Proxy Config (JSON)')}
                                         <InfoTip
                                             content={t(
-                                                '支持 sing-box 单个 outbound 对象或包含 outbounds / dns / endpoints 的配置片段；保存前自动校验并加密存储',
+                                                '支持 sing-box 单个 outbound 对象或包含 outbounds、dns、endpoints 的配置片段；保存前自动校验并加密存储',
                                                 'Accepts a sing-box outbound object or snippet; validated and encrypted locally before saving.',
                                             )}
                                         />

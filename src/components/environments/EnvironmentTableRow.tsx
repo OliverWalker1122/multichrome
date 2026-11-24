@@ -19,8 +19,10 @@ import {
     FolderOpenRegular,
     MoreHorizontalRegular,
     PanelRightRegular,
+    PlayFilled,
     PlayRegular,
     ShieldCheckmarkRegular,
+    StopFilled,
     StopRegular,
 } from '@fluentui/react-icons';
 import dayjs from 'dayjs';
@@ -355,12 +357,22 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                                 : styles.runButtonLaunch,
                         )}
                         size="small"
-                        appearance="subtle"
+                        appearance="secondary"
                         icon={
                             busy ? undefined : env.isRunning ? (
-                                <StopRegular style={{ fontSize: '13px' }} />
+                                <StopFilled
+                                    style={{
+                                        fontSize: '9px',
+                                        color: tokens.colorPaletteRedForeground1,
+                                    }}
+                                />
                             ) : (
-                                <PlayRegular style={{ fontSize: '13px' }} />
+                                <PlayFilled
+                                    style={{
+                                        fontSize: '10px',
+                                        color: tokens.colorBrandForeground1,
+                                    }}
+                                />
                             )
                         }
                         disabled={busy}

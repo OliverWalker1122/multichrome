@@ -427,7 +427,7 @@ export function createAutomationBackend({
                 const running = list.filter((item) => Boolean(item.isRunning));
                 if (running.length === 0) {
                     throw createValidationError(
-                        `No MultiChrome profile is currently running. Launch one via MultiChrome MCP (${baseUrl}/mcp -> list_profiles / start_profile) or HTTP (GET ${baseUrl}/api/v1/profiles, POST ${baseUrl}/api/v1/profiles/start with {"name":"<profileName>"}).`,
+                        `No MultiChrome profile is currently running. Launch one via MultiChrome MCP (${baseUrl}/mcp -> list_profiles, start_profile) or HTTP (GET ${baseUrl}/api/v1/profiles, POST ${baseUrl}/api/v1/profiles/start with {"name":"<profileName>"}).`,
                         'NO_RUNNING_PROFILE',
                         503,
                     );

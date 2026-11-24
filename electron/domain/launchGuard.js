@@ -62,8 +62,8 @@ export function evaluateLaunchConsistency({
                 ? 'C++ Fingerprint Kernel Missing'
                 : '缺少 C++ 指纹浏览器内核',
             detail: isEn
-                ? 'This environment is configured to use the C++ fingerprint kernel, which is not installed or activated yet. Download or import it in "Settings → Cores & Kernels", or switch to Official Chrome.'
-                : '当前环境配置了 C++ 指纹内核，但尚未安装或激活可用内核。请先前往「设置 → 浏览器内核」下载或导入，或切换为官方 Chrome。',
+                ? 'This environment is configured to use the C++ fingerprint kernel, which is not installed or activated yet. Download or import it in "Settings → Components", or switch to Official Chrome.'
+                : '当前环境配置了 C++ 指纹内核，但尚未安装或激活可用内核。请先前往「设置 → 组件」下载或导入，或切换为官方 Chrome。',
         });
     }
 

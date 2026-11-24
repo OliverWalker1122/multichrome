@@ -71,8 +71,8 @@ const BatchImportProxiesDialog: React.FC<BatchImportProxiesDialogProps> = ({
                                 'Proxy List (one per line)',
                             )}
                             hint={t(
-                                '支持 http/https/socks5、主机:端口(:账号:密码)，以及 vless://、vmess://、trojan://、ss://、hy2://、tuic:// 分享链接；支持“自定义名称 | 代理地址”或链接末尾 #备注 自动命名，以 # 或 // 开头的注释行会自动忽略。',
-                                'Supports http/https/socks5, host:port(:user:pass), and vless://, vmess://, trojan://, ss://, hy2://, tuic:// share URIs; supports "Custom Name | address" or #remark naming. Lines starting with # or // are ignored.',
+                                '支持 HTTP、HTTPS、SOCKS5、主机:端口(:账号:密码)，以及 vless://、vmess://、trojan://、ss://、hy2://、tuic:// 分享链接；支持“名称 | 地址”或末尾 #备注 命名。',
+                                'Supports HTTP, HTTPS, SOCKS5, host:port(:user:pass), and vless://, vmess://, trojan://, ss://, hy2://, tuic:// share URIs; supports "Name | address" or #remark naming.',
                             )}
                         >
                             <Textarea

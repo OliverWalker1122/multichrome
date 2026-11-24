@@ -172,7 +172,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
             <DialogSurface style={{ maxWidth: '560px', width: '92vw' }}>
                 <DialogBody>
                     <DialogTitle>
-                        {t('防泄露 / 指纹健康自检', 'Anti-Leak & Fingerprint Health Check')} · {env.name}
+                        {t('健康自检', 'Health Check')} · {env.name}
                     </DialogTitle>
                     <DialogContent>
                         {loading && !report ? (
@@ -209,7 +209,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                               )
                                             : report.overall === 'warn'
                                               ? t(
-                                                    '存在注意事项：部分项目需关注或在启动代理/环境后完成自动对齐。',
+                                                    '存在注意事项：部分项目需关注，或将在启动后自动对齐。',
                                                     'Warnings detected: Some items need attention or will auto-align after launch.',
                                                 )
                                               : t(

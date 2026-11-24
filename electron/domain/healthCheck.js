@@ -172,17 +172,22 @@ export function evaluateEnvironmentHealth({
                       ? 'Auto-aligned timezone and GPS coordinates from proxy exit IP (4D consistent).'
                       : '已开启按代理出口 IP 自动对齐时区与经纬度（四维一致）。'
                   : isEn
-                    ? 'Timezone auto-aligned from proxy exit IP; GPS override is off by default (zero page-level CDP attachment for C++ kernel) and can be enabled in Settings → Anti-Leak & Network.'
-                    : '已按代理出口 IP 自动对齐时区；GPS 经纬度覆盖默认关闭（保持 C++ 零页面 CDP 挂载），如需启用可在「设置 → 防泄露与网络」开启。',
+                    ? 'Timezone auto-aligned from proxy exit IP; GPS override is off by default (zero page-level CDP attachment for C++ kernel) and can be enabled in Settings → Privacy.'
+                    : '已按代理出口 IP 自动对齐时区；GPS 经纬度覆盖默认关闭（保持 C++ 零页面 CDP 挂载），如需启用可在「设置 → 隐私」开启。',
         });
     } else {
         items.push({
             id: 'geo',
             label: geoLabel,
             status: proxyMode === 'direct' ? 'pass' : 'warn',
-            value: isEn
-                ? 'Follow System / Auto-match on Launch'
-                : '跟随系统 / 启动后自动匹配',
+            value:
+                proxyMode === 'direct'
+                    ? isEn
+                        ? 'System Timezone'
+                        : '跟随系统'
+                    : isEn
+                      ? 'Auto-match on Launch'
+                      : '启动时自动匹配',
             detail:
                 proxyMode === 'direct'
                     ? isEn
@@ -238,8 +243,8 @@ export function evaluateEnvironmentHealth({
             status: 'warn',
             value: isEn ? 'Direct Mode (Unrestricted)' : '直连模式（未拦截）',
             detail: isEn
-                ? 'disable_non_proxied_udp and QUIC/UDP blocking apply only when a proxy is bound.'
-                : '仅在绑定代理时自动锁定 disable_non_proxied_udp 与禁用 QUIC/UDP 绕过。',
+                ? 'disable_non_proxied_udp and QUIC and UDP blocking apply only when a proxy is bound.'
+                : '仅在绑定代理时自动锁定 disable_non_proxied_udp 与阻断 QUIC 及 UDP 绕过。',
         });
     } else {
         const lockedInPrefs = prefsWebRTC === 'disable_non_proxied_udp';
@@ -271,8 +276,8 @@ export function evaluateEnvironmentHealth({
                 status: 'fail',
                 value: isEn ? 'Kernel Missing' : '缺少指纹内核',
                 detail: isEn
-                    ? 'Install and activate fingerprint-chromium in "Settings → Cores & Kernels".'
-                    : '请前往「设置 → 浏览器内核」安装并激活 fingerprint-chromium。',
+                    ? 'Install and activate fingerprint-chromium in "Settings → Components".'
+                    : '请前往「设置 → 组件」安装并激活 fingerprint-chromium。',
             });
         } else {
             const fp = env?.fingerprintConfig;
@@ -287,8 +292,8 @@ export function evaluateEnvironmentHealth({
                     ? `C++ Native Stealth · Seed #${fp?.seed || 'Auto'}`
                     : `C++ 纯原生隐匿 · Seed #${fp?.seed || '自动'}`,
                 detail: isEn
-                    ? `Zero extensions / Zero JS hooks · ${fp?.brand || 'Chrome'} (${fp?.platform || 'host'}) · ${enabledSpoofing}/5 C++ hardware noise modules active.`
-                    : `零扩展 / 零 JS Hook · ${fp?.brand || 'Chrome'} (${fp?.platform || 'host'}) · 已启用 ${enabledSpoofing}/5 项 C++ 硬件噪声伪装。`,
+                    ? `Zero extensions, zero JS hooks · ${fp?.brand || 'Chrome'} (${fp?.platform || 'host'}) · ${enabledSpoofing} of 5 C++ hardware noise modules active.`
+                    : `零扩展、零 JS Hook · ${fp?.brand || 'Chrome'} (${fp?.platform || 'host'}) · 已启用 ${enabledSpoofing} 项 C++ 硬件噪声伪装。`,
             });
         }
     } else {
@@ -298,8 +303,8 @@ export function evaluateEnvironmentHealth({
             status: 'pass',
             value: isEn ? 'Official Chrome (Isolated)' : '官方 Chrome（隔离模式）',
             detail: isEn
-                ? 'Isolated User-Data-Dir + CDP timezone/language/geolocation override for high-security accounts; switch to C++ Fingerprint Kernel for hardware-level anti-correlation.'
-                : '独立 User-Data-Dir + CDP 时区/语言/Geolocation 覆盖，适合高安全主号；若需强硬件抗指纹可切换 C++ 指纹内核。',
+                ? 'Isolated User-Data-Dir + CDP timezone, language, and geolocation override for high-security accounts; switch to C++ Fingerprint Kernel for hardware-level anti-correlation.'
+                : '独立 User-Data-Dir + CDP 时区、语言与地理位置覆盖，适合高安全主号；若需强硬件抗指纹可切换 C++ 指纹内核。',
         });
     }
 

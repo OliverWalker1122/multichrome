@@ -123,8 +123,8 @@ const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
                                           'Close the environment before clearing cache',
                                       )
                                     : t(
-                                          '清理 Cache/GPUCache（保留 Cookie 与登录态）',
-                                          'Clear Cache/GPUCache (preserves cookies & sessions)',
+                                          '清理浏览器缓存（保留 Cookie 与登录态）',
+                                          'Clear browser cache (preserves cookies and sessions)',
                                       )
                             }
                             relationship="label"

@@ -55,7 +55,7 @@ export default function ColumnResizeHandle({
             aria-valuenow={width}
             title={
                 isEn
-                    ? 'Drag to resize column; use Left/Right arrows when focused'
+                    ? 'Drag to resize column; use arrow keys when focused'
                     : '拖动调整列宽；聚焦后用左右方向键调整'
             }
             tabIndex={0}

@@ -85,7 +85,7 @@ export const MCP_TOOLS = [
     {
         name: 'start_profile',
         description:
-            'Launch a MultiChrome profile with its Fail-Closed proxy, timezone/language coherence, and C++ fingerprint seed, then return its guarded CDP endpoint for @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP.',
+            'Launch a MultiChrome profile with its Fail-Closed proxy, timezone and language coherence, and C++ fingerprint seed, then return its guarded CDP endpoint for @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP.',
         annotations: {
             title: 'Start Browser Profile',
             readOnlyHint: false,
@@ -322,7 +322,7 @@ export function createMcpHandler({
                         },
                         serverInfo: { name: serverName, version: serverVersion },
                         instructions:
-                            'MultiChrome manages anti-detect profiles and Fail-Closed proxies. Use start_profile or switch_active_profile to select an environment, then use standard @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP against cdpEndpoint / wsEndpoint for all page automation.',
+                            'MultiChrome manages anti-detect profiles and Fail-Closed proxies. Use start_profile or switch_active_profile to select an environment, then use standard @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP against cdpEndpoint or wsEndpoint for all page automation.',
                     });
                 }
 

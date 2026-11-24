@@ -73,8 +73,8 @@ export const SPOOFING_ITEMS: Array<{
     },
     {
         key: 'gpu',
-        zh: '显卡与图形',
-        en: 'Graphics / WebGL',
+        zh: '显卡渲染',
+        en: 'WebGL',
         tipZh: '隔离 WebGL 图形渲染特征与显卡标识',
         tipEn: 'Isolates WebGL rendering output and GPU identifiers',
     },

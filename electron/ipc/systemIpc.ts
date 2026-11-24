@@ -197,8 +197,8 @@ export function registerSystemIpc({
         const isEn = isEnglishLocale();
         const result = await dialog.showOpenDialog(mainWindow, {
             title: isEn
-                ? 'Select official sing-box archive (.zip / .tar.gz) or sing-box executable'
-                : '选择 sing-box 官方压缩包 (.zip / .tar.gz) 或 sing-box.exe',
+                ? 'Select official sing-box archive or executable'
+                : '选择 sing-box 官方安装包或可执行文件',
             properties: ['openFile'],
             filters: [
                 {
@@ -245,18 +245,9 @@ export function registerSystemIpc({
             }
             const isEn = isEnglishLocale();
             const isFolder = mode === 'folder';
-            const platformTitle =
-                process.platform === 'darwin'
-                    ? isEn
-                        ? 'Select privacy browser image (.dmg / .zip) or Chromium.app'
-                        : '选择指纹内核镜像 (.dmg / .zip) 或 Chromium.app'
-                    : process.platform === 'linux'
-                      ? isEn
-                          ? 'Select privacy browser archive (.tar.xz / .zip) or chrome executable'
-                          : '选择指纹内核压缩包 (.tar.xz / .zip) 或 chrome 可执行文件'
-                      : isEn
-                        ? 'Select privacy browser archive (.zip) or chrome.exe'
-                        : '选择指纹内核压缩包 (.zip) 或 chrome.exe';
+            const platformTitle = isEn
+                ? 'Select privacy browser package or executable'
+                : '选择防关联浏览器安装包或可执行文件';
             const platformFilters =
                 process.platform === 'darwin'
                     ? [

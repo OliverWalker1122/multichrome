@@ -258,7 +258,7 @@ export class BrowserLaunchService {
         try {
             parsed = new URL(url);
             if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-                throw new Error('仅支持 http/https 链接');
+                throw new Error('仅支持 HTTP 或 HTTPS 链接');
             }
         } catch {
             throw new Error('无效的检测页面链接');
@@ -736,7 +736,7 @@ export class BrowserLaunchService {
                     logger: log,
                 });
                 log.info(
-                    `[${env.name}] 已启用 C++ 纯原生隐匿模式（零扩展 / 零 JS Hook）: tz=${effectiveTimezone || 'pending'}, lang=${effectiveLanguage}, geo=${startupGeolocation ? `${startupGeolocation.latitude.toFixed(2)},${startupGeolocation.longitude.toFixed(2)}` : 'none'}, webrtc=${proxyAddress ? 'fail-closed' : 'direct'}`,
+                    `[${env.name}] 已启用 C++ 纯原生隐匿模式（零扩展、零 JS Hook）: tz=${effectiveTimezone || 'pending'}, lang=${effectiveLanguage}, geo=${startupGeolocation ? `${startupGeolocation.latitude.toFixed(2)},${startupGeolocation.longitude.toFixed(2)}` : 'none'}, webrtc=${proxyAddress ? 'fail-closed' : 'direct'}`,
                 );
             } else {
                 this.cdpManager.primeEnvironment(id, {
@@ -752,7 +752,7 @@ export class BrowserLaunchService {
                     logger: log,
                 });
                 log.info(
-                    `[${env.name}] 已启用标准 Chrome 原生隐匿模式（零扩展 / 零 JS Hook）: tz=${effectiveTimezone || 'none'}, lang=${effectiveLanguage}, geo=${startupGeolocation ? `${startupGeolocation.latitude.toFixed(2)},${startupGeolocation.longitude.toFixed(2)}` : 'none'}, webrtc=${proxyAddress ? 'fail-closed' : 'direct'}, gate=${startupGate ? 'on' : 'off'}`,
+                    `[${env.name}] 已启用标准 Chrome 原生隐匿模式（零扩展、零 JS Hook）: tz=${effectiveTimezone || 'none'}, lang=${effectiveLanguage}, geo=${startupGeolocation ? `${startupGeolocation.latitude.toFixed(2)},${startupGeolocation.longitude.toFixed(2)}` : 'none'}, webrtc=${proxyAddress ? 'fail-closed' : 'direct'}, gate=${startupGate ? 'on' : 'off'}`,
                 );
             }
 
@@ -1065,7 +1065,7 @@ export class BrowserLaunchService {
 
                 if (!gateHandshakeOk) {
                     log.error(
-                        `❌ [${env.name}] 启动安全防护超时/未就绪，已 Fail-Closed 阻断并终止本次启动`,
+                        `❌ [${env.name}] 启动安全防护超时未就绪，已 Fail-Closed 阻断并终止本次启动`,
                     );
                     await startupGate.abortFailClosed();
                     if (launchRecord) {

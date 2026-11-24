@@ -977,7 +977,7 @@ export class CDPManager {
 
         const reloadedCount = preCommitted.length + pendingHttp.length;
         log.info(
-            `[CDP] 启动闸门检测到 ${preCommitted.length} 个离线缓存/SW 抢跑页，已卸载旧页、丢弃 ${droppedCount} 条旧连接并重载 ${reloadedCount} 个标签页`,
+            `[CDP] 启动闸门检测到 ${preCommitted.length} 个离线缓存抢跑页，已卸载旧页、丢弃 ${droppedCount} 条旧连接并重载 ${reloadedCount} 个标签页`,
         );
         return {
             preCommittedCount: preCommitted.length,

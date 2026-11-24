@@ -102,8 +102,8 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
     'sing-box 引用了不存在的出口': 'sing-box references a non-existent outbound',
     'sing-box 配置校验失败，请检查协议参数及依赖配置':
         'sing-box configuration validation failed. Check protocol parameters and dependencies.',
-    'REALITY 握手校验失败，请检查公钥/Short ID/SNI，或排查透明代理的 TLS 域名嗅探覆写':
-        'REALITY verification failed. Check public key / short ID / SNI, or bypass TLS domain sniffing on your local TUN/transparent proxy.',
+    'REALITY 握手校验失败，请检查公钥、Short ID 与 SNI，或排查透明代理的 TLS 域名嗅探覆写':
+        'REALITY verification failed. Check public key, short ID, and SNI, or bypass TLS domain sniffing on your local transparent proxy.',
     '上游 TLS 握手失败，请检查证书、SNI 或协议配置':
         'Upstream TLS handshake failed. Check certificate, SNI, or protocol settings.',
     '上游代理认证失败，请检查认证配置':
@@ -257,8 +257,8 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
         'SHA-256 verified; extracting to data directory…',
     'SHA-256 校验通过，正在解压 sing-box…':
         'SHA-256 verified; extracting sing-box…',
-    '解压后未找到浏览器可执行文件（chrome.exe / Chromium / chrome），压缩包结构可能不兼容':
-        'Browser executable (chrome.exe / Chromium / chrome) not found after extraction; archive layout may be incompatible',
+    '解压后未找到浏览器可执行文件（chrome.exe、Chromium 或 chrome），压缩包结构可能不兼容':
+        'Browser executable (chrome.exe, Chromium, or chrome) not found after extraction; archive layout may be incompatible',
     '内核解压安装失败': 'Failed to extract and install kernel',
     '解压后未找到 sing-box 可执行文件':
         'sing-box executable not found after extraction',
@@ -272,8 +272,8 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
         'Browser executable not found in selected folder',
     '压缩包中未找到 sing-box 可执行文件':
         'sing-box executable not found in archive',
-    '请选择 sing-box.exe 或官方 .zip/.tar.gz 压缩包':
-        'Select sing-box.exe or an official .zip/.tar.gz archive',
+    '请选择 sing-box.exe 或官方压缩包':
+        'Select sing-box.exe or an official archive',
     '所选目录中未找到 sing-box 可执行文件':
         'sing-box executable not found in selected folder',
     '不支持的文件类型': 'Unsupported file type',
@@ -319,7 +319,7 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
     '源环境不存在或已移入回收站':
         'Source profile does not exist or has been moved to Trash',
     '环境不存在': 'Profile not found',
-    '仅支持 http/https 链接': 'Only http/https URLs are supported',
+    '仅支持 HTTP 或 HTTPS 链接': 'Only HTTP and HTTPS URLs are supported',
     '无效的检测页面链接': 'Invalid inspection URL',
     '请先启动此环境，再在环境内打开检测页面':
         'Launch this profile before opening an inspection URL',
@@ -575,8 +575,8 @@ const BACKEND_TEMPLATE_REPLACEMENTS: Array<
         '[CDP] Startup gate released (no offline cache race): ',
     ],
     [
-        /\[CDP\]\s*启动闸门检测到\s*(\d+)\s*个离线缓存\/SW 抢跑页，已卸载旧页、丢弃\s*(\d+)\s*条旧连接并重载\s*(\d+)\s*个标签页/g,
-        '[CDP] Startup gate caught $1 pre-committed cache/SW tab(s), unloaded old pages, dropped $2 stale connection(s), and reloaded $3 tab(s)',
+        /\[CDP\]\s*启动闸门检测到\s*(\d+)\s*个离线缓存抢跑页，已卸载旧页、丢弃\s*(\d+)\s*条旧连接并重载\s*(\d+)\s*个标签页/g,
+        '[CDP] Startup gate caught $1 pre-committed cached tab(s), unloaded old pages, dropped $2 stale connection(s), and reloaded $3 tab(s)',
     ],
     [
         /\[CDP\]\s*C\+\+\s*内核默认搜索引擎检查完成\s*\(([^)]+)\)[:：]\s*/g,
@@ -616,8 +616,8 @@ const BACKEND_TEMPLATE_REPLACEMENTS: Array<
         'WebRTC IP updated, refreshed $1 session(s)',
     ],
     [
-        /\[指纹扩展\]\s*已创建\/更新[:：]\s*/g,
-        '[Fingerprint Ext] Created/updated: ',
+        /\[指纹扩展\]\s*已创建或更新[:：]\s*/g,
+        '[Fingerprint Ext] Created or updated: ',
     ],
     [
         /\[时区扩展\]\s*已注册到 Preferences[:：]\s*/g,
@@ -646,12 +646,12 @@ const BACKEND_TEMPLATE_REPLACEMENTS: Array<
         'Fail-Closed startup traffic gate enabled',
     ],
     [
-        /已启用 C\+\+ 纯原生隐匿模式（零扩展 \/ 零 JS Hook）[:：]\s*/g,
-        'C++ native stealth enabled (zero extensions / zero JS hooks): ',
+        /已启用 C\+\+ 纯原生隐匿模式（零扩展、零 JS Hook）[:：]\s*/g,
+        'C++ native stealth enabled (zero extensions, zero JS hooks): ',
     ],
     [
-        /已启用标准 Chrome 原生隐匿模式（零扩展 \/ 零 JS Hook）[:：]\s*/g,
-        'Standard Chrome native stealth enabled (zero extensions / zero JS hooks): ',
+        /已启用标准 Chrome 原生隐匿模式（零扩展、零 JS Hook）[:：]\s*/g,
+        'Standard Chrome native stealth enabled (zero extensions, zero JS hooks): ',
     ],
     [
         /已分发\s*(\d+)\s*条书签模板（跳过重复\s*(\d+)\s*条）/g,
@@ -664,7 +664,7 @@ const BACKEND_TEMPLATE_REPLACEMENTS: Array<
     [/启用 CDP pipe（首次安装扩展）/g, 'Enabled CDP pipe (first-time extension install)'],
     [
         /已启用省内存启动策略（Memory Saver \+ 渲染进程与缓存上限）/g,
-        'Memory Saver launch policy enabled (Memory Saver + renderer/cache caps)',
+        'Memory Saver launch policy enabled (Memory Saver + renderer and cache caps)',
     ],
     [/使用 C\+\+ 指纹内核/g, 'Using privacy browser kernel'],
     [/启动前已解析代理出口[:：]\s*/g, 'Pre-launch proxy exit resolved: '],
@@ -689,8 +689,8 @@ const BACKEND_TEMPLATE_REPLACEMENTS: Array<
         'Background exit IP probe did not respond; keeping kernel Fail-Closed leak protection',
     ],
     [
-        /启动安全防护超时\/未就绪，已 Fail-Closed 阻断并终止本次启动/g,
-        'Launch security guard timed out/not ready; Fail-Closed aborted launch',
+        /启动安全防护超时未就绪，已 Fail-Closed 阻断并终止本次启动/g,
+        'Launch security guard timed out; Fail-Closed aborted launch',
     ],
     [/轮询确认运行中/g, 'Confirmed running via polling'],
     [/Chrome进程已强制关闭/g, 'Chrome process force-closed'],

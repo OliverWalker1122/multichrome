@@ -275,7 +275,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                       'Try a different name, protocol, or exit IP keyword.',
                                   )
                                 : t(
-                                      '支持粘贴一行地址或分享链接（HTTP / SOCKS5 / VLESS / VMess / Trojan / SS / Hy2 / TUIC），也支持 sing-box 出口 JSON。',
+                                      '支持粘贴一行地址或分享链接（HTTP、SOCKS5、VLESS、VMess、Trojan、SS、Hy2、TUIC），也支持 sing-box 出口 JSON。',
                                       'Paste a single line or share URI (HTTP, SOCKS5, VLESS, VMess, Trojan, SS, Hy2, TUIC), or sing-box outbound JSON.',
                                   )}
                         </span>
@@ -342,10 +342,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                         className={styles.th}
                                         style={{ width: '200px' }}
                                     >
-                                        {t(
-                                            '出口 IP / 位置',
-                                            'Exit IP / Location',
-                                        )}
+                                        {t('出口信息', 'Exit Info')}
                                     </th>
                                     <th
                                         className={styles.th}

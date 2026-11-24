@@ -466,10 +466,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                 </Button>
                 {onInspectHealth && (
                     <Tooltip
-                        content={t(
-                            '一键防泄露 / 指纹健康自检',
-                            'Anti-Leak & Fingerprint Health Check',
-                        )}
+                        content={t('健康自检', 'Health Check')}
                         relationship="label"
                     >
                         <Button
@@ -608,7 +605,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                         onChange={(_, data) => setProxyId(data.value)}
                     >
                         <option value="">
-                            {t('跟随默认 / 手动代理', 'Default / Manual')}
+                            {t('全局默认', 'Global Default')}
                         </option>
                         {managedProxies.map((item) => (
                             <option key={item.id} value={item.id}>

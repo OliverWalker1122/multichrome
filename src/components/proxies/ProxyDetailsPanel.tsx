@@ -617,7 +617,7 @@ const ProxyDetailsPanel: React.FC<ProxyDetailsPanelProps> = ({
                             <div key={env.id} className={styles.envItem}>
                                 <span
                                     className={styles.envName}
-                                    title={`${env.groupName} / ${env.name}`}
+                                    title={`${env.groupName} · ${env.name}`}
                                 >
                                     <span
                                         className={mergeClasses(

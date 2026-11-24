@@ -299,10 +299,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                         }
                                     >
                                         <option value="">
-                                            {t(
-                                                '不指定（跟随默认 / 直连）',
-                                                'Default / Direct',
-                                            )}
+                                            {t('全局默认', 'Global Default')}
                                         </option>
                                         {managedProxies.map((item) => (
                                             <option

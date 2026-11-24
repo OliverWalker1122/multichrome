@@ -633,8 +633,8 @@ const AutomationSettingsPanel: React.FC = () => {
                         </h2>
                         <InfoTip
                             content={t(
-                                '在 127.0.0.1 提供标准 CDP 透传守卫与 4 个极简环境启停 MCP 工具，原生兼容官方 @playwright/mcp 与 chrome-devtools-mcp；自动忽略外部 UA/时区/窗口尺寸覆盖指令，并在代理断开时同步断开连接。',
-                                'Exposes a guarded standard CDP endpoint and 4 profile lifecycle MCP tools on 127.0.0.1. Compatible with official @playwright/mcp and chrome-devtools-mcp while blocking external UA/timezone/viewport overrides and disconnecting if the proxy drops.',
+                                '在 127.0.0.1 提供标准 CDP 透传守卫与 4 个环境启停 MCP 工具，兼容官方 @playwright/mcp 与 chrome-devtools-mcp；自动忽略外部指纹覆盖指令，并在代理断开时同步断开连接。',
+                                'Exposes a guarded standard CDP endpoint and 4 profile lifecycle MCP tools on 127.0.0.1. Compatible with official @playwright/mcp and chrome-devtools-mcp while ignoring external fingerprint overrides and disconnecting if the proxy drops.',
                             )}
                         />
                     </div>

@@ -162,7 +162,7 @@ const EnvironmentAdvancedFields: React.FC<EnvironmentAdvancedFieldsProps> = ({
                         }
                     >
                         <Input
-                            placeholder="auto / en-US"
+                            placeholder="auto"
                             list="env-detail-languages"
                             value={language}
                             onChange={(_, data) =>

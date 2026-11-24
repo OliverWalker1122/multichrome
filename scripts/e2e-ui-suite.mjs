@@ -1150,7 +1150,7 @@ async function main() {
         await sleep(200);
         record(
             'E2E-08',
-            '一键防泄露 / 指纹健康自检弹窗',
+            '健康自检弹窗（无双重斜杠标题）',
             Boolean(healthDialogOk),
             healthDialogOk ? 'All health check cards rendered' : 'Health dialog incomplete',
         );

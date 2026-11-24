@@ -20,7 +20,9 @@ import {
     LinkRegular,
     MoreHorizontalRegular,
     PanelRightRegular,
+    PlayFilled,
     PlayRegular,
+    StopFilled,
     StopRegular,
     WarningRegular,
 } from '@fluentui/react-icons';
@@ -245,7 +247,7 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                     >
                         <Button
                             size="small"
-                            appearance="subtle"
+                            appearance="secondary"
                             className={mergeClasses(
                                 styles.runButton,
                                 running
@@ -254,9 +256,19 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                             )}
                             icon={
                                 busy === proxy.id ? undefined : running ? (
-                                    <StopRegular style={{ fontSize: '13px' }} />
+                                    <StopFilled
+                                        style={{
+                                            fontSize: '9px',
+                                            color: tokens.colorPaletteRedForeground1,
+                                        }}
+                                    />
                                 ) : (
-                                    <PlayRegular style={{ fontSize: '13px' }} />
+                                    <PlayFilled
+                                        style={{
+                                            fontSize: '10px',
+                                            color: tokens.colorBrandForeground1,
+                                        }}
+                                    />
                                 )
                             }
                             disabled={!!busy || (running && inUse)}

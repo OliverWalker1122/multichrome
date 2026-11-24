@@ -44,7 +44,6 @@ export interface ComponentsSettingsPanelProps {
     managedProxies: ManagedProxy[];
     fallbackProxyEnabled: boolean;
     fallbackProxyAddress: string;
-    hostPlatform: string;
 }
 
 const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
@@ -54,14 +53,10 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     managedProxies,
     fallbackProxyEnabled,
     fallbackProxyAddress,
-    hostPlatform,
 }) => {
     const styles = useSettingsStyles();
     const { locale, isEn, t } = useI18n();
     const { showNotification } = useNotification();
-
-    const isMac = hostPlatform === 'darwin';
-    const isLinux = hostPlatform === 'linux';
 
     const [selectedRelease, setSelectedRelease] = useState('');
     const [downloadProxyChoice, setDownloadProxyChoice] =
@@ -336,11 +331,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
         }
     };
 
-    const importFileLabel = isMac
-        ? t('导入 DMG / .app', 'Import DMG / .app')
-        : isLinux
-          ? t('导入安装包 / 可执行文件', 'Import archive / binary')
-          : t('导入压缩包 / chrome.exe', 'Import ZIP / chrome.exe');
+    const importFileLabel = t('导入本地文件', 'Import Local File');
 
     const canUseFallbackProxy =
         fallbackProxyEnabled && Boolean(fallbackProxyAddress.trim());

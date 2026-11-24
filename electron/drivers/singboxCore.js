@@ -60,7 +60,7 @@ export function safeLog(line) {
             return {
                 level: 'error',
                 message:
-                    'REALITY 握手校验失败，请检查公钥/Short ID/SNI，或排查透明代理的 TLS 域名嗅探覆写',
+                    'REALITY 握手校验失败，请检查公钥、Short ID 与 SNI，或排查透明代理的 TLS 域名嗅探覆写',
             };
         if (/authentication|authenticate|407|401/i.test(clean))
             return {

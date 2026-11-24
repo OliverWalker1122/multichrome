@@ -442,7 +442,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                             managedProxies={managedProxies}
                             fallbackProxyEnabled={proxyEnabled}
                             fallbackProxyAddress={proxyAddress}
-                            hostPlatform={hostPlatform}
                         />
                     )}
 

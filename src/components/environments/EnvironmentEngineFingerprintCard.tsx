@@ -202,17 +202,17 @@ const EnvironmentEngineFingerprintCard: React.FC<
                                         </Badge>
                                     </div>
 
-                                    <Field
-                                        label={t('模拟系统 / 品牌', 'OS / Brand')}
+                                    <div
+                                        style={{
+                                            display: 'flex',
+                                            gap: '8px',
+                                        }}
                                     >
-                                        <div
-                                            style={{
-                                                display: 'flex',
-                                                gap: '6px',
-                                            }}
+                                        <Field
+                                            style={{ flex: 1 }}
+                                            label={t('操作系统', 'System')}
                                         >
                                             <Select
-                                                style={{ flex: 1 }}
                                                 disabled={isRunning}
                                                 value={
                                                     fingerprintConfig.platform
@@ -240,8 +240,12 @@ const EnvironmentEngineFingerprintCard: React.FC<
                                                     Linux
                                                 </option>
                                             </Select>
+                                        </Field>
+                                        <Field
+                                            style={{ flex: 1 }}
+                                            label={t('浏览器品牌', 'Brand')}
+                                        >
                                             <Select
-                                                style={{ flex: 1 }}
                                                 disabled={isRunning}
                                                 value={fingerprintConfig.brand}
                                                 onChange={(_, data) =>
@@ -269,8 +273,8 @@ const EnvironmentEngineFingerprintCard: React.FC<
                                                     Vivaldi
                                                 </option>
                                             </Select>
-                                        </div>
-                                    </Field>
+                                        </Field>
+                                    </div>
 
                                     <div
                                         style={{
