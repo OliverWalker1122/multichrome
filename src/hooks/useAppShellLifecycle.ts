@@ -447,16 +447,34 @@ export function useAppShellLifecycle({
                     while (cursor < ids.length) {
                         const targetId = ids[cursor];
                         cursor += 1;
-                        if (await launchEnvironment(targetId)) {
-                            launchedCount += 1;
+                        try {
+                            if (await launchEnvironment(targetId)) {
+                                launchedCount += 1;
+                            }
+                        } catch {
+                            // individual launch error already surfaced via context
                         }
                     }
                 },
             );
             await Promise.all(workers);
+
+            const previouslyRunning = environments.filter(
+                (item) => item.isRunning && !ids.includes(item.id),
+            ).length;
+            if (
+                launchedCount > 0 &&
+                (ids.length >= 2 || previouslyRunning + launchedCount >= 2) &&
+                environmentApi.isAvailable()
+            ) {
+                await environmentApi.tileWindows().catch(() => {});
+                window.setTimeout(() => {
+                    void environmentApi.tileWindows().catch(() => {});
+                }, 900);
+            }
             return launchedCount;
         },
-        [launchEnvironment],
+        [environments, launchEnvironment],
     );
 
     const handleLaunchWithGuard = useCallback(
@@ -509,13 +527,7 @@ export function useAppShellLifecycle({
             }
 
             if (settings.requireHealthCheckOnLaunch) {
-                setLaunchHealthQueue((prev) => {
-                    const existingIds = new Set(prev.map((item) => item.id));
-                    const next = targets.filter(
-                        (item) => !existingIds.has(item.id),
-                    );
-                    return [...prev, ...next];
-                });
+                setLaunchHealthQueue(targets);
                 return {
                     launchedCount: 0,
                     deferredCount: targets.length,
@@ -535,38 +547,38 @@ export function useAppShellLifecycle({
                 }),
             );
 
-            const cleanIds: string[] = [];
-            const guarded: Array<{
-                env: ChromeEnvironment;
-                report: LaunchConsistencyReport;
-            }> = [];
-
-            for (const item of checks) {
-                if (
+            const hasAnyGuarded = checks.some(
+                (item) =>
                     item.report &&
                     !item.report.ok &&
-                    item.report.issues.length > 0
-                ) {
-                    guarded.push({ env: item.env, report: item.report });
-                } else {
-                    cleanIds.push(item.env.id);
-                }
+                    item.report.issues.length > 0,
+            );
+
+            if (hasAnyGuarded) {
+                const unifiedEntries = checks.map((item) => ({
+                    env: item.env,
+                    report:
+                        item.report ||
+                        ({
+                            ok: true,
+                            hasError: false,
+                            canAutoAlign: false,
+                            issues: [],
+                        } satisfies LaunchConsistencyReport),
+                }));
+                setLaunchGuardQueue(unifiedEntries);
+                return {
+                    launchedCount: 0,
+                    deferredCount: unifiedEntries.length,
+                    failedCount: 0,
+                };
             }
 
-            if (guarded.length > 0) {
-                setLaunchGuardQueue((prev) => {
-                    const existingIds = new Set(prev.map((x) => x.env.id));
-                    const additions = guarded.filter(
-                        (x) => !existingIds.has(x.env.id),
-                    );
-                    return [...prev, ...additions];
-                });
-            }
-
+            const cleanIds = targets.map((item) => item.id);
             const launchedCount = await launchWithConcurrency(cleanIds);
             return {
                 launchedCount,
-                deferredCount: guarded.length,
+                deferredCount: 0,
                 failedCount: Math.max(0, cleanIds.length - launchedCount),
             };
         },
@@ -580,7 +592,7 @@ export function useAppShellLifecycle({
     const handleConfirmHealthLaunch = useCallback(async () => {
         const current = launchHealthQueue[0];
         if (!current) return;
-        setLaunchHealthQueue((prev) => prev.slice(1));
+        setLaunchHealthQueue([]);
         await launchEnvironment(current.id);
     }, [launchEnvironment, launchHealthQueue]);
 
@@ -604,27 +616,58 @@ export function useAppShellLifecycle({
     }, []);
 
     const handleAutoAlignAndLaunch = useCallback(async () => {
-        const current = launchGuardQueue[0];
-        if (!current) return;
-        const { env, report } = current;
-        if (report.suggestedPatch) {
-            await updateEnvironment(env.id, report.suggestedPatch, {
-                throwOnError: true,
-            });
+        const queue = [...launchGuardQueue];
+        if (queue.length === 0) return;
+        await Promise.all(
+            queue.map(async ({ env, report }) => {
+                if (report.canAutoAlign && report.suggestedPatch) {
+                    await updateEnvironment(env.id, report.suggestedPatch, {
+                        throwOnError: true,
+                    });
+                }
+            }),
+        );
+        const launchableIds = queue
+            .filter(({ report }) => !report.hasError)
+            .map(({ env }) => env.id);
+        setLaunchGuardQueue([]);
+        const launchedCount = await launchWithConcurrency(launchableIds);
+        if (queue.length > 1 && launchedCount > 0) {
+            showNotification(
+                'success',
+                locale === 'en-US'
+                    ? `Launched ${launchedCount} environment(s)`
+                    : `已启动 ${launchedCount} 个环境`,
+            );
         }
-        setLaunchGuardQueue((prev) => prev.slice(1));
-        await launchEnvironment(env.id);
-    }, [launchEnvironment, launchGuardQueue, updateEnvironment]);
+    }, [
+        launchGuardQueue,
+        launchWithConcurrency,
+        locale,
+        showNotification,
+        updateEnvironment,
+    ]);
 
     const handleForceLaunch = useCallback(async () => {
-        const current = launchGuardQueue[0];
-        if (!current) return;
-        setLaunchGuardQueue((prev) => prev.slice(1));
-        await launchEnvironment(current.env.id);
-    }, [launchEnvironment, launchGuardQueue]);
+        const queue = [...launchGuardQueue];
+        if (queue.length === 0) return;
+        const launchableIds = queue
+            .filter(({ report }) => !report.hasError)
+            .map(({ env }) => env.id);
+        setLaunchGuardQueue([]);
+        const launchedCount = await launchWithConcurrency(launchableIds);
+        if (queue.length > 1 && launchedCount > 0) {
+            showNotification(
+                'success',
+                locale === 'en-US'
+                    ? `Launched ${launchedCount} environment(s)`
+                    : `已启动 ${launchedCount} 个环境`,
+            );
+        }
+    }, [launchGuardQueue, launchWithConcurrency, locale, showNotification]);
 
     const handleCancelLaunchGuard = useCallback(() => {
-        setLaunchGuardQueue((prev) => prev.slice(1));
+        setLaunchGuardQueue([]);
     }, []);
 
     return {
@@ -664,9 +707,11 @@ export function useAppShellLifecycle({
         handleInspectProxyLogs,
         handleClearLogs,
         launchGuardState,
+        launchGuardQueue,
         launchGuardQueueCount: launchGuardQueue.length,
         handleCancelLaunchGuard,
         launchHealthEnv,
+        launchHealthQueue,
         launchHealthQueueCount: launchHealthQueue.length,
         handleDismissHealthLaunch,
         handleLaunchWithGuard,

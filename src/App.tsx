@@ -645,7 +645,7 @@ const AppShell: React.FC = () => {
             <LaunchGuardDialog
                 env={lifecycle.launchGuardState?.env || null}
                 report={lifecycle.launchGuardState?.report || null}
-                remainingCount={lifecycle.launchGuardQueueCount}
+                items={lifecycle.launchGuardQueue}
                 onCancel={lifecycle.handleCancelLaunchGuard}
                 onAutoAlignAndLaunch={lifecycle.handleAutoAlignAndLaunch}
                 onForceLaunch={lifecycle.handleForceLaunch}
@@ -653,6 +653,7 @@ const AppShell: React.FC = () => {
 
             <EnvironmentHealthDialog
                 env={lifecycle.launchHealthEnv}
+                environments={lifecycle.launchHealthQueue}
                 mode="launch"
                 batchQueueCount={lifecycle.launchHealthQueueCount}
                 onClose={lifecycle.handleDismissHealthLaunch}

@@ -10,7 +10,7 @@ All notable changes to MultiChrome are documented in this file.
 - **Multi-Select Batch Operations & Bulk Profile Creation**:
   - Bulk-create up to 50 numbered profiles with unique 32-bit fingerprint seeds and optional sequential or single proxy assignment (`Create Environment -> Bulk Create`).
   - Select multiple profiles to batch launch, stop, move groups, bind proxies, add tags, or move to Trash, plus multi-select batch proxy removal.
-- **One-Click Window Grid Tiling**: Automatically arrange all running MultiChrome browser windows across the primary display work area (`Browser.setWindowBounds` grid calculation).
+- **One-Click & Automatic Multi-Window Grid Tiling**: Arrange all running MultiChrome browser windows across the primary display work area (`Browser.setWindowBounds` grid calculation) with one click or automatically when batch-launching multiple profiles, paired with unified concurrent multi-profile pre-launch health & consistency overview dialogs.
 - **Proxy IP Rotation Webhook URL**: Store an encrypted per-proxy rotation webhook URL, trigger IP rotation from Proxy Details or Proxies table, and automatically force-refresh exit IP and region metadata.
 - **Zero-State Onboarding Card, Sanitized Support Diagnostics & Verified Installer Download**:
   - Actionable 3-step empty-state onboarding card guiding new users to engine setup, proxy creation, and their first isolated profile.

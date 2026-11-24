@@ -70,7 +70,7 @@ MultiChrome 提供四层验证体系（详见 [docs/verification_zh.md](docs/ver
 - **L1 单元测试**：`npm test`（纯业务逻辑、代理协议解析、CDP 守卫/MCP、架构分层单向依赖校验与真实 `sing-box` 隔离集成测试）。
 - **L2 核心底盘与本地对抗 E2E**：`npm run test:e2e`（离线双引擎 Fail-Closed 零直连、WebRTC 零泄露、反 Hook `lies=0` 与启动闸门验证）。
 - **L3 界面冒烟测试**：运行 `npm run build` 后执行 `npm run test:ui`，在隔离临时目录启动真实 Electron 窗口，验证默认英文启动、即时切换中文、核心页面、关键交互、标准 CDP 守卫面板，以及浅深主题在标准、降低透明度和强制颜色模式下的界面材质。附加 `-- --screenshots` 可保存浅色和深色主页到 `.tmp/ui-screenshots/home-light.png` 与 `home-dark.png` 便于对照。
-- **L4 外网真站双内核抽检（按需手动）**：`npm run audit:live -- --proxy="<内置代理名>"` 默认创建隔离临时环境，分别实测 **C++ 隐私指纹内核（`fingerprint-chromium`）** 与 **系统 Chrome 内核（`system-chrome`）** 在 CreepJS、BrowserScan、BrowserLeaks WebRTC 与 PixelScan 上的表现（也支持 `--env="<环境名>"` 或 `--engine=fingerprint-chromium|system-chrome`）。
+- **L4 外网真站双内核抽检（按需手动）**：`npm run audit:live -- --proxy="<内置代理名>"`（或 `--auto-proxies=2` 进行 4 窗口双代理并发抽检）默认通过本地 MCP + 受保护 CDP 并发拉起隔离临时环境并自动宫格平铺到桌面，同时实测 **C++ 隐私指纹内核（`fingerprint-chromium`）** 与 **系统 Chrome 内核（`system-chrome`）** 在 CreepJS、BrowserScan、BrowserLeaks WebRTC 与 PixelScan 上的表现（也支持 `--env="<环境1>,<环境2>"`、`--engine=fingerprint-chromium|system-chrome` 与 `--serial`）。
 
 ## 文档
 

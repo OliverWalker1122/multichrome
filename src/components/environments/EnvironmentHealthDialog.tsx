@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     Badge,
     Button,
@@ -27,6 +27,7 @@ import { environmentApi } from '../../services';
 
 interface EnvironmentHealthDialogProps {
     env: ChromeEnvironment | null;
+    environments?: ChromeEnvironment[];
     mode?: 'inspect' | 'launch';
     batchQueueCount?: number;
     onClose: () => void;
@@ -34,12 +35,82 @@ interface EnvironmentHealthDialogProps {
     onConfirmLaunchAll?: () => Promise<void> | void;
 }
 
+interface HealthCheckSlot {
+    loading: boolean;
+    report?: EnvironmentHealthReport;
+    error?: string;
+}
+
 const useStyles = makeStyles({
+    overviewList: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        marginTop: '10px',
+        maxHeight: '196px',
+        overflowY: 'auto',
+    },
+    overviewRow: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        border: '1px solid var(--glass-border)',
+        backgroundColor: 'var(--glass-card-inner)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        width: '100%',
+        color: tokens.colorNeutralForeground1,
+        fontFamily: 'inherit',
+    },
+    overviewRowActive: {
+        border: `1px solid ${tokens.colorBrandStroke1}`,
+    },
+    overviewLeft: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        minWidth: 0,
+        flex: 1,
+    },
+    overviewName: {
+        fontSize: '13px',
+        fontWeight: 600,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    overviewRight: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        flexShrink: 0,
+    },
+    overviewMeta: {
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground3,
+        maxWidth: '180px',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+    },
+    detailHeader: {
+        marginTop: '12px',
+        paddingTop: '10px',
+        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+        fontSize: '12px',
+        fontWeight: 600,
+        color: tokens.colorNeutralForeground2,
+    },
     list: {
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
-        marginTop: '10px',
+        marginTop: '8px',
+        maxHeight: '280px',
+        overflowY: 'auto',
     },
     row: {
         display: 'flex',
@@ -109,55 +180,134 @@ const useStyles = makeStyles({
     },
 });
 
+function sanitizeErrorMessage(err: unknown, fallback: string): string {
+    return err instanceof Error
+        ? err.message.replace(
+              /^Error invoking remote method '[^']+': (?:Error: )?/,
+              '',
+          )
+        : fallback;
+}
+
 const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
     env,
+    environments,
     mode = 'inspect',
-    batchQueueCount = 0,
     onClose,
     onConfirmLaunch,
     onConfirmLaunchAll,
 }) => {
     const styles = useStyles();
     const { isEn, t } = useI18n();
-    const [loading, setLoading] = useState(false);
     const [launching, setLaunching] = useState(false);
-    const [error, setError] = useState('');
-    const [report, setReport] = useState<EnvironmentHealthReport | null>(null);
+    const [slots, setSlots] = useState<Record<string, HealthCheckSlot>>({});
+    const [selectedId, setSelectedId] = useState<string | null>(null);
 
-    const runCheck = useCallback(async (envId: string) => {
-        if (!environmentApi.isAvailable()) return;
-        setLoading(true);
-        setError('');
-        try {
-            const next = await environmentApi.inspectHealth(envId);
-            if (next) {
-                setReport(next);
-            }
-        } catch (err) {
-            setError(
-                err instanceof Error
-                    ? err.message.replace(
-                          /^Error invoking remote method '[^']+': (?:Error: )?/,
-                          '',
-                      )
-                    : t('自检失败，请稍后重试', 'Health check failed. Please try again.'),
+    const targets = useMemo(
+        () =>
+            environments && environments.length > 0
+                ? environments
+                : env
+                  ? [env]
+                  : [],
+        [environments, env],
+    );
+    const targetsSignature = useMemo(
+        () => targets.map((item) => item.id).join(','),
+        [targets],
+    );
+
+    const runChecks = useCallback(
+        async (list: ChromeEnvironment[]) => {
+            if (!environmentApi.isAvailable() || list.length === 0) return;
+            const initial: Record<string, HealthCheckSlot> = {};
+            list.forEach((item) => {
+                initial[item.id] = { loading: true };
+            });
+            setSlots(initial);
+
+            let cursor = 0;
+            const fallbackErr = t(
+                '自检失败，请稍后重试',
+                'Health check failed. Please try again.',
             );
-        } finally {
-            setLoading(false);
-        }
-    }, [t]);
+            const workers = Array.from(
+                { length: Math.min(4, list.length) },
+                async () => {
+                    while (cursor < list.length) {
+                        const target = list[cursor];
+                        cursor += 1;
+                        try {
+                            const report = await environmentApi.inspectHealth(
+                                target.id,
+                            );
+                            setSlots((prev) => ({
+                                ...prev,
+                                [target.id]: {
+                                    loading: false,
+                                    report: report || undefined,
+                                },
+                            }));
+                        } catch (err) {
+                            setSlots((prev) => ({
+                                ...prev,
+                                [target.id]: {
+                                    loading: false,
+                                    error: sanitizeErrorMessage(err, fallbackErr),
+                                },
+                            }));
+                        }
+                    }
+                },
+            );
+            await Promise.all(workers);
+        },
+        [t],
+    );
 
     useEffect(() => {
-        if (env) {
-            setReport(null);
-            void runCheck(env.id);
+        if (targets.length === 0) {
+            setSlots({});
+            setSelectedId(null);
+            return;
         }
-    }, [env, runCheck]);
+        setSelectedId((prev) =>
+            prev && targets.some((item) => item.id === prev)
+                ? prev
+                : targets[0].id,
+        );
+        void runChecks(targets);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [targetsSignature, runChecks]);
 
-    if (!env) return null;
+    if (targets.length === 0) return null;
 
-    const handleConfirmLaunch = async () => {
-        if (!onConfirmLaunch || launching || loading) return;
+    const isBatch = targets.length > 1;
+    const anyLoading = targets.some(
+        (item) => slots[item.id]?.loading !== false,
+    );
+    const doneCount = targets.filter(
+        (item) => slots[item.id] && !slots[item.id].loading,
+    ).length;
+    const passCount = targets.filter(
+        (item) => slots[item.id]?.report?.overall === 'pass',
+    ).length;
+    const warnCount = targets.filter(
+        (item) => slots[item.id]?.report?.overall === 'warn',
+    ).length;
+    const failCount = targets.filter(
+        (item) =>
+            Boolean(slots[item.id]?.error) ||
+            slots[item.id]?.report?.overall === 'fail',
+    ).length;
+
+    const activeEnv =
+        targets.find((item) => item.id === selectedId) || targets[0];
+    const activeSlot = slots[activeEnv.id];
+    const activeReport = activeSlot?.report || null;
+
+    const handleConfirmSingleLaunch = async () => {
+        if (!onConfirmLaunch || launching || anyLoading) return;
         setLaunching(true);
         try {
             await onConfirmLaunch();
@@ -166,18 +316,24 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
         }
     };
 
-    const handleConfirmLaunchAll = async () => {
-        if (!onConfirmLaunchAll || launching || loading) return;
+    const handleConfirmBatchLaunch = async () => {
+        const handler = onConfirmLaunchAll || onConfirmLaunch;
+        if (!handler || launching || anyLoading) return;
         setLaunching(true);
         try {
-            await onConfirmLaunchAll();
+            await handler();
         } finally {
             setLaunching(false);
         }
     };
 
-    const showBatchLaunchAll =
-        mode === 'launch' && batchQueueCount > 1 && Boolean(onConfirmLaunchAll);
+    const batchIntent = anyLoading
+        ? 'info'
+        : failCount > 0
+          ? 'error'
+          : warnCount > 0
+            ? 'warning'
+            : 'success';
 
     return (
         <Dialog
@@ -186,11 +342,13 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                 if (!data.open && !launching) onClose();
             }}
         >
-            <DialogSurface style={{ maxWidth: '560px', width: '92vw' }}>
+            <DialogSurface style={{ maxWidth: '580px', width: '92vw' }}>
                 <DialogBody>
                     <DialogTitle>
-                        {t('健康自检', 'Health Check')} · {env.name}
-                        {showBatchLaunchAll && (
+                        {isBatch
+                            ? t('批量健康自检', 'Batch Health Check')
+                            : `${t('健康自检', 'Health Check')} · ${activeEnv.name}`}
+                        {isBatch && (
                             <Badge
                                 size="small"
                                 appearance="tint"
@@ -198,13 +356,178 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                 style={{ marginLeft: '8px' }}
                             >
                                 {isEn
-                                    ? `${batchQueueCount} queued`
-                                    : `共 ${batchQueueCount} 项`}
+                                    ? `${targets.length} profiles`
+                                    : `共 ${targets.length} 项`}
                             </Badge>
                         )}
                     </DialogTitle>
                     <DialogContent>
-                        {loading && !report ? (
+                        {isBatch ? (
+                            <>
+                                <MessageBar
+                                    intent={batchIntent}
+                                    layout="multiline"
+                                >
+                                    <MessageBarBody>
+                                        {anyLoading
+                                            ? isEn
+                                                ? `Checking ${targets.length} environments concurrently (${doneCount} completed)…`
+                                                : `正在并发检测 ${targets.length} 个环境（已完成 ${doneCount} 项）…`
+                                            : failCount > 0
+                                              ? isEn
+                                                  ? `Completed ${targets.length} checks: ${passCount} passed, ${warnCount} warnings, ${failCount} critical.`
+                                                  : `已完成 ${targets.length} 个环境预检：通过 ${passCount} 项，注意 ${warnCount} 项，异常 ${failCount} 项。`
+                                              : warnCount > 0
+                                                ? isEn
+                                                    ? `All ${targets.length} environments checked: ${passCount} passed, ${warnCount} with minor notices.`
+                                                    : `全部 ${targets.length} 个环境预检完成：通过 ${passCount} 项，注意 ${warnCount} 项。`
+                                                : isEn
+                                                  ? `All ${targets.length} environments passed pre-launch checks and are ready to tile on screen.`
+                                                  : `全部 ${targets.length} 个环境预检通过，启动后将自动并排平铺窗口。`}
+                                    </MessageBarBody>
+                                </MessageBar>
+
+                                <div
+                                    className={styles.overviewList}
+                                    data-testid="batch-health-overview"
+                                >
+                                    {targets.map((item) => {
+                                        const slot = slots[item.id];
+                                        const rep = slot?.report;
+                                        const isSelected =
+                                            item.id === activeEnv.id;
+                                        const exitSummary = rep?.summary.ip
+                                            ? `${rep.summary.ip}${rep.summary.countryCode ? ` (${rep.summary.countryCode})` : ''}`
+                                            : rep?.items[0]?.value || '';
+                                        return (
+                                            <button
+                                                key={item.id}
+                                                type="button"
+                                                data-testid="batch-health-row"
+                                                className={`${styles.overviewRow} ${isSelected ? styles.overviewRowActive : ''}`}
+                                                onClick={() =>
+                                                    setSelectedId(item.id)
+                                                }
+                                            >
+                                                <div
+                                                    className={
+                                                        styles.overviewLeft
+                                                    }
+                                                >
+                                                    {!slot || slot.loading ? (
+                                                        <Spinner size="tiny" />
+                                                    ) : slot.error ||
+                                                      rep?.overall === 'fail' ? (
+                                                        <ErrorCircleRegular
+                                                            className={
+                                                                styles.iconFail
+                                                            }
+                                                        />
+                                                    ) : rep?.overall ===
+                                                      'warn' ? (
+                                                        <WarningRegular
+                                                            className={
+                                                                styles.iconWarn
+                                                            }
+                                                        />
+                                                    ) : (
+                                                        <CheckmarkCircleRegular
+                                                            className={
+                                                                styles.iconPass
+                                                            }
+                                                        />
+                                                    )}
+                                                    <span
+                                                        className={
+                                                            styles.overviewName
+                                                        }
+                                                    >
+                                                        {item.name}
+                                                    </span>
+                                                    <Badge
+                                                        size="small"
+                                                        appearance="tint"
+                                                        color={
+                                                            item.browserEngine ===
+                                                            'fingerprint-chromium'
+                                                                ? 'brand'
+                                                                : 'informative'
+                                                        }
+                                                    >
+                                                        {item.browserEngine ===
+                                                        'fingerprint-chromium'
+                                                            ? t(
+                                                                  '隐私内核',
+                                                                  'Privacy',
+                                                              )
+                                                            : 'Chrome'}
+                                                    </Badge>
+                                                </div>
+                                                <div
+                                                    className={
+                                                        styles.overviewRight
+                                                    }
+                                                >
+                                                    {exitSummary && (
+                                                        <span
+                                                            className={
+                                                                styles.overviewMeta
+                                                            }
+                                                        >
+                                                            {exitSummary}
+                                                        </span>
+                                                    )}
+                                                    <Badge
+                                                        size="small"
+                                                        appearance="tint"
+                                                        color={
+                                                            !slot || slot.loading
+                                                                ? 'informative'
+                                                                : slot.error ||
+                                                                    rep?.overall ===
+                                                                        'fail'
+                                                                  ? 'danger'
+                                                                  : rep?.overall ===
+                                                                      'warn'
+                                                                    ? 'warning'
+                                                                    : 'success'
+                                                        }
+                                                    >
+                                                        {!slot || slot.loading
+                                                            ? t(
+                                                                  '检测中',
+                                                                  'Checking',
+                                                              )
+                                                            : slot.error ||
+                                                                rep?.overall ===
+                                                                    'fail'
+                                                              ? t('异常', 'Fail')
+                                                              : rep?.overall ===
+                                                                  'warn'
+                                                                ? t(
+                                                                      '注意',
+                                                                      'Warn',
+                                                                  )
+                                                                : t(
+                                                                      '通过',
+                                                                      'Pass',
+                                                                  )}
+                                                    </Badge>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className={styles.detailHeader}>
+                                    {isEn
+                                        ? `Details · ${activeEnv.name}`
+                                        : `检测明细 · ${activeEnv.name}`}
+                                </div>
+                            </>
+                        ) : null}
+
+                        {(!activeSlot || activeSlot.loading) && !activeReport ? (
                             <div className={styles.centerBox}>
                                 <Spinner
                                     size="small"
@@ -214,42 +537,50 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                     )}
                                 />
                             </div>
-                        ) : error ? (
-                            <MessageBar intent="error" layout="multiline">
-                                <MessageBarBody>{error}</MessageBarBody>
+                        ) : activeSlot?.error ? (
+                            <MessageBar
+                                intent="error"
+                                layout="multiline"
+                                style={{ marginTop: isBatch ? '8px' : 0 }}
+                            >
+                                <MessageBarBody>
+                                    {activeSlot.error}
+                                </MessageBarBody>
                             </MessageBar>
-                        ) : report ? (
+                        ) : activeReport ? (
                             <>
-                                <MessageBar
-                                    intent={
-                                        report.overall === 'fail'
-                                            ? 'error'
-                                            : report.overall === 'warn'
-                                              ? 'warning'
-                                              : 'success'
-                                    }
-                                    layout="multiline"
-                                >
-                                    <MessageBarBody>
-                                        {report.overall === 'pass'
-                                            ? t(
-                                                  '检查通过：代理、时区、语言、防泄露与浏览器状态均正常。',
-                                                  'All checks passed: Proxy, timezone, language, anti-leak, and browser are healthy.',
-                                              )
-                                            : report.overall === 'warn'
-                                              ? t(
-                                                    '存在注意事项：部分项目需关注，或将在启动后自动对齐。',
-                                                    'Warnings detected: Some items need attention or will auto-align after launch.',
-                                                )
-                                              : t(
-                                                    '发现阻断性异常：请先修复标红项目后再使用此环境。',
-                                                    'Critical issues detected: Resolve the red items before using this environment.',
-                                                )}
-                                    </MessageBarBody>
-                                </MessageBar>
+                                {!isBatch && (
+                                    <MessageBar
+                                        intent={
+                                            activeReport.overall === 'fail'
+                                                ? 'error'
+                                                : activeReport.overall === 'warn'
+                                                  ? 'warning'
+                                                  : 'success'
+                                        }
+                                        layout="multiline"
+                                    >
+                                        <MessageBarBody>
+                                            {activeReport.overall === 'pass'
+                                                ? t(
+                                                      '检查通过：代理、时区、语言、防泄露与浏览器状态均正常。',
+                                                      'All checks passed: Proxy, timezone, language, anti-leak, and browser are healthy.',
+                                                  )
+                                                : activeReport.overall === 'warn'
+                                                  ? t(
+                                                        '存在注意事项：部分项目需关注，或将在启动后自动对齐。',
+                                                        'Warnings detected: Some items need attention or will auto-align after launch.',
+                                                    )
+                                                  : t(
+                                                        '发现阻断性异常：请先修复标红项目后再使用此环境。',
+                                                        'Critical issues detected: Resolve the red items before using this environment.',
+                                                    )}
+                                        </MessageBarBody>
+                                    </MessageBar>
+                                )}
 
                                 <div className={styles.list}>
-                                    {report.items.map((item) => (
+                                    {activeReport.items.map((item) => (
                                         <div key={item.id} className={styles.row}>
                                             {item.status === 'pass' ? (
                                                 <CheckmarkCircleRegular
@@ -266,7 +597,9 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                             )}
                                             <div className={styles.body}>
                                                 <div className={styles.topLine}>
-                                                    <span className={styles.label}>
+                                                    <span
+                                                        className={styles.label}
+                                                    >
                                                         {item.label}
                                                     </span>
                                                     <div
@@ -301,8 +634,14 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                                                 ? t('通过', 'Pass')
                                                                 : item.status ===
                                                                     'warn'
-                                                                  ? t('注意', 'Warn')
-                                                                  : t('异常', 'Fail')}
+                                                                  ? t(
+                                                                        '注意',
+                                                                        'Warn',
+                                                                    )
+                                                                  : t(
+                                                                        '异常',
+                                                                        'Fail',
+                                                                    )}
                                                         </Badge>
                                                     </div>
                                                 </div>
@@ -319,16 +658,17 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                     <DialogActions fluid>
                         <Button
                             className={styles.actionBtn}
-                            appearance="outline"
+                            appearance="subtle"
                             icon={<ArrowClockwiseRegular />}
-                            disabled={loading || launching}
-                            onClick={() => void runCheck(env.id)}
+                            disabled={anyLoading || launching}
+                            onClick={() => void runChecks(targets)}
                         >
-                            {loading
+                            {anyLoading
                                 ? t('检测中…', 'Checking…')
                                 : t('重新检测', 'Recheck')}
                         </Button>
-                        {mode === 'launch' && onConfirmLaunch ? (
+                        {mode === 'launch' &&
+                        (onConfirmLaunch || onConfirmLaunchAll) ? (
                             <>
                                 <Button
                                     className={styles.actionBtn}
@@ -338,34 +678,37 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                 >
                                     {t('关闭', 'Close')}
                                 </Button>
-                                <Button
-                                    className={styles.actionBtn}
-                                    appearance={
-                                        showBatchLaunchAll ? 'outline' : 'primary'
-                                    }
-                                    icon={<PlayRegular />}
-                                    disabled={loading || launching}
-                                    onClick={() => void handleConfirmLaunch()}
-                                >
-                                    {launching
-                                        ? t('启动中…', 'Launching…')
-                                        : report?.overall === 'fail'
-                                          ? t('仍要继续启动', 'Launch Anyway')
-                                          : t('继续启动', 'Continue Launch')}
-                                </Button>
-                                {showBatchLaunchAll && (
+                                {isBatch ? (
                                     <Button
                                         className={styles.actionBtn}
                                         appearance="primary"
                                         icon={<PlayRegular />}
-                                        disabled={loading || launching}
+                                        disabled={anyLoading || launching}
                                         onClick={() =>
-                                            void handleConfirmLaunchAll()
+                                            void handleConfirmBatchLaunch()
                                         }
                                     >
-                                        {isEn
-                                            ? `Launch All (${batchQueueCount})`
-                                            : `启动全部（${batchQueueCount}）`}
+                                        {launching
+                                            ? t('启动中…', 'Launching…')
+                                            : isEn
+                                              ? `Launch All (${targets.length})`
+                                              : `启动全部（${targets.length}）`}
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        className={styles.actionBtn}
+                                        appearance="primary"
+                                        icon={<PlayRegular />}
+                                        disabled={anyLoading || launching}
+                                        onClick={() =>
+                                            void handleConfirmSingleLaunch()
+                                        }
+                                    >
+                                        {launching
+                                            ? t('启动中…', 'Launching…')
+                                            : activeReport?.overall === 'fail'
+                                              ? t('仍要继续启动', 'Launch Anyway')
+                                              : t('继续启动', 'Continue Launch')}
                                     </Button>
                                 )}
                             </>

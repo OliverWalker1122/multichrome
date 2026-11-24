@@ -2,17 +2,20 @@
 /**
  * MultiChrome Live External Fingerprint Audit Runner (`npm run audit:live`)
  *
- * Launches specified local profile(s) through their configured proxy and visits
- * real external fingerprint/leak checkers (CreepJS, BrowserScan, BrowserLeaks WebRTC,
- * PixelScan). Intended for manual on-demand verification after kernel/fingerprint/proxy
- * changes — NOT part of offline CI.
+ * Launches specified local profile(s) or temporary dual-engine profiles simultaneously
+ * via MultiChrome's loopback MCP + Guarded CDP server, tiles all browser windows side-by-side
+ * on screen, and audits real external fingerprint/leak checkers concurrently
+ * (CreepJS, BrowserScan, BrowserLeaks WebRTC, PixelScan).
+ * Intended for manual on-demand verification — NOT part of offline CI.
  *
  * Usage:
- *   npm run audit:live -- --env="Profile-1,Profile-2"
- *   npm run audit:live -- --proxy="MyProxy"                          # 默认双内核分别测试（C++ 隐私内核 + 系统 Chrome 内核）
+ *   npm run audit:live -- --proxy="MyProxy"                          # 默认 MCP 并行拉起双内核同屏实测（C++ 隐私内核 + 系统 Chrome）
+ *   npm run audit:live -- --proxy="ProxyA,ProxyB"                    # MCP 并行拉起 4 窗口（2 代理 × 双内核）宫格平铺同时实测
+ *   npm run audit:live -- --auto-proxies=2                           # 自动挑选本地 2 个可用内置代理并行拉起 4 窗口同时实测
+ *   npm run audit:live -- --env="Profile-1,Profile-2"                # MCP 并行拉起多个本地环境同时实测
  *   npm run audit:live -- --proxy="MyProxy" --engine=fingerprint-chromium
  *   npm run audit:live -- --proxy="MyProxy" --engine=system-chrome
- *   npm run audit:live -- --proxy="MyProxy" --sites=creepjs,browserscan,browserleaks
+ *   npm run audit:live -- --proxy="MyProxy" --serial                 # 可选串行逐窗口模式
  */
 
 import path from 'node:path';

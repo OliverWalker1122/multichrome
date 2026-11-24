@@ -1336,12 +1336,14 @@ async function main() {
         let e2e11Error = '';
         let conflictBlocker = null;
 
-        // E2E-12 real-browser CDP Guard flags
+        // E2E-12 real-browser CDP Guard + Multi-Window MCP flags
         let realPrivatePortIsolationOk = false;
         let realDiscoveryAndPassThroughOk = false;
         let realOverrideShieldOk = false;
         let realIncognitoBlockOk = false;
         let realActiveSwitchAndParallelOk = false;
+        let mcpStdioBridgeOk = false;
+        let mcpMultiWindow3ConcurrentOk = false;
         let e2e12Error = '';
 
         try {
@@ -1597,17 +1599,193 @@ async function main() {
                         liveState.innerW !== 612 &&
                         liveState.webdriver === false;
 
-                    // 3) Launch second profile (setActive: false), then switch_active_profile & verify active disconnect + parallel explicit WS
-                    const startedClone = await callMcpTool('start_profile', {
-                        profileId: cloned.id,
-                        setActive: false,
+                    // 0) Verify real MCP stdio bridge (`scripts/mcp-stdio.mjs`) over NDJSON stdin/stdout
+                    const stdioBridgeRes = await new Promise((resolve, reject) => {
+                        const bridgeProc = spawn(
+                            process.execPath,
+                            [path.join(projectRoot, 'scripts', 'mcp-stdio.mjs')],
+                            {
+                                cwd: projectRoot,
+                                env: {
+                                    ...process.env,
+                                    MULTICHROME_API_URL: `http://127.0.0.1:${automationPort}`,
+                                },
+                                stdio: ['pipe', 'pipe', 'pipe'],
+                            },
+                        );
+                        const lines = [];
+                        let buf = '';
+                        const timer = setTimeout(() => {
+                            try { bridgeProc.kill('SIGTERM'); } catch {}
+                            reject(new Error('MCP stdio bridge timed out'));
+                        }, 10000);
+                        bridgeProc.stdout.on('data', (chunk) => {
+                            buf += chunk.toString('utf8');
+                            let idx;
+                            while ((idx = buf.indexOf('\n')) >= 0) {
+                                const line = buf.slice(0, idx).trim();
+                                buf = buf.slice(idx + 1);
+                                if (line) {
+                                    try { lines.push(JSON.parse(line)); } catch {}
+                                }
+                                if (lines.length >= 3) {
+                                    clearTimeout(timer);
+                                    try { bridgeProc.kill('SIGTERM'); } catch {}
+                                    resolve(lines);
+                                }
+                            }
+                        });
+                        bridgeProc.once('error', (err) => {
+                            clearTimeout(timer);
+                            reject(err);
+                        });
+                        bridgeProc.stdin.write(
+                            JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 101,
+                                method: 'initialize',
+                                params: {
+                                    protocolVersion: '2025-06-18',
+                                    capabilities: {},
+                                    clientInfo: { name: 'e2e-stdio', version: '1.0.0' },
+                                },
+                            }) +
+                            '\n' +
+                            JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 102,
+                                method: 'tools/list',
+                                params: {},
+                            }) +
+                            '\n' +
+                            JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 103,
+                                method: 'tools/call',
+                                params: { name: 'list_profiles', arguments: {} },
+                            }) +
+                            '\n',
+                        );
                     });
-                    const parallelWs = new WebSocket(startedClone.data.wsEndpoint);
-                    openGuardSockets.push(parallelWs);
-                    await new Promise((resolve, reject) => {
-                        parallelWs.once('open', resolve);
-                        parallelWs.once('error', reject);
+                    mcpStdioBridgeOk =
+                        Array.isArray(stdioBridgeRes) &&
+                        stdioBridgeRes.length === 3 &&
+                        stdioBridgeRes[0]?.result?.serverInfo?.name === 'multichrome-mcp' &&
+                        stdioBridgeRes[1]?.result?.tools?.length === 4 &&
+                        Array.isArray(stdioBridgeRes[2]?.result?.structuredContent?.profiles);
+
+                    // 3) Launch 2 more profiles concurrently via MCP (`cloned` + `mcpEnvC`) so 3 real windows run at once!
+                    const mcpEnvC = await cdp.eval(
+                        `window.electronAPI.chromeEnvironments.create('MCP并发窗口Gamma', '测试组B', '', { browserEngine: 'system-chrome' })`,
+                    );
+                    await cdp.eval(
+                        `Promise.all([
+                            window.electronAPI.chromeEnvironments.update(${JSON.stringify(cloned.id)}, {
+                                timezone: 'America/New_York',
+                                startupUrl: ${JSON.stringify(`${baseTestUrl}/rpa-form`)},
+                            }),
+                            window.electronAPI.chromeEnvironments.update(${JSON.stringify(mcpEnvC.id)}, {
+                                timezone: 'Europe/London',
+                                startupUrl: ${JSON.stringify(`${baseTestUrl}/flash-sale`)},
+                            }),
+                        ])`,
+                    );
+
+                    const [startedClone, startedGamma] = await Promise.all([
+                        callMcpTool('start_profile', {
+                            profileId: cloned.id,
+                            setActive: false,
+                        }),
+                        callMcpTool('start_profile', {
+                            profileId: mcpEnvC.id,
+                            setActive: false,
+                        }),
+                    ]);
+
+                    const runningViaMcp = await callMcpTool('list_profiles', {
+                        status: 'running',
                     });
+                    const tileViaIpc = await cdp.eval(
+                        `window.electronAPI.chromeEnvironments.tileWindows()`,
+                    );
+
+                    // Connect 3 explicit guarded CDP WebSockets concurrently across all 3 open browser windows
+                    const openExplicitWs = async (wsUrl) => {
+                        const sock = new WebSocket(wsUrl);
+                        openGuardSockets.push(sock);
+                        await new Promise((resolve, reject) => {
+                            sock.once('open', resolve);
+                            sock.once('error', reject);
+                        });
+                        return sock;
+                    };
+                    const [wsAlpha, wsBeta, wsGamma] = await Promise.all([
+                        openExplicitWs(startedA.data.wsEndpoint),
+                        openExplicitWs(startedClone.data.wsEndpoint),
+                        openExplicitWs(startedGamma.data.wsEndpoint),
+                    ]);
+
+                    const inspectLiveWindowViaGuard = async (sock, expectedPath) => {
+                        let reqSeq = 500;
+                        const tRes = await sendGuardCdp(sock, {
+                            id: reqSeq++,
+                            method: 'Target.getTargets',
+                            params: {},
+                        });
+                        const pg = (tRes.result?.targetInfos || []).find((t) => t.type === 'page');
+                        const winForTarget = await sendGuardCdp(sock, {
+                            id: reqSeq++,
+                            method: 'Browser.getWindowForTarget',
+                            params: { targetId: pg.targetId },
+                        });
+                        const att = await sendGuardCdp(sock, {
+                            id: reqSeq++,
+                            method: 'Target.attachToTarget',
+                            params: { targetId: pg.targetId, flatten: true },
+                        });
+                        const sid = att.result.sessionId;
+                        await sendGuardCdp(sock, {
+                            id: reqSeq++,
+                            sessionId: sid,
+                            method: 'Page.navigate',
+                            params: { url: `${baseTestUrl}${expectedPath}` },
+                        });
+                        await sleep(450);
+                        const ev = await sendGuardCdp(sock, {
+                            id: reqSeq++,
+                            sessionId: sid,
+                            method: 'Runtime.evaluate',
+                            params: {
+                                expression: `({
+                                    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                                    path: location.pathname,
+                                })`,
+                                returnByValue: true,
+                            },
+                        });
+                        return {
+                            bounds: winForTarget.result?.bounds || {},
+                            evalValue: ev.result?.result?.value || {},
+                        };
+                    };
+
+                    const [snapAlpha, snapBeta, snapGamma] = await Promise.all([
+                        inspectLiveWindowViaGuard(wsAlpha, '/inbox'),
+                        inspectLiveWindowViaGuard(wsBeta, '/rpa-form'),
+                        inspectLiveWindowViaGuard(wsGamma, '/flash-sale'),
+                    ]);
+                    const posSet = new Set([
+                        `${snapAlpha.bounds.left},${snapAlpha.bounds.top}`,
+                        `${snapBeta.bounds.left},${snapBeta.bounds.top}`,
+                        `${snapGamma.bounds.left},${snapGamma.bounds.top}`,
+                    ]);
+                    mcpMultiWindow3ConcurrentOk =
+                        runningViaMcp.data?.count === 3 &&
+                        tileViaIpc?.tiledCount === 3 &&
+                        posSet.size === 3 &&
+                        snapAlpha.evalValue.tz === 'Asia/Tokyo' &&
+                        snapBeta.evalValue.tz === 'America/New_York' &&
+                        snapGamma.evalValue.tz === 'Europe/London';
 
                     const activeClosedOnSwitch = new Promise((resolve) =>
                         guardWs.once('close', () => resolve(true)),
@@ -1626,10 +1804,16 @@ async function main() {
                     realActiveSwitchAndParallelOk =
                         switched.data?.activeProfileId === cloned.id &&
                         verAfterSwitch.json?.webSocketDebuggerUrl?.endsWith(`/${cloned.id}`) &&
-                        parallelWs.readyState === WebSocket.OPEN;
+                        wsBeta.readyState === WebSocket.OPEN &&
+                        wsGamma.readyState === WebSocket.OPEN;
 
-                    await callMcpTool('stop_profile', { profileId: cloned.id });
-                    await callMcpTool('stop_profile', { profileId: envA.id });
+                    await Promise.all([
+                        callMcpTool('stop_profile', { profileId: mcpEnvC.id }),
+                        callMcpTool('stop_profile', { profileId: cloned.id }),
+                        callMcpTool('stop_profile', { profileId: envA.id }),
+                    ]);
+                    await cdp.eval(`window.electronAPI.chromeEnvironments.delete(${JSON.stringify(mcpEnvC.id)})`).catch(() => {});
+                    await cdp.eval(`window.electronAPI.chromeEnvironments.permanentlyDelete(${JSON.stringify(mcpEnvC.id)})`).catch(() => {});
                 } catch (err12) {
                     e2e12Error = err12 instanceof Error ? err12.message : String(err12);
                 } finally {
@@ -2028,7 +2212,7 @@ async function main() {
                 15000,
             );
 
-            // 6) Enable Pre-Launch Check in Settings -> verify Batch Health Queue "启动全部（2）" launches 2 windows together
+            // 6) Enable Pre-Launch Check in Settings -> verify ALL 3 pre-checks are visible simultaneously in Batch Health Dialog & "启动全部（3）" launches & auto-tiles all 3 windows!
             await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);
             await waitUntil(() =>
                 cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-privacy"]'))`),
@@ -2074,26 +2258,41 @@ async function main() {
             await waitUntil(() =>
                 cdp.eval(`document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"])').length === 3`),
             );
-            // EnvironmentsPage remounted cleanly with empty selection: select first 2 rows
-            await cdp.eval(`(() => {
-                const cbs = document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"]) input[type="checkbox"]');
-                if (cbs[0]) cbs[0].click();
-                if (cbs[1]) cbs[1].click();
-            })()`);
+            // Select ALL 3 rows via header select-all checkbox
+            await cdp.eval(`document.querySelector('table[aria-label="环境列表"] thead input[type="checkbox"]')?.click()`);
             await waitUntil(() =>
-                cdp.eval(`(document.querySelector('[aria-label="批量操作栏"]')?.innerText || '').includes('已选 2 项')`),
+                cdp.eval(`(document.querySelector('[aria-label="批量操作栏"]')?.innerText || '').includes('已选 3 项')`),
                 5000,
             );
             await cdp.eval(`window.__e2e.clickByText('批量启动', '[aria-label="批量操作栏"] button')`);
             const healthAllBtnReady = await waitUntil(() =>
-                cdp.eval(`Boolean(Array.from(document.querySelectorAll('[role="dialog"] button')).find(b => !b.disabled && (b.innerText || '').includes('启动全部（2）')))`),
-                10000,
+                cdp.eval(`Boolean(Array.from(document.querySelectorAll('[role="dialog"] button')).find(b => !b.disabled && (b.innerText || '').includes('启动全部（3）')))`),
+                12000,
             );
-            if (healthAllBtnReady) {
-                await cdp.eval(`window.__e2e.clickByText('启动全部（2）', '[role="dialog"] button')`);
+            const all3PrechecksVisible = await cdp.eval(`(() => {
+                const rows = Array.from(document.querySelectorAll('[role="dialog"] [data-testid="batch-health-row"]'));
+                const text = rows.map((r) => r.innerText || '').join(' | ');
+                if (
+                    rows.length !== 3 ||
+                    !text.includes('MultiWin 01') ||
+                    !text.includes('MultiWin 02') ||
+                    !text.includes('MultiWin 03')
+                ) {
+                    return false;
+                }
+                const row2 = rows.find((r) => (r.innerText || '').includes('MultiWin 02'));
+                row2?.click();
+                return true;
+            })()`);
+            const detailSwitchedOk = await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[role="dialog"]')?.innerText || '').includes('检测明细 · MultiWin 02')`),
+                3000,
+            );
+            if (healthAllBtnReady && all3PrechecksVisible && detailSwitchedOk) {
+                await cdp.eval(`window.__e2e.clickByText('启动全部（3）', '[role="dialog"] button')`);
                 healthQueueBatchOk = await waitUntil(
                     () =>
-                        cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 2)`),
+                        cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 3)`),
                     25000,
                     300,
                 );
@@ -2176,15 +2375,17 @@ async function main() {
 
         record(
             'E2E-12',
-            '真机标准 CDP 透传守卫（私有高端口隔离 / 标准 /json/version 直连 / 拦截 UA·时区·窗口尺寸篡改与无痕 Context / 多环境无缝切号）',
+            '真机标准 CDP 透传守卫 + MCP 双通道（HTTP + Stdio）并发拉起 3 窗口宫格平铺与跨时区并行控制',
             Boolean(
                 realPrivatePortIsolationOk &&
                     realDiscoveryAndPassThroughOk &&
                     realOverrideShieldOk &&
                     realIncognitoBlockOk &&
+                    mcpStdioBridgeOk &&
+                    mcpMultiWindow3ConcurrentOk &&
                     realActiveSwitchAndParallelOk,
             ),
-            `privatePort=${realPrivatePortIsolationOk}, passThrough=${realDiscoveryAndPassThroughOk}, overrideShield=${realOverrideShieldOk}, incognitoBlock=${realIncognitoBlockOk}, activeSwitch=${realActiveSwitchAndParallelOk}${e2e12Error ? `, err=${e2e12Error}` : ''}`,
+            `privatePort=${realPrivatePortIsolationOk}, passThrough=${realDiscoveryAndPassThroughOk}, overrideShield=${realOverrideShieldOk}, incognitoBlock=${realIncognitoBlockOk}, mcpStdio=${mcpStdioBridgeOk}, multiWin3Mcp=${mcpMultiWindow3ConcurrentOk}, activeSwitch=${realActiveSwitchAndParallelOk}${e2e12Error ? `, err=${e2e12Error}` : ''}`,
         );
 
         record(
@@ -2201,7 +2402,7 @@ async function main() {
 
         record(
             'E2E-14',
-            '真实界面批量新建（3 环境）+ 多选同时 3 窗口并发启动 + 宫格平铺 + UI Cookie 导入导出 + 并发批量关闭 + 安全检查排队全启',
+            '真实界面批量新建（3 环境）+ 多选同时 3 窗口并发启动 + 宫格平铺 + UI Cookie 导入导出 + 并发批量关闭 + 3 窗口同屏批量预检全启',
             Boolean(
                 uiBulkCreateOk &&
                     simultaneousLaunch3Ok &&
@@ -2211,7 +2412,7 @@ async function main() {
                     healthQueueBatchOk &&
                     backupValidationOk,
             ),
-            `bulkCreate=${uiBulkCreateOk}, launch3=${simultaneousLaunch3Ok}, tile3=${uiTile3Ok}, cookieUI=${uiCookieTransferOk}, stop3=${simultaneousStop3Ok}, healthQueue2=${healthQueueBatchOk}, backupPwdCheck=${backupValidationOk}${e2e14Error ? `, err=${e2e14Error}` : ''}`,
+            `bulkCreate=${uiBulkCreateOk}, launch3=${simultaneousLaunch3Ok}, tile3=${uiTile3Ok}, cookieUI=${uiCookieTransferOk}, stop3=${simultaneousStop3Ok}, batchHealth3=${healthQueueBatchOk}, backupPwdCheck=${backupValidationOk}${e2e14Error ? `, err=${e2e14Error}` : ''}`,
         );
     } finally {
         cdp?.close();

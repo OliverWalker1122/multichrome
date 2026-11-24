@@ -3,17 +3,21 @@
 /**
  * Live External Fingerprint Audit Worker (invoked via `npm run audit:live`)
  *
- * Visits real external checkers (CreepJS, BrowserScan, BrowserLeaks WebRTC, PixelScan)
- * using the user's chosen local profile(s) without modifying or deleting any profile data.
- * Never attempts to solve or bypass CAPTCHAs — reports CAPTCHA/Challenge transparently.
+ * Launches target profiles simultaneously via MultiChrome's loopback MCP + Guarded CDP
+ * control plane, tiles all browser windows side-by-side across the screen, and concurrently
+ * visits real external checkers (CreepJS, BrowserScan, BrowserLeaks WebRTC, PixelScan).
+ * Never modifies or deletes user profile data, never hardcodes proxy/profile names,
+ * redacts all exit IPs/proxy labels when `--auto-proxies` is used, and NEVER attempts
+ * to solve or bypass CAPTCHAs — reports CAPTCHA/Challenge transparently.
  */
 
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
-const { app, safeStorage } = require('electron');
+const { app, safeStorage, screen } = require('electron');
 const Store = require('electron-store');
 const WebSocket = require('ws');
 
@@ -61,9 +65,12 @@ function parseArgs(argv) {
     const opts = {
         envs: [],
         proxies: [],
+        autoProxiesCount: 0,
         engines: ['fingerprint-chromium', 'system-chrome'],
         invalidEngine: '',
         sites: ['creepjs', 'browserscan', 'browserleaks', 'pixelscan'],
+        parallel: true,
+        viaMcp: true,
     };
     for (const arg of argv) {
         if (arg.startsWith('--env=')) {
@@ -78,6 +85,16 @@ function parseArgs(argv) {
                 .split(',')
                 .map((s) => s.trim())
                 .filter(Boolean);
+        } else if (arg.startsWith('--auto-proxies=')) {
+            const count = Number.parseInt(
+                arg.slice('--auto-proxies='.length).trim(),
+                10,
+            );
+            if (Number.isInteger(count) && count > 0) {
+                opts.autoProxiesCount = Math.min(count, 4);
+            }
+        } else if (arg === '--auto-proxies') {
+            opts.autoProxiesCount = 2;
         } else if (arg.startsWith('--engine=')) {
             const raw = arg.slice('--engine='.length).trim();
             const parsed = parseEngines(raw);
@@ -92,6 +109,14 @@ function parseArgs(argv) {
                 .split(',')
                 .map((s) => s.trim())
                 .filter(Boolean);
+        } else if (arg === '--serial') {
+            opts.parallel = false;
+        } else if (arg === '--parallel') {
+            opts.parallel = true;
+        } else if (arg === '--direct') {
+            opts.viaMcp = false;
+        } else if (arg === '--via-mcp') {
+            opts.viaMcp = true;
         }
     }
     return opts;
@@ -103,10 +128,15 @@ app.setPath('userData', realUserData);
 
 function redactPublicIps(input) {
     if (typeof input === 'string') {
-        return input.replace(
-            /\b(?!127\.0\.0\.1\b)(?:\d{1,3}\.){3}\d{1,3}\b/g,
-            '[REDACTED_EXIT_IP]',
-        );
+        return input
+            .replace(
+                /\b(?!127\.0\.0\.1\b)(?:\d{1,3}\.){3}\d{1,3}\b/g,
+                '[REDACTED_EXIT_IP]',
+            )
+            .replace(
+                /\b(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}\b/gi,
+                '[REDACTED_EXIT_IPV6]',
+            );
     }
     if (Array.isArray(input)) {
         return input.map(redactPublicIps);
@@ -123,7 +153,187 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
-async function waitForDevToolsWs(chromeManager, envId, timeoutMs = 15000) {
+function httpJsonRequest({ port, method = 'GET', pathname = '/', body = undefined, timeoutMs = 45000 }) {
+    return new Promise((resolve, reject) => {
+        const headers = {
+            Host: `127.0.0.1:${port}`,
+            Accept: 'application/json, text/event-stream',
+        };
+        let payloadBuf = null;
+        if (body !== undefined) {
+            payloadBuf = Buffer.from(
+                typeof body === 'string' ? body : JSON.stringify(body),
+                'utf8',
+            );
+            headers['Content-Type'] = 'application/json';
+            headers['Content-Length'] = String(payloadBuf.byteLength);
+        }
+        const req = http.request(
+            {
+                host: '127.0.0.1',
+                port,
+                method,
+                path: pathname,
+                headers,
+            },
+            (res) => {
+                const chunks = [];
+                res.on('data', (c) => chunks.push(c));
+                res.on('end', () => {
+                    const text = Buffer.concat(chunks).toString('utf8');
+                    let json = null;
+                    try {
+                        json = JSON.parse(text);
+                    } catch {
+                        // non-json
+                    }
+                    resolve({ status: res.statusCode || 0, text, json });
+                });
+            },
+        );
+        req.on('error', reject);
+        req.setTimeout(timeoutMs, () => {
+            req.destroy();
+            reject(new Error(`HTTP timeout on ${method} ${pathname}`));
+        });
+        if (payloadBuf) req.write(payloadBuf);
+        req.end();
+    });
+}
+
+async function createLoopbackMcpHarness(chromeManager, proxyManager) {
+    const { createAutomationBackend } = await import(
+        pathToFileURL(path.join(distElectron, 'services', 'automationService.js')).href
+    );
+    const { AutomationServer } = await import(
+        pathToFileURL(path.join(distElectron, 'transport', 'automationServer.js')).href
+    );
+
+    const automationBackend = createAutomationBackend({
+        chromeManager,
+        proxyManager,
+    });
+    const server = new AutomationServer({
+        backend: automationBackend,
+        serverVersion: '1.6.0',
+    });
+    await server.start({ port: 0 });
+    const port = server.getBoundPort();
+
+    let rpcSeq = 1;
+    const callMcp = async (method, params = {}) => {
+        const res = await httpJsonRequest({
+            port,
+            method: 'POST',
+            pathname: '/mcp',
+            body: {
+                jsonrpc: '2.0',
+                id: rpcSeq++,
+                method,
+                params,
+            },
+        });
+        if (res.status !== 200 || res.json?.error) {
+            throw new Error(
+                `MCP ${method} failed: ${res.json?.error?.message || res.text}`,
+            );
+        }
+        return res.json.result;
+    };
+
+    const callTool = async (name, args = {}) => {
+        const result = await callMcp('tools/call', { name, arguments: args });
+        if (result?.isError) {
+            throw new Error(
+                `MCP tool ${name} error: ${result?.content?.[0]?.text || 'unknown'}`,
+            );
+        }
+        return result.structuredContent;
+    };
+
+    const initRes = await callMcp('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'audit-live-mcp', version: '1.6.0' },
+    });
+    const toolsRes = await callMcp('tools/list', {});
+
+    // Also verify real stdio MCP bridge (`scripts/mcp-stdio.mjs`) under Electron node mode
+    const stdioSmokeOk = await new Promise((resolve) => {
+        const bridgeChild = spawn(
+            process.execPath,
+            [path.join(projectRoot, 'scripts', 'mcp-stdio.mjs')],
+            {
+                cwd: projectRoot,
+                env: {
+                    ...process.env,
+                    ELECTRON_RUN_AS_NODE: '1',
+                    MULTICHROME_API_URL: `http://127.0.0.1:${port}`,
+                },
+                stdio: ['pipe', 'pipe', 'ignore'],
+            },
+        );
+        let stdoutBuf = '';
+        const timer = setTimeout(() => {
+            try { bridgeChild.kill('SIGTERM'); } catch {}
+            resolve(false);
+        }, 8000);
+        bridgeChild.stdout.on('data', (chunk) => {
+            stdoutBuf += chunk.toString('utf8');
+            if (stdoutBuf.includes('\n')) {
+                clearTimeout(timer);
+                try { bridgeChild.kill('SIGTERM'); } catch {}
+                try {
+                    const parsed = JSON.parse(stdoutBuf.trim().split('\n')[0]);
+                    resolve(parsed?.result?.tools?.length === 4);
+                } catch {
+                    resolve(false);
+                }
+            }
+        });
+        bridgeChild.once('error', () => {
+            clearTimeout(timer);
+            resolve(false);
+        });
+        bridgeChild.stdin.write(
+            JSON.stringify({
+                jsonrpc: '2.0',
+                id: 99,
+                method: 'tools/list',
+                params: {},
+            }) + '\n',
+        );
+    });
+
+    return {
+        port,
+        serverName: initRes?.serverInfo?.name || 'unknown',
+        toolNames: (toolsRes?.tools || []).map((t) => t.name),
+        stdioSmokeOk,
+        callTool,
+        fetchScopedVersion: async (profileId) => {
+            const res = await httpJsonRequest({
+                port,
+                method: 'GET',
+                pathname: `/cdp/${encodeURIComponent(profileId)}/json/version`,
+            });
+            return res.json || {};
+        },
+        fetchActiveVersion: async () => {
+            const res = await httpJsonRequest({
+                port,
+                method: 'GET',
+                pathname: '/json/version',
+            });
+            return res.json || {};
+        },
+        close: async () => {
+            await server.stop().catch(() => {});
+        },
+    };
+}
+
+async function waitForDevToolsWs(chromeManager, envId, timeoutMs = 20000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const proc = chromeManager.runningProcesses?.get(envId);
@@ -202,7 +412,7 @@ class CDPClient {
             }
         });
     }
-    send(method, params = {}, sessionId = undefined, timeoutMs = 20000) {
+    send(method, params = {}, sessionId = undefined, timeoutMs = 25000) {
         const id = ++this.id;
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -232,6 +442,20 @@ class CDPClient {
         } catch {
             // ignore
         }
+    }
+}
+
+async function readWindowBounds(cdp) {
+    try {
+        const targetsRes = await cdp.send('Target.getTargets', {});
+        const page = (targetsRes?.targetInfos || []).find((t) => t.type === 'page');
+        if (!page?.targetId) return null;
+        const winRes = await cdp.send('Browser.getWindowForTarget', {
+            targetId: page.targetId,
+        });
+        return winRes?.bounds || null;
+    } catch {
+        return null;
     }
 }
 
@@ -280,7 +504,7 @@ const SITE_SPECS = {
         label: 'CreepJS',
         url: 'https://abrahamjuliot.github.io/creepjs/',
         waitMs: 10000,
-        pollMs: 25000,
+        pollMs: 28000,
         extractJs: `(() => {
             const text = (document.body?.innerText || '').trim();
             if (/verify you are human|just a moment|cloudflare/i.test(text)) {
@@ -311,7 +535,7 @@ const SITE_SPECS = {
         label: 'BrowserScan',
         url: 'https://www.browserscan.net/',
         waitMs: 12000,
-        pollMs: 18000,
+        pollMs: 20000,
         extractJs: `(() => {
             const text = (document.body?.innerText || '').trim();
             if (/verify you are human|just a moment|turnstile|captcha/i.test(text)) {
@@ -332,7 +556,7 @@ const SITE_SPECS = {
         label: 'BrowserLeaks WebRTC',
         url: 'https://browserleaks.com/webrtc',
         waitMs: 10000,
-        pollMs: 12000,
+        pollMs: 14000,
         extractJs: `(() => {
             const text = (document.body?.innerText || '').trim();
             if (/verify you are human|just a moment|captcha/i.test(text)) {
@@ -425,54 +649,304 @@ function summarizeSiteResult(siteKey, res) {
     return 'ok';
 }
 
-async function auditEnvironment(chromeManager, env, label, reports) {
-    const engineLabel = getEngineLabel(env.browserEngine);
-    console.log(
-        `\n==================== LIVE AUDIT: ${label} ====================\n` +
-            `内核类型: ${engineLabel}`,
-    );
-    const report = {
-        label,
-        engine: env.browserEngine,
-        engineLabel,
-        browserVersion: 'unknown',
-        sites: {},
-        error: null,
-    };
-    reports.push(report);
-    let cdp;
-    try {
-        await chromeManager.launchEnvironment(env.id);
-        const devTools = await waitForDevToolsWs(chromeManager, env.id, 20000);
-        report.browserVersion = devTools.browserVersion;
-        console.log(`浏览器版本: ${devTools.browserVersion}`);
-        cdp = new CDPClient(devTools.wsUrl);
-        await cdp.connect();
-        await sleep(2000);
-
-        for (const siteKey of OPTS.sites) {
-            const spec = SITE_SPECS[siteKey];
-            if (!spec) continue;
-            console.log(`\n--- [${engineLabel}] [${spec.label}] ${spec.url} ---`);
-            const res = await visitAndInspect(
-                cdp,
-                spec.url,
-                spec.waitMs,
-                spec.extractJs,
-                spec.pollMs,
-            );
-            const sanitizedRes = redactPublicIps(res);
-            report.sites[siteKey] = sanitizedRes;
-            console.log(JSON.stringify(sanitizedRes, null, 2));
+async function selectAutoWorkingProxies(proxyManager, maxCount) {
+    const all = proxyManager.list();
+    const selected = [];
+    for (const candidate of all) {
+        if (selected.length >= maxCount) break;
+        try {
+            await proxyManager.ensureStarted(candidate.id);
+            const exit = await Promise.race([
+                proxyManager.refreshExitInfo(candidate.id, { force: true }),
+                new Promise((resolve) => setTimeout(() => resolve(null), 9000)),
+            ]);
+            if (exit && exit.status === 'ready' && exit.ip) {
+                selected.push({
+                    id: candidate.id,
+                    protocol: candidate.protocol || 'proxy',
+                    countryCode: exit.countryCode || 'UNKNOWN',
+                    displaySlot: `ProxySlot-${selected.length + 1} (${String(candidate.protocol || 'proxy').toUpperCase()}/${exit.countryCode || 'XX'})`,
+                });
+            } else {
+                await proxyManager.stop(candidate.id).catch(() => {});
+            }
+        } catch {
+            await proxyManager.stop(candidate.id).catch(() => {});
         }
-    } catch (err) {
-        report.error = err.message;
-        console.error(`[audit:live] ${label} (${engineLabel}) 异常:`, err.message);
-        process.exitCode = 1;
+    }
+    return selected;
+}
+
+async function runAuditGroup({
+    chromeManager,
+    proxyManager,
+    targets,
+    reports,
+    parallel,
+    viaMcp,
+}) {
+    if (targets.length === 0) return { auditedCount: 0, mcpSummary: null };
+
+    const useParallel = parallel && targets.length > 1;
+    let mcpHarness = null;
+    const mcpSummary = {
+        enabled: Boolean(viaMcp),
+        serverName: '',
+        toolCount: 0,
+        stdioBridgeOk: false,
+        simultaneousLaunched: 0,
+        tiledCount: 0,
+        distinctGridPositions: 0,
+        activeSwitchVerified: false,
+    };
+
+    try {
+        if (viaMcp) {
+            mcpHarness = await createLoopbackMcpHarness(chromeManager, proxyManager);
+            mcpSummary.serverName = mcpHarness.serverName;
+            mcpSummary.toolCount = mcpHarness.toolNames.length;
+            mcpSummary.stdioBridgeOk = mcpHarness.stdioSmokeOk;
+            console.log(
+                `\n[MCP Control Plane] Started on 127.0.0.1:${mcpHarness.port} | server=${mcpHarness.serverName} | tools=${mcpHarness.toolNames.join(',')} | stdioBridge=${mcpHarness.stdioSmokeOk}`,
+            );
+            const listed = await mcpHarness.callTool('list_profiles', {});
+            console.log(
+                `[MCP Control Plane] list_profiles discovered ${listed.count} profile(s)`,
+            );
+        }
+
+        if (!useParallel) {
+            for (const target of targets) {
+                const engineLabel = getEngineLabel(target.env.browserEngine);
+                const report = {
+                    label: target.label,
+                    engine: target.env.browserEngine,
+                    engineLabel,
+                    browserVersion: 'unknown',
+                    windowBounds: null,
+                    sites: {},
+                    error: null,
+                };
+                reports.push(report);
+                let cdp;
+                try {
+                    let wsUrl = '';
+                    if (mcpHarness) {
+                        const started = await mcpHarness.callTool('start_profile', {
+                            profileId: target.env.id,
+                            setActive: true,
+                        });
+                        wsUrl = started.wsEndpoint;
+                        const ver = await mcpHarness.fetchScopedVersion(target.env.id);
+                        report.browserVersion = ver.Browser || 'unknown';
+                    } else {
+                        await chromeManager.launchEnvironment(target.env.id);
+                        const devTools = await waitForDevToolsWs(
+                            chromeManager,
+                            target.env.id,
+                            20000,
+                        );
+                        wsUrl = devTools.wsUrl;
+                        report.browserVersion = devTools.browserVersion;
+                    }
+                    cdp = new CDPClient(wsUrl);
+                    await cdp.connect();
+                    await sleep(1500);
+                    for (const siteKey of OPTS.sites) {
+                        const spec = SITE_SPECS[siteKey];
+                        if (!spec) continue;
+                        const res = await visitAndInspect(
+                            cdp,
+                            spec.url,
+                            spec.waitMs,
+                            spec.extractJs,
+                            spec.pollMs,
+                        );
+                        report.sites[siteKey] = redactPublicIps(res);
+                    }
+                } catch (err) {
+                    report.error = redactPublicIps(err.message);
+                    process.exitCode = 1;
+                } finally {
+                    cdp?.close();
+                    if (mcpHarness) {
+                        await mcpHarness
+                            .callTool('stop_profile', { profileId: target.env.id })
+                            .catch(() => {});
+                    } else {
+                        await chromeManager.closeEnvironment(target.env.id).catch(() => {});
+                    }
+                    await sleep(1200);
+                }
+            }
+            return { auditedCount: targets.length, mcpSummary };
+        }
+
+        // ===================================================================
+        // MULTI-WINDOW SIMULTANEOUS LAUNCH + TILING + CONCURRENT LIVE L4 AUDIT
+        // ===================================================================
+        console.log(
+            `\n==================== MULTI-WINDOW SIMULTANEOUS L4 (${targets.length} WINDOWS) ====================`,
+        );
+
+        const sessions = [];
+        try {
+            // 1) Launch ALL target browser windows simultaneously!
+            const launchOutcomes = await Promise.all(
+                targets.map(async (target, idx) => {
+                    const engineLabel = getEngineLabel(target.env.browserEngine);
+                    const report = {
+                        label: target.label,
+                        engine: target.env.browserEngine,
+                        engineLabel,
+                        browserVersion: 'unknown',
+                        windowBounds: null,
+                        sites: {},
+                        error: null,
+                    };
+                    reports.push(report);
+                    try {
+                        let wsUrl = '';
+                        let browserVersion = 'unknown';
+                        if (mcpHarness) {
+                            const started = await mcpHarness.callTool(
+                                'start_profile',
+                                {
+                                    profileId: target.env.id,
+                                    setActive: idx === 0,
+                                },
+                            );
+                            wsUrl = started.wsEndpoint;
+                            const ver = await mcpHarness.fetchScopedVersion(
+                                target.env.id,
+                            );
+                            browserVersion = ver.Browser || 'unknown';
+                        } else {
+                            await chromeManager.launchEnvironment(target.env.id);
+                            const devTools = await waitForDevToolsWs(
+                                chromeManager,
+                                target.env.id,
+                                25000,
+                            );
+                            wsUrl = devTools.wsUrl;
+                            browserVersion = devTools.browserVersion;
+                        }
+                        report.browserVersion = browserVersion;
+                        const cdp = new CDPClient(wsUrl);
+                        await cdp.connect();
+                        return { target, report, cdp, ok: true };
+                    } catch (err) {
+                        report.error = redactPublicIps(err.message);
+                        process.exitCode = 1;
+                        return { target, report, cdp: null, ok: false };
+                    }
+                }),
+            );
+
+            for (const item of launchOutcomes) {
+                if (item.ok && item.cdp) {
+                    sessions.push(item);
+                }
+            }
+            mcpSummary.simultaneousLaunched = sessions.length;
+
+            if (mcpHarness && sessions.length >= 2) {
+                const runningList = await mcpHarness.callTool('list_profiles', {
+                    status: 'running',
+                });
+                const secondId = sessions[1].target.env.id;
+                const switched = await mcpHarness.callTool(
+                    'switch_active_profile',
+                    { profileId: secondId },
+                );
+                const activeVer = await mcpHarness.fetchActiveVersion();
+                mcpSummary.activeSwitchVerified =
+                    runningList.count === sessions.length &&
+                    switched.activeProfileId === secondId &&
+                    String(activeVer.webSocketDebuggerUrl || '').endsWith(
+                        `/${secondId}`,
+                    );
+                console.log(
+                    `[MCP Multi-Window] running=${runningList.count}/${targets.length} | switch_active_profile -> ${sessions[1].target.label} verified=${mcpSummary.activeSwitchVerified}`,
+                );
+            }
+
+            // 2) Tile all simultaneously open browser windows side-by-side across the primary display!
+            if (sessions.length > 0) {
+                const workArea = screen.getPrimaryDisplay().workArea;
+                const tileRes = await chromeManager.tileRunningWindows(workArea);
+                mcpSummary.tiledCount = tileRes?.tiledCount || 0;
+                await sleep(600);
+                const posKeys = new Set();
+                for (const sess of sessions) {
+                    const b = await readWindowBounds(sess.cdp);
+                    if (b) {
+                        sess.report.windowBounds = {
+                            left: b.left,
+                            top: b.top,
+                            width: b.width,
+                            height: b.height,
+                        };
+                        posKeys.add(`${b.left},${b.top}`);
+                    }
+                }
+                mcpSummary.distinctGridPositions = posKeys.size;
+                console.log(
+                    `[Multi-Window Grid Tiling] tiled=${mcpSummary.tiledCount}/${sessions.length} | distinctPositions=${mcpSummary.distinctGridPositions} | bounds=${JSON.stringify(sessions.map((s) => ({ label: s.target.label, bounds: s.report.windowBounds })))}`,
+                );
+            }
+
+            await sleep(1500);
+
+            // 3) Audit ALL open browser windows CONCURRENTLY (`Promise.all`) against live external L4 sites!
+            await Promise.all(
+                sessions.map(async ({ target, report, cdp }) => {
+                    for (const siteKey of OPTS.sites) {
+                        const spec = SITE_SPECS[siteKey];
+                        if (!spec) continue;
+                        console.log(
+                            `[Concurrent L4 -> START] [${target.label}] [${spec.label}]`,
+                        );
+                        const res = await visitAndInspect(
+                            cdp,
+                            spec.url,
+                            spec.waitMs,
+                            spec.extractJs,
+                            spec.pollMs,
+                        );
+                        const sanitizedRes = redactPublicIps(res);
+                        report.sites[siteKey] = sanitizedRes;
+                        console.log(
+                            `[Concurrent L4 -> DONE]  [${target.label}] [${spec.label}] => ${summarizeSiteResult(siteKey, sanitizedRes)}`,
+                        );
+                    }
+                }),
+            );
+        } finally {
+            for (const sess of sessions) {
+                sess.cdp?.close();
+            }
+            if (mcpHarness) {
+                await Promise.allSettled(
+                    targets.map((t) =>
+                        mcpHarness.callTool('stop_profile', {
+                            profileId: t.env.id,
+                        }),
+                    ),
+                );
+            } else {
+                await Promise.allSettled(
+                    targets.map((t) => chromeManager.closeEnvironment(t.env.id)),
+                );
+            }
+            await sleep(1200);
+        }
+
+        return { auditedCount: targets.length, mcpSummary };
     } finally {
-        cdp?.close();
-        await chromeManager.closeEnvironment(env.id).catch(() => {});
-        await sleep(1500);
+        if (mcpHarness) {
+            await mcpHarness.close();
+        }
     }
 }
 
@@ -482,6 +956,7 @@ app.whenReady().then(async () => {
     let tempChromeManager;
     let tempAuditRoot = '';
     const reports = [];
+    const mcpSummaries = [];
     try {
         if (OPTS.invalidEngine) {
             console.error(
@@ -490,11 +965,16 @@ app.whenReady().then(async () => {
             process.exitCode = 1;
             return;
         }
-        if (OPTS.envs.length === 0 && OPTS.proxies.length === 0) {
+        if (
+            OPTS.envs.length === 0 &&
+            OPTS.proxies.length === 0 &&
+            OPTS.autoProxiesCount === 0
+        ) {
             console.log(
                 'Usage:\n' +
-                    '  npm run audit:live -- --env="<环境名称1>,<环境名称2>" [--sites=creepjs,browserscan,browserleaks,pixelscan]\n' +
-                    '  npm run audit:live -- --proxy="<内置代理名称>" [--engine=both|fingerprint-chromium|system-chrome] [--sites=creepjs,browserscan,browserleaks,pixelscan]',
+                    '  npm run audit:live -- --proxy="<内置代理名称1>,<内置代理名称2>" [--engine=both|fingerprint-chromium|system-chrome]\n' +
+                    '  npm run audit:live -- --auto-proxies=2 [--engine=both]\n' +
+                    '  npm run audit:live -- --env="<环境名称1>,<环境名称2>" [--sites=creepjs,browserscan,browserleaks,pixelscan]',
             );
             process.exitCode = 1;
             return;
@@ -546,48 +1026,76 @@ app.whenReady().then(async () => {
                 kernelManager,
             );
             const allEnvs = await realChromeManager.getAllEnvironments();
-            const targets = OPTS.envs
+            const matchedEnvs = OPTS.envs
                 .map((name) => allEnvs.find((e) => e.name === name))
                 .filter(Boolean);
 
-            if (targets.length === 0) {
+            if (matchedEnvs.length === 0) {
                 console.error(
                     `[audit:live] 未找到指定环境: ${OPTS.envs.join(', ')}`,
                 );
                 process.exitCode = 1;
             } else {
-                for (const env of targets) {
-                    await auditEnvironment(
-                        realChromeManager,
+                const res = await runAuditGroup({
+                    chromeManager: realChromeManager,
+                    proxyManager,
+                    targets: matchedEnvs.map((env, idx) => ({
                         env,
-                        env.name,
-                        reports,
-                    );
-                    auditedCount += 1;
-                }
+                        label: `EnvSlot-${idx + 1} (${env.browserEngine || 'system-chrome'})`,
+                    })),
+                    reports,
+                    parallel: OPTS.parallel,
+                    viaMcp: OPTS.viaMcp,
+                });
+                auditedCount += res.auditedCount;
+                if (res.mcpSummary) mcpSummaries.push(res.mcpSummary);
             }
         }
 
-        if (OPTS.proxies.length > 0) {
-            const allProxies = proxyManager.list();
-            const matchedProxies = OPTS.proxies
-                .map((name) => {
-                    const lower = name.toLowerCase();
-                    return (
-                        allProxies.find((p) => p.name === name) ||
-                        allProxies.find(
-                            (p) => String(p.name || '').trim().toLowerCase() === lower,
-                        )
-                    );
-                })
-                .filter(Boolean);
-
-            if (matchedProxies.length === 0) {
-                console.error(
-                    `[audit:live] 未找到指定内置代理: ${OPTS.proxies.join(', ')}`,
+        if (OPTS.proxies.length > 0 || OPTS.autoProxiesCount > 0) {
+            let selectedProxySpecs = [];
+            if (OPTS.autoProxiesCount > 0) {
+                console.log(
+                    `[audit:live] Probing up to ${OPTS.autoProxiesCount} healthy managed proxies automatically...`,
                 );
-                process.exitCode = 1;
+                selectedProxySpecs = await selectAutoWorkingProxies(
+                    proxyManager,
+                    OPTS.autoProxiesCount,
+                );
+                if (selectedProxySpecs.length === 0) {
+                    console.error(
+                        '[audit:live] 未找到可连通的内置代理，请确认至少有 1 个可用代理节点',
+                    );
+                    process.exitCode = 1;
+                }
             } else {
+                const allProxies = proxyManager.list();
+                selectedProxySpecs = OPTS.proxies
+                    .map((name, idx) => {
+                        const lower = name.toLowerCase();
+                        const found =
+                            allProxies.find((p) => p.name === name) ||
+                            allProxies.find(
+                                (p) =>
+                                    String(p.name || '').trim().toLowerCase() ===
+                                    lower,
+                            );
+                        if (!found) return null;
+                        return {
+                            id: found.id,
+                            protocol: found.protocol || 'proxy',
+                            countryCode: '',
+                            displaySlot: `ProxySlot-${idx + 1} (${String(found.protocol || 'proxy').toUpperCase()})`,
+                        };
+                    })
+                    .filter(Boolean);
+                if (selectedProxySpecs.length === 0) {
+                    console.error('[audit:live] 未找到指定内置代理');
+                    process.exitCode = 1;
+                }
+            }
+
+            if (selectedProxySpecs.length > 0) {
                 tempAuditRoot = fs.mkdtempSync(
                     path.join(os.tmpdir(), 'multichrome-live-audit-'),
                 );
@@ -604,7 +1112,9 @@ app.whenReady().then(async () => {
                     kernelManager,
                 );
 
-                for (const proxy of matchedProxies) {
+                const ephemeralTargets = [];
+                for (let pIdx = 0; pIdx < selectedProxySpecs.length; pIdx += 1) {
+                    const proxySpec = selectedProxySpecs[pIdx];
                     for (const engineId of OPTS.engines) {
                         const meta = ENGINE_META[engineId];
                         if (engineId === 'fingerprint-chromium') {
@@ -614,7 +1124,7 @@ app.whenReady().then(async () => {
                                     '未安装或未激活 C++ 隐私指纹内核 (fingerprint-chromium)，无法执行该内核抽检';
                                 console.error(`[audit:live] ${msg}`);
                                 reports.push({
-                                    label: `LiveAudit-${proxy.name}-${meta.tag} [proxy:${proxy.name}]`,
+                                    label: `${proxySpec.displaySlot}-${meta.tag}`,
                                     engine: engineId,
                                     engineLabel: meta.label,
                                     browserVersion: 'missing',
@@ -632,7 +1142,7 @@ app.whenReady().then(async () => {
                                     '未检测到系统 Chrome 可执行文件 (system-chrome)，无法执行该内核抽检';
                                 console.error(`[audit:live] ${msg}`);
                                 reports.push({
-                                    label: `LiveAudit-${proxy.name}-${meta.tag} [proxy:${proxy.name}]`,
+                                    label: `${proxySpec.displaySlot}-${meta.tag}`,
                                     engine: engineId,
                                     engineLabel: meta.label,
                                     browserVersion: 'missing',
@@ -646,23 +1156,42 @@ app.whenReady().then(async () => {
 
                         const ephemeralEnv =
                             await tempChromeManager.createEnvironment(
-                                `LiveAudit-${proxy.name}-${meta.tag}`,
+                                `LiveAudit-P${pIdx + 1}-${meta.tag}`,
                                 '用户分组',
-                                `ephemeral L4 audit profile (${engineId})`,
+                                `ephemeral L4 multi-window MCP audit profile (${engineId})`,
                                 {
                                     browserEngine: engineId,
-                                    proxyId: proxy.id,
+                                    proxyId: proxySpec.id,
                                 },
                             );
-                        await auditEnvironment(
-                            tempChromeManager,
-                            ephemeralEnv,
-                            `${ephemeralEnv.name} [proxy:${proxy.name}]`,
-                            reports,
-                        );
-                        auditedCount += 1;
+                        ephemeralTargets.push({
+                            env: ephemeralEnv,
+                            label: `${ephemeralEnv.name} [${proxySpec.displaySlot}]`,
+                        });
                     }
                 }
+
+                const res = await runAuditGroup({
+                    chromeManager: tempChromeManager,
+                    proxyManager,
+                    targets: ephemeralTargets,
+                    reports,
+                    parallel: OPTS.parallel,
+                    viaMcp: OPTS.viaMcp,
+                });
+                auditedCount += res.auditedCount;
+                if (res.mcpSummary) mcpSummaries.push(res.mcpSummary);
+            }
+        }
+
+        if (mcpSummaries.length > 0) {
+            console.log(
+                '\n==================== MCP & MULTI-WINDOW SUMMARY ====================',
+            );
+            for (const s of mcpSummaries) {
+                console.log(
+                    `  MCP Server: ${s.serverName} | Tools=${s.toolCount} | StdioBridge=${s.stdioBridgeOk} | SimultaneousWindows=${s.simultaneousLaunched} | GridTiled=${s.tiledCount} (distinctPositions=${s.distinctGridPositions}) | ActiveSwitchVerified=${s.activeSwitchVerified}`,
+                );
             }
         }
 
@@ -670,30 +1199,41 @@ app.whenReady().then(async () => {
             console.log(
                 '\n==================== LIVE AUDIT DUAL-ENGINE SUMMARY ====================',
             );
-            for (const item of reports) {
-                console.log(
-                    `\n[${item.engineLabel}] ${item.label} | version=${item.browserVersion}`,
-                );
-                if (item.error) {
-                    console.log(`  ERROR: ${item.error}`);
-                    continue;
-                }
-                for (const siteKey of OPTS.sites) {
-                    const spec = SITE_SPECS[siteKey];
-                    if (!spec) continue;
+            for (const engineKey of ['fingerprint-chromium', 'system-chrome']) {
+                const group = reports.filter((r) => r.engine === engineKey);
+                if (group.length === 0) continue;
+                console.log(`\n### ${getEngineLabel(engineKey)} (共 ${group.length} 个并发窗口)`);
+                for (const item of group) {
                     console.log(
-                        `  - ${spec.label}: ${summarizeSiteResult(siteKey, item.sites[siteKey])}`,
+                        `\n  [${item.label}] version=${item.browserVersion}${item.windowBounds ? ` | bounds=${JSON.stringify(item.windowBounds)}` : ''}`,
                     );
+                    if (item.error) {
+                        console.log(`    ERROR: ${item.error}`);
+                        continue;
+                    }
+                    for (const siteKey of OPTS.sites) {
+                        const spec = SITE_SPECS[siteKey];
+                        if (!spec) continue;
+                        console.log(
+                            `    - ${spec.label}: ${summarizeSiteResult(siteKey, item.sites[siteKey])}`,
+                        );
+                    }
                 }
             }
             console.log(
-                '========================================================================',
+                '\n========================================================================',
             );
         }
 
         if (auditedCount === 0) {
             process.exitCode = 1;
         }
+    } catch (fatalErr) {
+        console.error(
+            '[audit:live] Fatal error:',
+            redactPublicIps(fatalErr?.message || String(fatalErr)),
+        );
+        process.exitCode = 1;
     } finally {
         disposeChromeManager(tempChromeManager);
         disposeChromeManager(realChromeManager);

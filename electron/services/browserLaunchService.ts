@@ -1484,24 +1484,25 @@ export class BrowserLaunchService {
             return { tiledCount: 0 };
         }
         const gridBounds = computeWindowGridBounds(entries.length, workArea);
-        let tiledCount = 0;
-        for (let i = 0; i < entries.length; i += 1) {
-            const port = entries[i].debugPort;
-            if (!port) continue;
-            try {
-                const ok = await this.cdpManager.setWindowBoundsForPort(
-                    port,
-                    gridBounds[i],
-                );
-                if (ok) tiledCount += 1;
-            } catch (err) {
-                log.warn(
-                    `[${entries[i].envId.substring(0, 8)}] 窗口排列跳过:`,
-                    err,
-                );
-            }
-        }
-        return { tiledCount };
+        const outcomes = await Promise.all(
+            entries.map(async (entry, index) => {
+                const port = entry.debugPort;
+                if (!port) return false;
+                try {
+                    return await this.cdpManager.setWindowBoundsForPort(
+                        port,
+                        gridBounds[index],
+                    );
+                } catch (err) {
+                    log.warn(
+                        `[${entry.envId.substring(0, 8)}] 窗口排列跳过:`,
+                        err,
+                    );
+                    return false;
+                }
+            }),
+        );
+        return { tiledCount: outcomes.filter(Boolean).length };
     }
 
     public async closeAllEnvironments(): Promise<{

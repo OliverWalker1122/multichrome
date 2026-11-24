@@ -1491,7 +1491,7 @@ export class CDPManager {
         bounds: { left: number; top: number; width: number; height: number },
     ): Promise<boolean> {
         let pageTarget: { id?: string; type?: string } | undefined;
-        const waitDeadline = Date.now() + 4000;
+        const waitDeadline = Date.now() + 8000;
         while (Date.now() < waitDeadline) {
             const targets = await this.fetchDebugTargets(debugPort);
             pageTarget =
@@ -1502,27 +1502,39 @@ export class CDPManager {
         }
         if (!pageTarget?.id) return false;
 
+        const targetId = pageTarget.id;
         return this.withEphemeralBrowserClient(debugPort, async (call) => {
-            const winInfo = await call('Browser.getWindowForTarget', {
-                targetId: pageTarget.id,
-            });
-            const windowId = Number(winInfo.windowId);
-            if (!Number.isInteger(windowId)) return false;
-            await call('Browser.setWindowBounds', {
-                windowId,
-                bounds: { windowState: 'normal' },
-            });
-            await call('Browser.setWindowBounds', {
-                windowId,
-                bounds: {
-                    left: Math.round(bounds.left),
-                    top: Math.round(bounds.top),
-                    width: Math.round(bounds.width),
-                    height: Math.round(bounds.height),
-                    windowState: 'normal',
-                },
-            });
-            return true;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+                try {
+                    const winInfo = await call('Browser.getWindowForTarget', {
+                        targetId,
+                    });
+                    const windowId = Number(winInfo.windowId);
+                    if (!Number.isInteger(windowId)) {
+                        await new Promise((resolve) => setTimeout(resolve, 200));
+                        continue;
+                    }
+                    await call('Browser.setWindowBounds', {
+                        windowId,
+                        bounds: { windowState: 'normal' },
+                    });
+                    await call('Browser.setWindowBounds', {
+                        windowId,
+                        bounds: {
+                            left: Math.round(bounds.left),
+                            top: Math.round(bounds.top),
+                            width: Math.round(bounds.width),
+                            height: Math.round(bounds.height),
+                            windowState: 'normal',
+                        },
+                    });
+                    return true;
+                } catch {
+                    if (attempt === 2) return false;
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                }
+            }
+            return false;
         });
     }
 
