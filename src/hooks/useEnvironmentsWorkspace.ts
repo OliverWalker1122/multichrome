@@ -635,9 +635,12 @@ export function useEnvironmentsWorkspace({
         }
     };
 
-    const handleFocusWindow = (id: string) => {
+    const handleFocusWindow = (
+        id: string,
+        options?: { highlightOnly?: boolean },
+    ) => {
         if (!environmentApi.isAvailable()) return;
-        void environmentApi.focusWindow(id).catch(() => {});
+        void environmentApi.focusWindow(id, options).catch(() => {});
     };
 
     return {

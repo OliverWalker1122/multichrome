@@ -226,10 +226,13 @@ export const environmentApi = {
         return fn(options);
     },
 
-    focusWindow: async (id: string): Promise<boolean> => {
+    focusWindow: async (
+        id: string,
+        options?: { highlightOnly?: boolean },
+    ): Promise<boolean> => {
         const fn = getElectronApi()?.chromeEnvironments?.focusWindow;
         if (!fn) return false;
-        return fn(id);
+        return fn(id, options);
     },
 
     onStatusChanged: (handler: () => void): (() => void) =>

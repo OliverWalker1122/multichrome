@@ -136,9 +136,13 @@ try {
             tileWindows: (options) =>
                 ipcRenderer.invoke('tile-chrome-windows', options),
 
-            // 定位并置顶运行中环境的浏览器窗口
-            focusWindow: (id) =>
-                ipcRenderer.invoke('focus-chrome-environment-window', id),
+            // 定位并置顶运行中环境的浏览器窗口（可选 highlightOnly 仅高亮不抢焦点）
+            focusWindow: (id, options) =>
+                ipcRenderer.invoke(
+                    'focus-chrome-environment-window',
+                    id,
+                    options,
+                ),
         },
 
         // 回收站管理API

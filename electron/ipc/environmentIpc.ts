@@ -16,16 +16,29 @@ import {
 
 export interface EnvironmentIpcDeps {
     ipcMain: IpcMain;
+    getMainWindow?: () => BrowserWindow | null;
     chromeManager: EnvironmentService;
     settingsManager: SettingsManager;
     proxyIntegration: ProxyCoordinator;
+    flashWindowHighlight?: (
+        bounds: {
+            left: number;
+            top: number;
+            width: number;
+            height: number;
+            windowState?: string;
+        } | null,
+        label: string,
+    ) => boolean;
 }
 
 export function registerEnvironmentIpc({
     ipcMain,
+    getMainWindow,
     chromeManager,
     settingsManager,
     proxyIntegration,
+    flashWindowHighlight,
 }: EnvironmentIpcDeps): void {
     ipcMain.handle('get-chrome-environments', async () => {
         try {
@@ -470,9 +483,11 @@ export function registerEnvironmentIpc({
         async (_, rawOptions: unknown = undefined) => {
             try {
                 const mainWin =
+                    (getMainWindow ? getMainWindow() : null) ||
                     BrowserWindow.getAllWindows().find(
-                        (win) => !win.isDestroyed(),
-                    ) || null;
+                        (win) => !win.isDestroyed() && win.isFocusable(),
+                    ) ||
+                    null;
                 const display = mainWin
                     ? screen.getDisplayMatching(mainWin.getBounds())
                     : screen.getPrimaryDisplay();
@@ -552,10 +567,23 @@ export function registerEnvironmentIpc({
 
     ipcMain.handle(
         'focus-chrome-environment-window',
-        async (_, id: unknown) => {
+        async (_, id: unknown, rawOptions: unknown = undefined) => {
             try {
                 const validId = validateId(id);
-                return await chromeManager.focusEnvironmentWindow(validId);
+                const highlightOnly = Boolean(
+                    rawOptions &&
+                        typeof rawOptions === 'object' &&
+                        (rawOptions as { highlightOnly?: unknown })
+                            .highlightOnly === true,
+                );
+                const result = await chromeManager.focusEnvironmentWindow(
+                    validId,
+                    { highlightOnly },
+                );
+                if (result.bounds && flashWindowHighlight) {
+                    flashWindowHighlight(result.bounds, result.label);
+                }
+                return result.focused;
             } catch (error) {
                 log.error('定位浏览器窗口失败:', error);
                 throw error;

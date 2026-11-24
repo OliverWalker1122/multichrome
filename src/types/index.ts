@@ -634,7 +634,10 @@ export interface ElectronAPI {
             mode?: WindowArrangeMode;
             envIds?: string[];
         }) => Promise<WindowArrangeResult>;
-        focusWindow?: (id: string) => Promise<boolean>;
+        focusWindow?: (
+            id: string,
+            options?: { highlightOnly?: boolean },
+        ) => Promise<boolean>;
     };
     kernels?: {
         getStatus: () => Promise<KernelStatus>;

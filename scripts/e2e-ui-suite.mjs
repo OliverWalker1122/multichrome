@@ -18,6 +18,10 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import {
+    getForegroundWindowPid,
+    isNativeWindowFocusAvailable,
+} from '../electron/drivers/nativeWindowFocus.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2396,20 +2400,74 @@ async function main() {
                     8000,
                 );
 
-                // Test explicit '定位窗口' icon button on MultiWin 02 + direct pure-CDP focusWindow IPC
+                // Test highlightOnly mode (must NOT steal OS focus) AND explicit '定位窗口' button (must truly bring target Chrome to OS foreground on Windows!)
+                const targetEnv2Id = await cdp.eval(`
+                    window.electronAPI.chromeEnvironments.getAll().then(list => {
+                        const target = list.find(e => e.name === 'MultiWin 02');
+                        return target ? target.id : '';
+                    })
+                `);
+                const fgBeforeLocate =
+                    process.platform === 'win32' && isNativeWindowFocusAvailable()
+                        ? getForegroundWindowPid()
+                        : null;
+                const highlightOnlyRes = targetEnv2Id
+                    ? await cdp.eval(
+                          `window.electronAPI.chromeEnvironments.focusWindow(${JSON.stringify(targetEnv2Id)}, { highlightOnly: true })`,
+                      )
+                    : false;
+                await sleep(180);
+                const fgAfterHighlightOnly =
+                    process.platform === 'win32' && isNativeWindowFocusAvailable()
+                        ? getForegroundWindowPid()
+                        : null;
+                const highlightOnlyNoStealOk =
+                    Boolean(highlightOnlyRes) &&
+                    (fgBeforeLocate !== electronProc.pid ||
+                        fgAfterHighlightOnly === electronProc.pid);
+
                 const locateBtnClicked = await cdp.eval(`(() => {
                     const btn = document.querySelector('button[aria-label="定位窗口 MultiWin 02"]');
                     if (!btn) return false;
                     btn.click();
                     return true;
                 })()`);
-                const ipcFocusRes = await cdp.eval(`
-                    window.electronAPI.chromeEnvironments.getAll().then(list => {
-                        const target = list.find(e => e.name === 'MultiWin 02');
-                        return target ? window.electronAPI.chromeEnvironments.focusWindow(target.id) : false;
-                    })
-                `);
-                focusLocateOk = Boolean(locateBtnClicked && ipcFocusRes);
+                const ipcFocusRes = targetEnv2Id
+                    ? await cdp.eval(
+                          `window.electronAPI.chromeEnvironments.focusWindow(${JSON.stringify(targetEnv2Id)}, { highlightOnly: false })`,
+                      )
+                    : false;
+
+                let osForegroundJumpedOk = true;
+                if (
+                    process.platform === 'win32' &&
+                    isNativeWindowFocusAvailable() &&
+                    fgBeforeLocate === electronProc.pid
+                ) {
+                    osForegroundJumpedOk = await waitUntil(async () => {
+                        const fgNow = getForegroundWindowPid();
+                        return Boolean(
+                            fgNow &&
+                                fgNow > 0 &&
+                                fgNow !== electronProc.pid,
+                        );
+                    }, 3000, 100);
+                    // Wait 250ms while 1.2s highlight overlay is visible to verify showInactive() never steals focus back to Electron!
+                    if (osForegroundJumpedOk) {
+                        await sleep(250);
+                        const fgDuringOverlay = getForegroundWindowPid();
+                        osForegroundJumpedOk = Boolean(
+                            fgDuringOverlay &&
+                                fgDuringOverlay !== electronProc.pid,
+                        );
+                    }
+                }
+                focusLocateOk = Boolean(
+                    locateBtnClicked &&
+                        ipcFocusRes &&
+                        highlightOnlyNoStealOk &&
+                        osForegroundJumpedOk,
+                );
 
                 uiTile3Ok = Boolean(
                     noMisfireOnOpenOk &&

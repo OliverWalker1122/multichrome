@@ -6,13 +6,20 @@ import { buildBulkEnvironmentSpecs } from '../electron/domain/bulkEnvironmentPol
 import {
     computeConsoleSplitWorkArea,
     computeDefaultMainWindowBounds,
+    computeVisualHighlightBounds,
     computeWindowArrangement,
     computeWindowCascadeBounds,
     computeWindowGridBounds,
     computeWindowUniformStackBounds,
     normalizeWindowArrangeMode,
+    sanitizeHighlightLabel,
     sanitizeWindowTitleTag,
 } from '../electron/domain/windowTiling.js';
+import {
+    allowForegroundForPid,
+    getForegroundWindowPid,
+    isNativeWindowFocusAvailable,
+} from '../electron/drivers/nativeWindowFocus.js';
 import { DebugPortReservationPool } from '../electron/drivers/portAllocator.js';
 
 test('buildBulkEnvironmentSpecs creates unique fingerprint seeds and sequential proxy distribution', () => {
@@ -214,25 +221,62 @@ test('Batch bar has no duplicate tiling buttons and close actions use red cross 
     );
 });
 
-test('Window locating strictly uses pure loopback CDP with zero AV-sensitive shell/WScript subprocesses', () => {
+test('Window locating uses in-process native Win32 API + CDP with zero AV-sensitive shell/WScript subprocesses', () => {
     assert.equal(
         fs.existsSync(path.resolve('electron/drivers/windowFocusDriver.js')),
         false,
         'windowFocusDriver.js must not exist',
     );
     const filesToCheck = [
+        'electron/drivers/nativeWindowFocus.js',
         'electron/drivers/cdpManager.ts',
+        'electron/app/windowHighlightOverlay.ts',
         'electron/services/browserLaunchService.ts',
         'electron/services/environmentService.ts',
         'electron/ipc/environmentIpc.ts',
     ];
     for (const rel of filesToCheck) {
-        const src = fs.readFileSync(path.resolve(rel), 'utf8');
+        const raw = fs.readFileSync(path.resolve(rel), 'utf8');
+        const src = raw
+            .replace(/\/\*[\s\S]*?\*\//g, '')
+            .replace(/^\s*\/\/.*$/gm, '');
+        assert.equal(
+            /WScript\.Shell|AppActivate|powershell\.exe|child_process/i.test(src) &&
+                rel !== 'electron/services/browserLaunchService.ts',
+            false,
+            `${rel} must not spawn subprocesses or invoke PowerShell/WScript.Shell`,
+        );
         assert.equal(
             /WScript\.Shell|AppActivate|powershell\.exe/i.test(src),
             false,
             `${rel} must not invoke PowerShell or WScript.Shell for window focus`,
         );
+    }
+
+    // Visual highlight bounds remove Win32 7px DWM invisible shadow borders cleanly
+    assert.deepEqual(
+        computeVisualHighlightBounds(
+            { left: -7, top: 0, width: 974, height: 523, windowState: 'normal' },
+            'win32',
+        ),
+        { x: 0, y: 0, width: 960, height: 516 },
+    );
+    assert.deepEqual(
+        computeVisualHighlightBounds(
+            { left: 0, top: 0, width: 1920, height: 1040, windowState: 'maximized' },
+            'win32',
+        ),
+        { x: 0, y: 0, width: 1920, height: 1040 },
+    );
+    assert.equal(computeVisualHighlightBounds(null, 'win32'), null);
+    assert.equal(sanitizeHighlightLabel('  美国2\n<script>  '), '美国2 <script>');
+
+    // On Windows, native in-process user32.dll bindings load cleanly and read current foreground PID
+    if (process.platform === 'win32') {
+        assert.equal(isNativeWindowFocusAvailable(), true);
+        assert.equal(allowForegroundForPid(-1), false);
+        const fgPid = getForegroundWindowPid();
+        assert.ok(fgPid === null || (Number.isInteger(fgPid) && fgPid > 0));
     }
 });
 

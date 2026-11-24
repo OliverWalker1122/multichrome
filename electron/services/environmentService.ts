@@ -621,8 +621,11 @@ export class EnvironmentService {
         return this.launchService.arrangeRunningWindows(workArea, options);
     }
 
-    public focusEnvironmentWindow(id: string): Promise<boolean> {
-        return this.launchService.focusEnvironmentWindow(id);
+    public focusEnvironmentWindow(
+        id: string,
+        options?: { highlightOnly?: boolean },
+    ): ReturnType<BrowserLaunchService['focusEnvironmentWindow']> {
+        return this.launchService.focusEnvironmentWindow(id, options);
     }
 
     public async batchCreateEnvironments(input: {

@@ -13,6 +13,7 @@ import log from 'electron-log';
 import Store from 'electron-store';
 import { createApplicationLogBuffer } from './app/applicationLogs.js';
 import { TrayManager } from './app/trayManager.js';
+import { WindowHighlightOverlay } from './app/windowHighlightOverlay.js';
 import {
     getTitleBarOverlay,
     MainWindowManager,
@@ -142,6 +143,8 @@ const backupService = new BackupService({
 // ---------------------------------------------------------------------------
 // Layer 3: Host Shell & Transport Adapters
 // ---------------------------------------------------------------------------
+const windowHighlightOverlay = new WindowHighlightOverlay();
+
 const trayManager = new TrayManager({
     isEnglishLocale,
     onShowWindow: () => windowManager.showOrRestore(),
@@ -241,7 +244,10 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
-    windowManager.create();
+    const initialWin = windowManager.create();
+    initialWin.on('closed', () => {
+        windowHighlightOverlay.destroy();
+    });
 
     registerAllIpcHandlers({
         ipcMain,
@@ -257,6 +263,8 @@ app.whenReady().then(() => {
         isEnglishLocale,
         onSettingsSaved: () => trayManager.updateMenu(),
         getTitleBarOverlay,
+        flashWindowHighlight: (bounds, label) =>
+            windowHighlightOverlay.flash(bounds, label),
     });
 
     const automationCfg = automationConfigRepository.getConfig();
@@ -365,6 +373,7 @@ async function performGracefulQuit(
         }
         environmentService.stopStatusMonitoring();
         environmentService.closeDatabase();
+        windowHighlightOverlay.destroy();
         trayManager.destroy();
         quitReady = true;
         app.quit();

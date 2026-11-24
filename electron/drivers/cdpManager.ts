@@ -1579,7 +1579,20 @@ export class CDPManager {
         });
     }
 
-    public async focusWindowForPort(debugPort: number): Promise<boolean> {
+    public async focusWindowForPort(
+        debugPort: number,
+        options?: { bringToFront?: boolean },
+    ): Promise<{
+        focused: boolean;
+        bounds: {
+            left: number;
+            top: number;
+            width: number;
+            height: number;
+            windowState?: string;
+        } | null;
+    }> {
+        const bringToFront = options?.bringToFront !== false;
         let pageTarget: { id?: string; type?: string } | undefined;
         const waitDeadline = Date.now() + 4000;
         while (Date.now() < waitDeadline) {
@@ -1590,26 +1603,66 @@ export class CDPManager {
             if (pageTarget?.id) break;
             await new Promise((resolve) => setTimeout(resolve, 100));
         }
-        if (!pageTarget?.id) return false;
+        if (!pageTarget?.id) return { focused: false, bounds: null };
         const targetId = pageTarget.id;
 
+        const normalizeBounds = (raw: unknown) => {
+            if (!raw || typeof raw !== 'object') return null;
+            const b = raw as {
+                left?: unknown;
+                top?: unknown;
+                width?: unknown;
+                height?: unknown;
+                windowState?: unknown;
+            };
+            if (
+                typeof b.left !== 'number' ||
+                typeof b.top !== 'number' ||
+                typeof b.width !== 'number' ||
+                typeof b.height !== 'number'
+            ) {
+                return null;
+            }
+            return {
+                left: b.left,
+                top: b.top,
+                width: b.width,
+                height: b.height,
+                windowState:
+                    typeof b.windowState === 'string'
+                        ? b.windowState
+                        : undefined,
+            };
+        };
+
         return this.withEphemeralBrowserClient(debugPort, async (call) => {
-            const winInfo = await call('Browser.getWindowForTarget', {
+            let winInfo = await call('Browser.getWindowForTarget', {
                 targetId,
             });
             const windowId = Number(winInfo.windowId);
-            const currentBounds = (winInfo.bounds || {}) as {
-                windowState?: string;
-            };
+            let bounds = normalizeBounds(winInfo.bounds);
+
+            if (!bringToFront) {
+                return { focused: Boolean(bounds), bounds };
+            }
+
             if (
                 Number.isInteger(windowId) &&
-                currentBounds.windowState === 'minimized'
+                bounds?.windowState === 'minimized'
             ) {
                 await call('Browser.setWindowBounds', {
                     windowId,
                     bounds: { windowState: 'normal' },
                 });
+                const refreshed = await call('Browser.getWindowForTarget', {
+                    targetId,
+                }).catch(() => winInfo);
+                winInfo = refreshed;
+                bounds = normalizeBounds(refreshed.bounds) || bounds;
             }
+
+            await call('Target.activateTarget', { targetId }).catch(() => {});
+
             const attached = await call('Target.attachToTarget', {
                 targetId,
                 flatten: true,
@@ -1627,7 +1680,7 @@ export class CDPManager {
                     );
                 }
             }
-            return true;
+            return { focused: true, bounds };
         });
     }
 

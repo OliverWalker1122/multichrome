@@ -639,6 +639,10 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                     if (env.isRunning) {
                                                         ws.handleFocusWindow(
                                                             env.id,
+                                                            {
+                                                                highlightOnly:
+                                                                    detailsOpen,
+                                                            },
                                                         );
                                                     }
                                                 }}
@@ -647,6 +651,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                         ? () =>
                                                               ws.handleFocusWindow(
                                                                   env.id,
+                                                                  {
+                                                                      highlightOnly: false,
+                                                                  },
                                                               )
                                                         : undefined
                                                 }

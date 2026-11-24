@@ -4,6 +4,11 @@ import http from 'http';
 import path from 'path';
 import log from 'electron-log';
 import { CDPManager } from '../drivers/cdpManager.js';
+import {
+    activateProcessWindowByPid,
+    allowForegroundForPid,
+    getForegroundWindowPid,
+} from '../drivers/nativeWindowFocus.js';
 import { DebugPortReservationPool } from '../drivers/portAllocator.js';
 import { BrowserProcessScanner } from '../drivers/browserProcessScanner.js';
 import { findSystemChromeExecutable } from '../drivers/chromeDiscovery.js';
@@ -1585,23 +1590,103 @@ export class BrowserLaunchService {
         return { tiledCount: res.tiledCount };
     }
 
-    public async focusEnvironmentWindow(id: string): Promise<boolean> {
+    public async focusEnvironmentWindow(
+        id: string,
+        options?: { highlightOnly?: boolean },
+    ): Promise<{
+        focused: boolean;
+        bounds: {
+            left: number;
+            top: number;
+            width: number;
+            height: number;
+            windowState?: string;
+        } | null;
+        label: string;
+        pid: number | null;
+        foregroundConfirmed: boolean;
+    }> {
         const record = this.runningProcesses.get(id);
         if (!record) {
-            return false;
+            return {
+                focused: false,
+                bounds: null,
+                label: '',
+                pid: null,
+                foregroundConfirmed: false,
+            };
         }
         const debugPort =
             record.debugPort || this.cdpManager.getConnectionInfo(id)?.debugPort;
+        const pid =
+            typeof record.pid === 'number' && record.pid > 0
+                ? record.pid
+                : null;
+        const envMeta = this.deps.repository.findAnyById(id, true);
+        const label = envMeta?.name || '';
+        const highlightOnly = Boolean(options?.highlightOnly);
+
         if (!debugPort) {
-            return false;
+            if (!highlightOnly && pid) {
+                const nativeOk = activateProcessWindowByPid(pid);
+                return {
+                    focused: nativeOk,
+                    bounds: null,
+                    label,
+                    pid,
+                    foregroundConfirmed:
+                        nativeOk || getForegroundWindowPid() === pid,
+                };
+            }
+            return {
+                focused: false,
+                bounds: null,
+                label,
+                pid,
+                foregroundConfirmed: false,
+            };
         }
-        let cdpFocused = false;
+
+        if (!highlightOnly && pid) {
+            allowForegroundForPid(pid);
+        }
+
+        let cdpRes: {
+            focused: boolean;
+            bounds: {
+                left: number;
+                top: number;
+                width: number;
+                height: number;
+                windowState?: string;
+            } | null;
+        } = { focused: false, bounds: null };
         try {
-            cdpFocused = await this.cdpManager.focusWindowForPort(debugPort);
+            cdpRes = await this.cdpManager.focusWindowForPort(debugPort, {
+                bringToFront: !highlightOnly,
+            });
         } catch (err) {
             log.warn(`[${id.substring(0, 8)}] CDP 定位窗口异常:`, err);
         }
-        return cdpFocused;
+
+        let foregroundConfirmed = false;
+        if (!highlightOnly && pid) {
+            if (getForegroundWindowPid() === pid) {
+                foregroundConfirmed = true;
+            } else {
+                const nativeFocused = activateProcessWindowByPid(pid);
+                foregroundConfirmed =
+                    nativeFocused || getForegroundWindowPid() === pid;
+            }
+        }
+
+        return {
+            focused: Boolean(cdpRes.focused || foregroundConfirmed),
+            bounds: cdpRes.bounds,
+            label,
+            pid,
+            foregroundConfirmed,
+        };
     }
 
     public async closeAllEnvironments(): Promise<{

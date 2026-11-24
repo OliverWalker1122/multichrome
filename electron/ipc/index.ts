@@ -39,6 +39,16 @@ export interface RegisterAllIpcDeps {
         symbolColor: string;
         height: number;
     };
+    flashWindowHighlight?: (
+        bounds: {
+            left: number;
+            top: number;
+            width: number;
+            height: number;
+            windowState?: string;
+        } | null,
+        label: string,
+    ) => boolean;
 }
 
 export function registerAllIpcHandlers(deps: RegisterAllIpcDeps): void {
@@ -53,9 +63,11 @@ export function registerAllIpcHandlers(deps: RegisterAllIpcDeps): void {
     });
     registerEnvironmentIpc({
         ipcMain: deps.ipcMain,
+        getMainWindow: deps.getMainWindow,
         chromeManager: deps.environmentService,
         settingsManager: deps.settingsRepository,
         proxyIntegration: deps.proxyCoordinator,
+        flashWindowHighlight: deps.flashWindowHighlight,
     });
     registerSystemIpc({
         ipcMain: deps.ipcMain,

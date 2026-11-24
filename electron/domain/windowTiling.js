@@ -411,3 +411,53 @@ export function sanitizeWindowTitleTag(rawName) {
         .slice(0, 48);
     return cleaned ? `[${cleaned}]` : '';
 }
+
+export function sanitizeHighlightLabel(rawName) {
+    if (typeof rawName !== 'string') return '';
+    return Array.from(rawName)
+        .map((ch) => (ch.charCodeAt(0) < 32 ? ' ' : ch))
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40);
+}
+
+/**
+ * Convert outer Chromium window bounds (as reported by CDP `Browser.getWindowForTarget`,
+ * which match Win32 `GetWindowRect` including the invisible 7px DWM resize shadow border)
+ * into visible on-screen frame bounds so a translucent highlight overlay aligns
+ * pixel-for-pixel with the visible browser edges.
+ */
+export function computeVisualHighlightBounds(windowBounds, platform = 'other') {
+    if (
+        !windowBounds ||
+        !Number.isFinite(windowBounds.left) ||
+        !Number.isFinite(windowBounds.top) ||
+        !Number.isFinite(windowBounds.width) ||
+        !Number.isFinite(windowBounds.height) ||
+        windowBounds.width <= 0 ||
+        windowBounds.height <= 0
+    ) {
+        return null;
+    }
+    const isMaximizedOrFullscreen =
+        windowBounds.windowState === 'maximized' ||
+        windowBounds.windowState === 'fullscreen';
+    const comp = isMaximizedOrFullscreen
+        ? { left: 0, top: 0, right: 0, bottom: 0 }
+        : resolvePlatformFrameCompensation(platform);
+    const width = Math.max(
+        80,
+        Math.round(windowBounds.width - comp.left - comp.right),
+    );
+    const height = Math.max(
+        60,
+        Math.round(windowBounds.height - comp.top - comp.bottom),
+    );
+    return {
+        x: Math.round(windowBounds.left + comp.left),
+        y: Math.round(windowBounds.top + comp.top),
+        width,
+        height,
+    };
+}
