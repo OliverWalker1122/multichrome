@@ -4,6 +4,7 @@ import {
     Checkbox,
     Input,
     Menu,
+    MenuDivider,
     MenuItem,
     MenuList,
     MenuPopover,
@@ -17,18 +18,28 @@ import {
 } from '@fluentui/react-components';
 import {
     AddRegular,
+    ArrowMinimizeRegular,
     ArrowSortRegular,
+    ChevronDownRegular,
     DeleteRegular,
     DismissRegular,
     EditRegular,
     GridRegular,
+    MaximizeRegular,
     MoreHorizontalRegular,
     SearchRegular,
+    SplitVerticalRegular,
+    SquareMultipleRegular,
     StopRegular,
     TableSettingsRegular,
     TagRegular,
+    WindowNewRegular,
 } from '@fluentui/react-icons';
-import type { OptionalEnvColumn, RunStatus } from '../../types';
+import type {
+    OptionalEnvColumn,
+    RunStatus,
+    WindowArrangeMode,
+} from '../../types';
 import {
     type EnvSortKey,
     type EnvSortOrder,
@@ -68,7 +79,7 @@ export interface EnvironmentsToolbarProps {
     sortOrder: EnvSortOrder;
     onSortOrderChange: React.Dispatch<React.SetStateAction<EnvSortOrder>>;
     onCreateClick: () => void;
-    onTileWindows?: () => void;
+    onTileWindows?: (mode?: WindowArrangeMode) => void;
     onOpenCloseAllConfirm: () => void;
     onRequestRenameGroup?: (groupName: string) => void;
     onRequestDeleteGroup?: (groupName: string) => void;
@@ -148,22 +159,115 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                 />
                 <div className={styles.headerActions}>
                     {allRunningCount > 0 && onTileWindows && (
-                        <Tooltip
-                            content={t(
-                                '一键在主屏幕按网格自动排列所有正在运行的浏览器窗口',
-                                'Automatically arrange all running browser windows in a grid',
-                            )}
-                            relationship="label"
+                        <div
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                            }}
                         >
-                            <Button
-                                appearance="subtle"
-                                icon={<GridRegular />}
-                                disabled={tilingWindows || closingAll}
-                                onClick={onTileWindows}
+                            <Tooltip
+                                content={t(
+                                    '零间隙无缝铺满当前屏幕工作区',
+                                    'Tile all running browser windows seamlessly with zero gap',
+                                )}
+                                relationship="label"
                             >
-                                {t('排列窗口', 'Tile Windows')}
-                            </Button>
-                        </Tooltip>
+                                <Button
+                                    appearance="subtle"
+                                    icon={<GridRegular />}
+                                    disabled={tilingWindows || closingAll}
+                                    onClick={() => onTileWindows('grid')}
+                                >
+                                    {t('排列窗口', 'Tile Windows')}
+                                </Button>
+                            </Tooltip>
+                            <Menu positioning="below-end">
+                                <MenuTrigger disableButtonEnhancement>
+                                    <Button
+                                        appearance="subtle"
+                                        size="small"
+                                        icon={<ChevronDownRegular />}
+                                        disabled={tilingWindows || closingAll}
+                                        aria-label={t(
+                                            '更多窗口布局',
+                                            'More window layouts',
+                                        )}
+                                        title={t(
+                                            '切换平铺、分屏、统一尺寸堆叠或层叠布局',
+                                            'Switch between seamless grid, console split, uniform stack, or cascade',
+                                        )}
+                                    />
+                                </MenuTrigger>
+                                <MenuPopover>
+                                    <MenuList>
+                                        <MenuItem
+                                            icon={<GridRegular />}
+                                            onClick={() =>
+                                                onTileWindows('grid')
+                                            }
+                                        >
+                                            {t(
+                                                '无缝宫格平铺',
+                                                'Seamless Grid',
+                                            )}
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<SplitVerticalRegular />}
+                                            onClick={() =>
+                                                onTileWindows('split-grid')
+                                            }
+                                        >
+                                            {t(
+                                                '分屏并排平铺',
+                                                'Split Beside Console',
+                                            )}
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<SquareMultipleRegular />}
+                                            onClick={() =>
+                                                onTileWindows('stack')
+                                            }
+                                        >
+                                            {t(
+                                                '统一尺寸堆叠',
+                                                'Uniform Stack',
+                                            )}
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<WindowNewRegular />}
+                                            onClick={() =>
+                                                onTileWindows('cascade')
+                                            }
+                                        >
+                                            {t(
+                                                '阶梯错位层叠',
+                                                'Cascade Windows',
+                                            )}
+                                        </MenuItem>
+                                        <MenuDivider />
+                                        <MenuItem
+                                            icon={<ArrowMinimizeRegular />}
+                                            onClick={() =>
+                                                onTileWindows('minimize')
+                                            }
+                                        >
+                                            {t(
+                                                '最小化全部窗口',
+                                                'Minimize All',
+                                            )}
+                                        </MenuItem>
+                                        <MenuItem
+                                            icon={<MaximizeRegular />}
+                                            onClick={() =>
+                                                onTileWindows('restore')
+                                            }
+                                        >
+                                            {t('恢复全部窗口', 'Restore All')}
+                                        </MenuItem>
+                                    </MenuList>
+                                </MenuPopover>
+                            </Menu>
+                        </div>
                     )}
                     {allRunningCount > 0 && (
                         <Button

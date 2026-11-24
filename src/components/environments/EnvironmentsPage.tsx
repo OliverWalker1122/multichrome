@@ -17,7 +17,9 @@ import {
     DismissRegular,
     FolderSwapRegular,
     GlobeRegular,
+    GridRegular,
     PlayRegular,
+    SquareMultipleRegular,
     StopRegular,
     WindowMultipleRegular,
 } from '@fluentui/react-icons';
@@ -176,6 +178,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         Boolean(ws.search.trim()) ||
         ws.selectedTags.length > 0 ||
         ws.statusFilter !== 'all';
+    const selectedRunningIds = environments
+        .filter((item) => ws.selectedIds.has(item.id) && item.isRunning)
+        .map((item) => item.id);
 
     return (
         <div className={styles.workspace}>
@@ -211,7 +216,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     sortOrder={ws.sortOrder}
                     onSortOrderChange={ws.setSortOrder}
                     onCreateClick={onCreateClick}
-                    onTileWindows={() => void ws.handleTileWindows()}
+                    onTileWindows={(mode) => void ws.handleTileWindows(mode)}
                     onOpenCloseAllConfirm={() => ws.setCloseAllConfirmOpen(true)}
                     onRequestRenameGroup={onRequestRenameGroup}
                     onRequestDeleteGroup={onRequestDeleteGroup}
@@ -250,6 +255,38 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                         >
                             {t('批量关闭', 'Stop')}
                         </Button>
+                        {selectedRunningIds.length >= 2 && (
+                            <>
+                                <Button
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<GridRegular />}
+                                    disabled={ws.batchBusy || ws.tilingWindows}
+                                    onClick={() =>
+                                        void ws.handleTileWindows(
+                                            'grid',
+                                            selectedRunningIds,
+                                        )
+                                    }
+                                >
+                                    {t('平铺所选', 'Tile Selected')}
+                                </Button>
+                                <Button
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<SquareMultipleRegular />}
+                                    disabled={ws.batchBusy || ws.tilingWindows}
+                                    onClick={() =>
+                                        void ws.handleTileWindows(
+                                            'stack',
+                                            selectedRunningIds,
+                                        )
+                                    }
+                                >
+                                    {t('堆叠所选', 'Stack Selected')}
+                                </Button>
+                            </>
+                        )}
                         <Menu positioning="below-start">
                             <MenuTrigger disableButtonEnhancement>
                                 <Button
@@ -420,7 +457,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                       (showProxyCol ? ws.proxyWidth : 0) +
                                       optionalColsWidth +
                                       (showLastUsedCol ? 100 : 0) +
-                                      152,
+                                      176,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -556,7 +593,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: '152px' }}
+                                        style={{ width: '176px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>
@@ -628,8 +665,21 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 onToggleChecked={() =>
                                                     ws.toggleSelectId(env.id)
                                                 }
-                                                onSelect={() =>
-                                                    onSelectEnv(env.id)
+                                                onSelect={() => {
+                                                    onSelectEnv(env.id);
+                                                    if (env.isRunning) {
+                                                        ws.handleFocusWindow(
+                                                            env.id,
+                                                        );
+                                                    }
+                                                }}
+                                                onFocusWindow={
+                                                    env.isRunning
+                                                        ? () =>
+                                                              ws.handleFocusWindow(
+                                                                  env.id,
+                                                              )
+                                                        : undefined
                                                 }
                                                 onOpenDetails={() =>
                                                     onToggleDetails(true)
@@ -710,6 +760,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     onStop={async (id) => {
                         await onClose(id);
                     }}
+                    onFocusWindow={(id) => ws.handleFocusWindow(id)}
                     onClone={onClone}
                     onInspectHealth={(env) => ws.setHealthTargetId(env.id)}
                     onDelete={(env) => ws.setDeleteTarget(env)}
@@ -733,6 +784,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 contextMenu={ws.contextMenu}
                 onCloseContextMenu={() => ws.setContextMenu(null)}
                 onRunToggle={(env) => void ws.handleRunToggle(env)}
+                onFocusWindow={(id) => ws.handleFocusWindow(id)}
                 onOpenDetails={(env) => {
                     onSelectEnv(env.id);
                     onToggleDetails(true);

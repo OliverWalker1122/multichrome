@@ -8,12 +8,14 @@ import { applyLanguagePreferences } from '../domain/proxyGeo.js';
  * Persist pure native Chromium stealth & Fail-Closed preferences before launch:
  * - Locks WebRTC non-proxied UDP policy in Default/Preferences when proxied
  * - Writes language / countryid_at_install preferences
+ * - Sets native Chromium profile display name (`profile.name`) for toolbar avatar identification
  * - Cleans up legacy `_tz_extension` artifacts without touching user extensions
  *
  * @param {{
  *   dataDir: string,
  *   enforceWebRTCFailClosed?: boolean,
  *   language?: string,
+ *   profileName?: string,
  *   disableDeveloperMode?: boolean,
  *   logger?: { info?: (...args: any[]) => void, warn?: (...args: any[]) => void },
  * }} options
@@ -22,6 +24,7 @@ export function writeNativeStealthPreferences({
     dataDir,
     enforceWebRTCFailClosed = false,
     language = undefined,
+    profileName = undefined,
     disableDeveloperMode = false,
     logger = undefined,
 }) {
@@ -56,6 +59,18 @@ export function writeNativeStealthPreferences({
         }
         if (language) {
             applyLanguagePreferences(prefs, language);
+        }
+        if (typeof profileName === 'string' && profileName.trim()) {
+            const existingProfile =
+                prefs.profile &&
+                typeof prefs.profile === 'object' &&
+                !Array.isArray(prefs.profile)
+                    ? prefs.profile
+                    : {};
+            prefs.profile = {
+                ...existingProfile,
+                name: profileName.trim().slice(0, 64),
+            };
         }
 
         fs.writeFileSync(prefPath, JSON.stringify(prefs));

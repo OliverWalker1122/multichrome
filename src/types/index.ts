@@ -199,6 +199,25 @@ export interface ClearEnvironmentCacheResult {
     afterCacheBytes: number;
 }
 
+export type WindowArrangeMode =
+    | 'grid'
+    | 'split-grid'
+    | 'stack'
+    | 'cascade'
+    | 'minimize'
+    | 'restore';
+
+export interface WindowArrangeResult {
+    mode?: WindowArrangeMode | string;
+    tiledCount: number;
+    consoleBounds?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    } | null;
+}
+
 export interface RunningResourceStats {
     totalMemoryBytes: number;
     totalProcesses: number;
@@ -608,7 +627,11 @@ export interface ElectronAPI {
             id: string,
             rawText: string,
         ) => Promise<{ importedCount: number }>;
-        tileWindows?: () => Promise<{ tiledCount: number }>;
+        tileWindows?: (options?: {
+            mode?: WindowArrangeMode;
+            envIds?: string[];
+        }) => Promise<WindowArrangeResult>;
+        focusWindow?: (id: string) => Promise<boolean>;
     };
     kernels?: {
         getStatus: () => Promise<KernelStatus>;

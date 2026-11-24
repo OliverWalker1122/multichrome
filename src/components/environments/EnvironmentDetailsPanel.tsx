@@ -18,6 +18,7 @@ import {
     PlayRegular,
     ShieldCheckmarkRegular,
     StopRegular,
+    TargetRegular,
 } from '@fluentui/react-icons';
 import {
     BrowserEngineType,
@@ -58,6 +59,7 @@ interface EnvironmentDetailsPanelProps {
     onClose: () => void;
     onLaunch: (id: string) => Promise<void>;
     onStop: (id: string) => Promise<void>;
+    onFocusWindow?: (id: string) => void;
     onClone?: (id: string) => Promise<void>;
     onInspectHealth?: (env: ChromeEnvironment) => void;
     onDelete: (env: ChromeEnvironment) => void;
@@ -90,6 +92,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
     onClose,
     onLaunch,
     onStop,
+    onFocusWindow,
     onClone,
     onInspectHealth,
     onDelete,
@@ -466,6 +469,16 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                         ? t('关闭环境', 'Stop')
                         : t('启动环境', 'Launch')}
                 </Button>
+                {environment.isRunning && onFocusWindow && (
+                    <Button
+                        size="small"
+                        appearance="subtle"
+                        icon={<TargetRegular />}
+                        onClick={() => onFocusWindow(environment.id)}
+                    >
+                        {t('定位窗口', 'Locate')}
+                    </Button>
+                )}
                 {onInspectHealth && (
                     <Tooltip
                         content={t('健康自检', 'Health Check')}

@@ -2136,15 +2136,62 @@ async function main() {
                 300,
             );
 
-            // 3) Click real Tile Windows button in toolbar
+            // 3) Verify Multi-Window Layouts: Seamless Grid -> Uniform Stack -> Cascade -> Focus Window + Native Profile Name
             const tileBtnVisible = await waitUntil(() =>
                 cdp.eval(`window.__e2e.clickExact('排列窗口', 'main button')`),
                 5000,
             );
+            let stackUniformOk = false;
+            let cascadeUniformOk = false;
+            let focusLocateOk = false;
             if (tileBtnVisible) {
-                uiTile3Ok = await waitUntil(() =>
+                const gridToastOk = await waitUntil(() =>
                     cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已宫格排列 3 个运行中窗口')`),
                     8000,
+                );
+
+                // Open layout dropdown menu -> Uniform Stack ('统一尺寸堆叠')
+                await cdp.eval(`document.querySelector('button[aria-label="更多窗口布局"]')?.click()`);
+                await waitUntil(() =>
+                    cdp.eval(`window.__e2e.clickByText('统一尺寸堆叠', '[role="menuitem"]')`),
+                    4000,
+                );
+                stackUniformOk = await waitUntil(() =>
+                    cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已统一尺寸堆叠 3 个运行中窗口')`),
+                    8000,
+                );
+
+                // Open layout dropdown menu -> Cascade ('阶梯错位层叠')
+                await cdp.eval(`document.querySelector('button[aria-label="更多窗口布局"]')?.click()`);
+                await waitUntil(() =>
+                    cdp.eval(`window.__e2e.clickByText('阶梯错位层叠', '[role="menuitem"]')`),
+                    4000,
+                );
+                cascadeUniformOk = await waitUntil(() =>
+                    cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已阶梯层叠 3 个运行中窗口')`),
+                    8000,
+                );
+
+                // Test explicit '定位窗口' icon button on MultiWin 02 + direct focusWindow IPC
+                const locateBtnClicked = await cdp.eval(`(() => {
+                    const btn = document.querySelector('button[aria-label="定位窗口 MultiWin 02"]');
+                    if (!btn) return false;
+                    btn.click();
+                    return true;
+                })()`);
+                const ipcFocusRes = await cdp.eval(`
+                    window.electronAPI.chromeEnvironments.getAll().then(list => {
+                        const target = list.find(e => e.name === 'MultiWin 02');
+                        return target ? window.electronAPI.chromeEnvironments.focusWindow(target.id) : false;
+                    })
+                `);
+                focusLocateOk = Boolean(locateBtnClicked && ipcFocusRes);
+
+                uiTile3Ok = Boolean(
+                    gridToastOk &&
+                        stackUniformOk &&
+                        cascadeUniformOk &&
+                        focusLocateOk,
                 );
             }
 

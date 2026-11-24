@@ -12,6 +12,8 @@ import type {
     LaunchConsistencyReport,
     RenameGroupResult,
     RunningResourceStats,
+    WindowArrangeMode,
+    WindowArrangeResult,
 } from '../types';
 import { getElectronApi, subscribeIpcEvent } from './ipcGateway';
 
@@ -215,10 +217,19 @@ export const environmentApi = {
         return fn(id, rawText);
     },
 
-    tileWindows: async (): Promise<{ tiledCount: number }> => {
+    tileWindows: async (options?: {
+        mode?: WindowArrangeMode;
+        envIds?: string[];
+    }): Promise<WindowArrangeResult> => {
         const fn = getElectronApi()?.chromeEnvironments?.tileWindows;
         if (!fn) throw new Error('Electron API failed to load');
-        return fn();
+        return fn(options);
+    },
+
+    focusWindow: async (id: string): Promise<boolean> => {
+        const fn = getElectronApi()?.chromeEnvironments?.focusWindow;
+        if (!fn) return false;
+        return fn(id);
     },
 
     onStatusChanged: (handler: () => void): (() => void) =>

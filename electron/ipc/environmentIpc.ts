@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { screen, shell, type IpcMain } from 'electron';
+import { BrowserWindow, screen, shell, type IpcMain } from 'electron';
 import log from 'electron-log';
 import type { EnvironmentService } from '../services/environmentService.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
@@ -425,13 +425,72 @@ export function registerEnvironmentIpc({
         },
     );
 
-    ipcMain.handle('tile-chrome-windows', async () => {
-        try {
-            const workArea = screen.getPrimaryDisplay().workArea;
-            return await chromeManager.tileRunningWindows(workArea);
-        } catch (error) {
-            log.error('排列浏览器窗口失败:', error);
-            throw error;
-        }
-    });
+    ipcMain.handle(
+        'tile-chrome-windows',
+        async (_, rawOptions: unknown = undefined) => {
+            try {
+                const mainWin =
+                    BrowserWindow.getAllWindows().find(
+                        (win) => !win.isDestroyed(),
+                    ) || null;
+                const display = mainWin
+                    ? screen.getDisplayMatching(mainWin.getBounds())
+                    : screen.getPrimaryDisplay();
+                const workArea = display.workArea;
+
+                const opts =
+                    rawOptions && typeof rawOptions === 'object'
+                        ? (rawOptions as {
+                              mode?: unknown;
+                              envIds?: unknown;
+                          })
+                        : {};
+                const mode =
+                    typeof opts.mode === 'string' ? opts.mode : 'grid';
+                const envIds = Array.isArray(opts.envIds)
+                    ? opts.envIds
+                          .filter(
+                              (item): item is string =>
+                                  typeof item === 'string' &&
+                                  item.trim().length > 0,
+                          )
+                          .map((item) => validateId(item))
+                    : undefined;
+
+                const res = await chromeManager.arrangeRunningWindows(workArea, {
+                    mode,
+                    envIds,
+                });
+
+                if (res.consoleBounds && mainWin && !mainWin.isDestroyed()) {
+                    if (mainWin.isMinimized()) {
+                        mainWin.restore();
+                    }
+                    if (mainWin.isMaximized()) {
+                        mainWin.unmaximize();
+                    }
+                    mainWin.setBounds(res.consoleBounds);
+                    mainWin.focus();
+                }
+
+                return res;
+            } catch (error) {
+                log.error('排列浏览器窗口失败:', error);
+                throw error;
+            }
+        },
+    );
+
+    ipcMain.handle(
+        'focus-chrome-environment-window',
+        async (_, id: unknown) => {
+            try {
+                const validId = validateId(id);
+                return await chromeManager.focusEnvironmentWindow(validId);
+            } catch (error) {
+                log.error('定位浏览器窗口失败:', error);
+                throw error;
+            }
+        },
+    );
 }

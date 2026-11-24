@@ -10,6 +10,7 @@ import { findSystemChromeExecutable } from '../drivers/chromeDiscovery.js';
 import { loadExtensionsViaCdpPipe } from '../drivers/extensionPipeLoader.js';
 import { writeNativeStealthPreferences } from '../drivers/nativePreferences.js';
 import { isProfileRunningLocally } from '../drivers/profileLock.js';
+import { bringProcessWindowToFront } from '../drivers/windowFocusDriver.js';
 import {
     hasSavedChromeSession,
     resolveExtensionTemplatePaths,
@@ -36,7 +37,11 @@ import {
     normalizeDefaultFingerprintSettings,
 } from '../domain/fingerprintProfile.js';
 import { buildMemorySaverChromiumArgs } from '../domain/processMetrics.js';
-import { computeWindowGridBounds } from '../domain/windowTiling.js';
+import {
+    computeWindowArrangement,
+    normalizeWindowArrangeMode,
+    sanitizeWindowTitleTag,
+} from '../domain/windowTiling.js';
 import {
     parseCookiesInput,
     serializeCookiesJson,
@@ -70,6 +75,7 @@ export interface ProxyExitInfo {
 export interface RunningEnvironmentRecord {
     envId: string;
     dataDir: string;
+    pid?: number;
     debugPort?: number;
     launchedAt: number;
     proxyId?: string;
@@ -581,6 +587,10 @@ export class BrowserLaunchService {
                 '--disable-blink-features=AutomationControlled',
                 '--test-type',
             ];
+            const windowTitleTag = sanitizeWindowTitleTag(env.name);
+            if (windowTitleTag) {
+                args.push(`--window-name=${windowTitleTag}`);
+            }
 
             const extensionsToLoad: string[] = [];
             if (env.userAgent) {
@@ -740,6 +750,7 @@ export class BrowserLaunchService {
                     dataDir: env.dataDir,
                     enforceWebRTCFailClosed: Boolean(proxyAddress),
                     language: effectiveLanguage,
+                    profileName: env.name,
                     disableDeveloperMode: true,
                     logger: log,
                 });
@@ -756,6 +767,7 @@ export class BrowserLaunchService {
                     dataDir: env.dataDir,
                     enforceWebRTCFailClosed: Boolean(proxyAddress),
                     language: effectiveLanguage,
+                    profileName: env.name,
                     disableDeveloperMode: false,
                     logger: log,
                 });
@@ -905,6 +917,7 @@ export class BrowserLaunchService {
             this.runningProcesses.set(id, {
                 envId: id,
                 dataDir: env.dataDir,
+                pid: chromeProcess.pid,
                 debugPort,
                 launchedAt: Date.now(),
                 proxyId: env.proxyId,
@@ -1471,19 +1484,70 @@ export class BrowserLaunchService {
         return { importedCount };
     }
 
-    public async tileRunningWindows(workArea: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    }): Promise<{ tiledCount: number }> {
+    public async arrangeRunningWindows(
+        workArea: {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+        options?: {
+            mode?: string;
+            envIds?: string[];
+            platform?: string;
+        },
+    ): Promise<{
+        mode: string;
+        tiledCount: number;
+        consoleBounds: {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        } | null;
+    }> {
+        const mode = normalizeWindowArrangeMode(options?.mode);
+        const filterSet =
+            Array.isArray(options?.envIds) && options.envIds.length > 0
+                ? new Set(options.envIds)
+                : null;
         const entries = Array.from(this.runningProcesses.values())
-            .filter((item) => item.debugPort && item.debugPort > 0)
+            .filter(
+                (item) =>
+                    item.debugPort &&
+                    item.debugPort > 0 &&
+                    (!filterSet || filterSet.has(item.envId)),
+            )
             .sort((a, b) => a.launchedAt - b.launchedAt);
         if (entries.length === 0) {
-            return { tiledCount: 0 };
+            return { mode, tiledCount: 0, consoleBounds: null };
         }
-        const gridBounds = computeWindowGridBounds(entries.length, workArea);
+
+        if (mode === 'minimize' || mode === 'restore') {
+            const targetState = mode === 'minimize' ? 'minimized' : 'normal';
+            const outcomes = await Promise.all(
+                entries.map(async (entry) => {
+                    if (!entry.debugPort) return false;
+                    try {
+                        return await this.cdpManager.setWindowStateForPort(
+                            entry.debugPort,
+                            targetState,
+                        );
+                    } catch {
+                        return false;
+                    }
+                }),
+            );
+            return {
+                mode,
+                tiledCount: outcomes.filter(Boolean).length,
+                consoleBounds: null,
+            };
+        }
+
+        const plan = computeWindowArrangement(mode, entries.length, workArea, {
+            platform: options?.platform ?? process.platform,
+        });
         const outcomes = await Promise.all(
             entries.map(async (entry, index) => {
                 const port = entry.debugPort;
@@ -1491,7 +1555,7 @@ export class BrowserLaunchService {
                 try {
                     return await this.cdpManager.setWindowBoundsForPort(
                         port,
-                        gridBounds[index],
+                        plan.boundsList[index],
                     );
                 } catch (err) {
                     log.warn(
@@ -1502,7 +1566,46 @@ export class BrowserLaunchService {
                 }
             }),
         );
-        return { tiledCount: outcomes.filter(Boolean).length };
+        return {
+            mode: plan.mode,
+            tiledCount: outcomes.filter(Boolean).length,
+            consoleBounds: plan.consoleBounds,
+        };
+    }
+
+    public async tileRunningWindows(workArea: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }): Promise<{ tiledCount: number }> {
+        const res = await this.arrangeRunningWindows(workArea, {
+            mode: 'grid',
+            platform: process.platform,
+        });
+        return { tiledCount: res.tiledCount };
+    }
+
+    public async focusEnvironmentWindow(id: string): Promise<boolean> {
+        const record = this.runningProcesses.get(id);
+        if (!record) {
+            return false;
+        }
+        const debugPort =
+            record.debugPort || this.cdpManager.getConnectionInfo(id)?.debugPort;
+        if (!debugPort) {
+            return false;
+        }
+        let cdpFocused = false;
+        try {
+            cdpFocused = await this.cdpManager.focusWindowForPort(debugPort);
+        } catch (err) {
+            log.warn(`[${id.substring(0, 8)}] CDP 定位窗口异常:`, err);
+        }
+        const osScheduled = record.pid
+            ? bringProcessWindowToFront(record.pid)
+            : false;
+        return Boolean(cdpFocused || osScheduled);
     }
 
     public async closeAllEnvironments(): Promise<{

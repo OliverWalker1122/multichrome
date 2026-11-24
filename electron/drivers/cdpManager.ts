@@ -1305,6 +1305,7 @@ export class CDPManager {
             call: (
                 method: string,
                 params?: Record<string, unknown>,
+                sessionId?: string,
             ) => Promise<Record<string, unknown>>,
         ) => Promise<T>,
     ): Promise<T> {
@@ -1370,6 +1371,7 @@ export class CDPManager {
         const call = (
             method: string,
             params: Record<string, unknown> = {},
+            sessionId?: string,
         ): Promise<Record<string, unknown>> =>
             new Promise((resolve, reject) => {
                 if (ws.readyState !== WebSocket.OPEN) {
@@ -1383,7 +1385,15 @@ export class CDPManager {
                 }, 5000);
                 pending.set(id, { resolve, reject, timer });
                 try {
-                    ws.send(JSON.stringify({ id, method, params }));
+                    const payload: Record<string, unknown> = {
+                        id,
+                        method,
+                        params,
+                    };
+                    if (sessionId) {
+                        payload.sessionId = sessionId;
+                    }
+                    ws.send(JSON.stringify(payload));
                 } catch (err) {
                     clearTimeout(timer);
                     pending.delete(id);
@@ -1535,6 +1545,89 @@ export class CDPManager {
                 }
             }
             return false;
+        });
+    }
+
+    public async setWindowStateForPort(
+        debugPort: number,
+        windowState: 'minimized' | 'normal' | 'maximized',
+    ): Promise<boolean> {
+        let pageTarget: { id?: string; type?: string } | undefined;
+        const waitDeadline = Date.now() + 4000;
+        while (Date.now() < waitDeadline) {
+            const targets = await this.fetchDebugTargets(debugPort);
+            pageTarget =
+                targets.find((item) => item.type === 'page' && item.id) ||
+                targets.find((item) => item.id);
+            if (pageTarget?.id) break;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!pageTarget?.id) return false;
+        const targetId = pageTarget.id;
+
+        return this.withEphemeralBrowserClient(debugPort, async (call) => {
+            const winInfo = await call('Browser.getWindowForTarget', {
+                targetId,
+            });
+            const windowId = Number(winInfo.windowId);
+            if (!Number.isInteger(windowId)) return false;
+            await call('Browser.setWindowBounds', {
+                windowId,
+                bounds: { windowState },
+            });
+            return true;
+        });
+    }
+
+    public async focusWindowForPort(debugPort: number): Promise<boolean> {
+        let pageTarget: { id?: string; type?: string } | undefined;
+        const waitDeadline = Date.now() + 4000;
+        while (Date.now() < waitDeadline) {
+            const targets = await this.fetchDebugTargets(debugPort);
+            pageTarget =
+                targets.find((item) => item.type === 'page' && item.id) ||
+                targets.find((item) => item.id);
+            if (pageTarget?.id) break;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        if (!pageTarget?.id) return false;
+        const targetId = pageTarget.id;
+
+        return this.withEphemeralBrowserClient(debugPort, async (call) => {
+            const winInfo = await call('Browser.getWindowForTarget', {
+                targetId,
+            });
+            const windowId = Number(winInfo.windowId);
+            const currentBounds = (winInfo.bounds || {}) as {
+                windowState?: string;
+            };
+            if (
+                Number.isInteger(windowId) &&
+                currentBounds.windowState === 'minimized'
+            ) {
+                await call('Browser.setWindowBounds', {
+                    windowId,
+                    bounds: { windowState: 'normal' },
+                });
+            }
+            const attached = await call('Target.attachToTarget', {
+                targetId,
+                flatten: true,
+            });
+            const sessionId =
+                typeof attached.sessionId === 'string'
+                    ? attached.sessionId
+                    : '';
+            if (sessionId) {
+                try {
+                    await call('Page.bringToFront', {}, sessionId);
+                } finally {
+                    await call('Target.detachFromTarget', { sessionId }).catch(
+                        () => {},
+                    );
+                }
+            }
+            return true;
         });
     }
 

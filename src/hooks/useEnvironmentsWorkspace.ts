@@ -5,6 +5,7 @@ import type {
     OptionalEnvColumn,
     RunStatus,
     RunningResourceStats,
+    WindowArrangeMode,
 } from '../types';
 import { environmentApi } from '../services';
 import { useNotification } from '../contexts/NotificationContext';
@@ -553,20 +554,53 @@ export function useEnvironmentsWorkspace({
         }
     };
 
-    const handleTileWindows = async () => {
+    const handleTileWindows = async (
+        mode: WindowArrangeMode = 'grid',
+        envIds?: string[],
+    ) => {
         if (tilingWindows || allRunningCount === 0) return;
         setTilingWindows(true);
         try {
-            const res = await environmentApi.tileWindows();
+            const res = await environmentApi.tileWindows({ mode, envIds });
+            const n = res.tiledCount;
+            const successText = (() => {
+                if (mode === 'split-grid') {
+                    return isEn
+                        ? `Split-tiled ${n} running window(s) beside console`
+                        : `已分屏并排平铺 ${n} 个运行中窗口`;
+                }
+                if (mode === 'stack') {
+                    return isEn
+                        ? `Stacked ${n} running window(s) to uniform size`
+                        : `已统一尺寸堆叠 ${n} 个运行中窗口`;
+                }
+                if (mode === 'cascade') {
+                    return isEn
+                        ? `Cascaded ${n} running window(s)`
+                        : `已阶梯层叠 ${n} 个运行中窗口`;
+                }
+                if (mode === 'minimize') {
+                    return isEn
+                        ? `Minimized ${n} running window(s)`
+                        : `已最小化 ${n} 个运行中窗口`;
+                }
+                if (mode === 'restore') {
+                    return isEn
+                        ? `Restored ${n} running window(s)`
+                        : `已恢复 ${n} 个运行中窗口`;
+                }
+                return isEn
+                    ? `Tiled ${n} running window(s)`
+                    : `已宫格排列 ${n} 个运行中窗口`;
+            })();
+
             showNotification(
-                res.tiledCount > 0 ? 'success' : 'info',
-                res.tiledCount > 0
-                    ? isEn
-                        ? `Tiled ${res.tiledCount} running window(s)`
-                        : `已宫格排列 ${res.tiledCount} 个运行中窗口`
+                n > 0 ? 'success' : 'info',
+                n > 0
+                    ? successText
                     : t(
                           '暂无可排列的浏览器窗口',
-                          'No browser windows available to tile',
+                          'No browser windows available to arrange',
                       ),
             );
         } catch (err) {
@@ -574,11 +608,16 @@ export function useEnvironmentsWorkspace({
                 'error',
                 err instanceof Error
                     ? err.message
-                    : t('窗口排列失败', 'Failed to tile windows'),
+                    : t('窗口排列失败', 'Failed to arrange windows'),
             );
         } finally {
             setTilingWindows(false);
         }
+    };
+
+    const handleFocusWindow = (id: string) => {
+        if (!environmentApi.isAvailable()) return;
+        void environmentApi.focusWindow(id).catch(() => {});
     };
 
     return {
@@ -627,6 +666,7 @@ export function useEnvironmentsWorkspace({
         handleBatchAction,
         tilingWindows,
         handleTileWindows,
+        handleFocusWindow,
         busyId,
         proxyMap,
         proxyUsageMap,

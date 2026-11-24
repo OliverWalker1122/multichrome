@@ -25,6 +25,7 @@ import {
     ShieldCheckmarkRegular,
     StopFilled,
     StopRegular,
+    TargetRegular,
 } from '@fluentui/react-icons';
 import dayjs from 'dayjs';
 import type {
@@ -54,6 +55,7 @@ export interface EnvironmentTableRowProps {
     selectionRowProps: React.HTMLAttributes<HTMLTableRowElement>;
     onToggleChecked: () => void;
     onSelect: () => void;
+    onFocusWindow?: () => void;
     onOpenDetails: () => void;
     onOpenContextMenu: (event: React.MouseEvent) => void;
     onToggleTagFilter: (tag: string) => void;
@@ -82,6 +84,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
     selectionRowProps,
     onToggleChecked,
     onSelect,
+    onFocusWindow,
     onOpenDetails,
     onOpenContextMenu,
     onToggleTagFilter,
@@ -212,9 +215,21 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                     }}
                 >
                     {env.isRunning ? (
-                        <Badge appearance="tint" color="success" size="small">
-                            {t('运行中', 'Running')}
-                        </Badge>
+                        <Tooltip
+                            content={t(
+                                '点击此行可立即定位并置顶对应浏览器窗口',
+                                'Click row to locate and focus this browser window',
+                            )}
+                            relationship="description"
+                        >
+                            <Badge
+                                appearance="tint"
+                                color="success"
+                                size="small"
+                            >
+                                {t('运行中', 'Running')}
+                            </Badge>
+                        </Tooltip>
                     ) : (
                         <span className={styles.statusStopped}>
                             {t('未运行', 'Stopped')}
@@ -411,6 +426,27 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                               ? t('关闭', 'Stop')
                               : t('启动', 'Launch')}
                     </Button>
+                    {env.isRunning && onFocusWindow && (
+                        <Tooltip
+                            content={t(
+                                '定位并置顶此浏览器窗口',
+                                'Locate and bring browser window to front',
+                            )}
+                            relationship="label"
+                        >
+                            <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={<TargetRegular />}
+                                aria-label={
+                                    isEn
+                                        ? `Locate window ${env.name}`
+                                        : `定位窗口 ${env.name}`
+                                }
+                                onClick={onFocusWindow}
+                            />
+                        </Tooltip>
+                    )}
                     <Menu positioning="below-end">
                         <MenuTrigger disableButtonEnhancement>
                             <Button
@@ -427,6 +463,14 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                         </MenuTrigger>
                         <MenuPopover>
                             <MenuList>
+                                {env.isRunning && onFocusWindow && (
+                                    <MenuItem
+                                        icon={<TargetRegular />}
+                                        onClick={onFocusWindow}
+                                    >
+                                        {t('定位窗口', 'Locate Window')}
+                                    </MenuItem>
+                                )}
                                 <MenuItem
                                     icon={
                                         env.isRunning ? (

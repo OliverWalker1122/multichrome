@@ -132,8 +132,13 @@ try {
             importCookies: (id, rawText) =>
                 ipcRenderer.invoke('import-environment-cookies', id, rawText),
 
-            // 一键宫格排列运行中窗口
-            tileWindows: () => ipcRenderer.invoke('tile-chrome-windows'),
+            // 多窗口排列（无缝宫格平铺 / 分屏平铺 / 统一尺寸堆叠 / 阶梯层叠 / 最小化 / 恢复）
+            tileWindows: (options) =>
+                ipcRenderer.invoke('tile-chrome-windows', options),
+
+            // 定位并置顶运行中环境的浏览器窗口
+            focusWindow: (id) =>
+                ipcRenderer.invoke('focus-chrome-environment-window', id),
         },
 
         // 回收站管理API

@@ -605,6 +605,26 @@ export class EnvironmentService {
         return this.launchService.tileRunningWindows(workArea);
     }
 
+    public arrangeRunningWindows(
+        workArea: {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+        options?: {
+            mode?: string;
+            envIds?: string[];
+            platform?: string;
+        },
+    ) {
+        return this.launchService.arrangeRunningWindows(workArea, options);
+    }
+
+    public focusEnvironmentWindow(id: string): Promise<boolean> {
+        return this.launchService.focusEnvironmentWindow(id);
+    }
+
     public async batchCreateEnvironments(input: {
         namePrefix: string;
         groupName: string;
