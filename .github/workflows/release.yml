@@ -190,3 +190,27 @@ jobs:
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update release badge on badges branch
+        shell: bash
+        run: |
+          TMP_BADGE_DIR="$(mktemp -d)"
+          node scripts/generate-badge-svg.mjs --label="release" --message="${GITHUB_REF_NAME}" --color="#0969da" --out="$TMP_BADGE_DIR/release.svg"
+          git fetch origin badges:refs/remotes/origin/badges 2>/dev/null || true
+          if git show-ref --verify --quiet refs/remotes/origin/badges; then
+            git worktree add "$TMP_BADGE_DIR/repo" origin/badges
+          else
+            git worktree add --orphan -b badges "$TMP_BADGE_DIR/repo"
+          fi
+          cp "$TMP_BADGE_DIR/release.svg" "$TMP_BADGE_DIR/repo/release.svg"
+          cd "$TMP_BADGE_DIR/repo"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release.svg
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): update release badge to ${GITHUB_REF_NAME}"
+            git push origin HEAD:refs/heads/badges
+          fi
+          cd "$GITHUB_WORKSPACE"
+          git worktree remove --force "$TMP_BADGE_DIR/repo" || true
+          rm -rf "$TMP_BADGE_DIR"

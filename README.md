@@ -8,8 +8,8 @@
 
 [![CI](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
 [![Release](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml)
-[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/test-badge.json)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
-[![GitHub release](https://img.shields.io/github/v/release/OliverWalker1122/multichrome.svg)](https://github.com/OliverWalker1122/multichrome/releases)
+[![Tests](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/tests.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
+[![GitHub release](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/release.svg)](https://github.com/OliverWalker1122/multichrome/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](https://github.com/OliverWalker1122/multichrome)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

@@ -79,17 +79,21 @@ jobs:
             }
             console.log(`Test Pass Rate: ${pass}/${total} (${rate}%)`);
           '
+          BADGE_MSG="$(node -p "require('./test-badge.json').message")"
+          BADGE_COLOR="$(node -p "require('./test-badge.json').color")"
+          node scripts/generate-badge-svg.mjs --label="tests" --message="$BADGE_MSG" --color="#$BADGE_COLOR" --out="tests.svg"
           exit $TEST_EXIT
 
       - name: Update dynamic test badge on badges branch
         if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          if [ ! -f test-badge.json ]; then
+          if [ ! -f test-badge.json ] || [ ! -f tests.svg ]; then
             exit 0
           fi
           TMP_BADGE_DIR="$(mktemp -d)"
           cp test-badge.json "$TMP_BADGE_DIR/test-badge.json"
+          cp tests.svg "$TMP_BADGE_DIR/tests.svg"
           git fetch origin badges:refs/remotes/origin/badges 2>/dev/null || true
           if git show-ref --verify --quiet refs/remotes/origin/badges; then
             git worktree add "$TMP_BADGE_DIR/repo" origin/badges
@@ -97,10 +101,11 @@ jobs:
             git worktree add --orphan -b badges "$TMP_BADGE_DIR/repo"
           fi
           cp "$TMP_BADGE_DIR/test-badge.json" "$TMP_BADGE_DIR/repo/test-badge.json"
+          cp "$TMP_BADGE_DIR/tests.svg" "$TMP_BADGE_DIR/repo/tests.svg"
           cd "$TMP_BADGE_DIR/repo"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add test-badge.json
+          git add test-badge.json tests.svg
           if ! git diff --cached --quiet; then
             git commit -m "chore(ci): update live test badge"
             git push origin HEAD:refs/heads/badges
