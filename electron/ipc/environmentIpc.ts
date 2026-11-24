@@ -1,10 +1,12 @@
 import fs from 'fs';
-import { shell, type IpcMain } from 'electron';
+import { screen, shell, type IpcMain } from 'electron';
 import log from 'electron-log';
 import type { EnvironmentService } from '../services/environmentService.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
 import type { ProxyCoordinator } from '../services/proxyCoordinator.js';
 import {
+    sanitizeBatchActionPayload,
+    sanitizeBatchCreatePayload,
     sanitizeCreateEnvironmentOptions,
     sanitizeUpdateEnvironmentPayload,
     validateId,
@@ -352,6 +354,83 @@ export function registerEnvironmentIpc({
             return await chromeManager.deleteEmptyGroup(validGroupName);
         } catch (error) {
             log.error('删除空分组失败:', error);
+            throw error;
+        }
+    });
+
+    ipcMain.handle(
+        'batch-create-environments',
+        async (_, payload: unknown) => {
+            try {
+                const validPayload = sanitizeBatchCreatePayload(
+                    payload,
+                    settingsManager.getSettings().fingerprint,
+                );
+                return await chromeManager.batchCreateEnvironments(
+                    validPayload,
+                );
+            } catch (error) {
+                log.error('批量创建环境失败:', error);
+                throw error;
+            }
+        },
+    );
+
+    ipcMain.handle(
+        'batch-action-environments',
+        async (_, payload: unknown) => {
+            try {
+                const validPayload = sanitizeBatchActionPayload(payload);
+                return await proxyIntegration.run(() =>
+                    chromeManager.batchActionEnvironments(validPayload),
+                );
+            } catch (error) {
+                log.error('批量操作环境失败:', error);
+                throw error;
+            }
+        },
+    );
+
+    ipcMain.handle(
+        'export-environment-cookies',
+        async (_, id: unknown, format: unknown = 'json') => {
+            try {
+                const validId = validateId(id);
+                const safeFormat = format === 'netscape' ? 'netscape' : 'json';
+                return await chromeManager.exportEnvironmentCookies(
+                    validId,
+                    safeFormat,
+                );
+            } catch (error) {
+                log.error('导出环境 Cookie 失败:', error);
+                throw error;
+            }
+        },
+    );
+
+    ipcMain.handle(
+        'import-environment-cookies',
+        async (_, id: unknown, rawText: unknown) => {
+            try {
+                const validId = validateId(id);
+                const validText = validateString(rawText, 'Cookie 内容');
+                return await chromeManager.importEnvironmentCookies(
+                    validId,
+                    validText,
+                );
+            } catch (error) {
+                log.error('导入环境 Cookie 失败:', error);
+                throw error;
+            }
+        },
+    );
+
+    ipcMain.handle('tile-chrome-windows', async () => {
+        try {
+            const workArea = screen.getPrimaryDisplay().workArea;
+            return await chromeManager.tileRunningWindows(workArea);
+        } catch (error) {
+            log.error('排列浏览器窗口失败:', error);
             throw error;
         }
     });

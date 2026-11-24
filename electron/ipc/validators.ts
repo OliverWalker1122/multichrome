@@ -260,3 +260,101 @@ export function sanitizeAppSettingsPayload(settings: unknown): AppSettings {
 
     return validSettings;
 }
+
+export function sanitizeBatchCreatePayload(
+    input: unknown,
+    defaultFingerprint?: DefaultFingerprintSettings,
+): {
+    namePrefix: string;
+    groupName: string;
+    count: number;
+    startNumber?: number;
+    notes?: string;
+    browserEngine?: BrowserEngineType;
+    proxyMode?: 'none' | 'single' | 'sequential';
+    proxyIds?: string[];
+    tags?: string[];
+} {
+    if (!input || typeof input !== 'object') {
+        throw new Error('批量创建参数格式无效');
+    }
+    const raw = input as Record<string, unknown>;
+    const namePrefix = validateString(raw.namePrefix, '名称前缀');
+    const groupName = validateString(raw.groupName, '分组名称');
+    const count = Number(raw.count);
+    const startNumber =
+        raw.startNumber === undefined ? 1 : Number(raw.startNumber);
+    const notes = typeof raw.notes === 'string' ? raw.notes : '';
+    const browserEngine =
+        'browserEngine' in raw
+            ? (normalizeBrowserEngine(
+                  raw.browserEngine,
+              ) as BrowserEngineType)
+            : defaultFingerprint?.defaultEngine;
+    const proxyMode =
+        raw.proxyMode === 'single' || raw.proxyMode === 'sequential'
+            ? raw.proxyMode
+            : 'none';
+    const proxyIds = Array.isArray(raw.proxyIds)
+        ? raw.proxyIds
+              .filter((item) => typeof item === 'string' && item.trim())
+              .map((item) => validateId(item))
+        : undefined;
+    const tags = 'tags' in raw ? normalizeEnvironmentTags(raw.tags) : undefined;
+
+    return {
+        namePrefix,
+        groupName,
+        count,
+        startNumber,
+        notes,
+        browserEngine,
+        proxyMode,
+        proxyIds,
+        tags,
+    };
+}
+
+export function sanitizeBatchActionPayload(input: unknown): {
+    ids: string[];
+    action: 'moveGroup' | 'bindProxy' | 'addTags' | 'delete';
+    groupName?: string;
+    proxyId?: string;
+    tags?: string[];
+} {
+    if (!input || typeof input !== 'object') {
+        throw new Error('批量操作参数格式无效');
+    }
+    const raw = input as Record<string, unknown>;
+    if (!Array.isArray(raw.ids) || raw.ids.length === 0) {
+        throw new Error('请至少选择一个浏览器环境');
+    }
+    const ids = Array.from(
+        new Set(raw.ids.map((id) => validateId(id))),
+    );
+    const action = raw.action;
+    if (
+        action !== 'moveGroup' &&
+        action !== 'bindProxy' &&
+        action !== 'addTags' &&
+        action !== 'delete'
+    ) {
+        throw new Error('不支持的批量操作类型');
+    }
+    return {
+        ids,
+        action,
+        groupName:
+            action === 'moveGroup'
+                ? validateString(raw.groupName, '目标分组名称')
+                : undefined,
+        proxyId:
+            action === 'bindProxy' && typeof raw.proxyId === 'string' && raw.proxyId.trim()
+                ? validateId(raw.proxyId)
+                : undefined,
+        tags:
+            action === 'addTags'
+                ? normalizeEnvironmentTags(raw.tags)
+                : undefined,
+    };
+}

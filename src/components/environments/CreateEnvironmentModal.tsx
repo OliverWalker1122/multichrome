@@ -16,6 +16,7 @@ import {
     makeStyles,
 } from '@fluentui/react-components';
 import {
+    BatchCreateEnvironmentsInput,
     BrowserEngineType,
     ChromeEnvironment,
     ManagedProxy,
@@ -42,6 +43,7 @@ interface CreateEnvironmentModalProps {
             tags?: string[];
         },
     ) => Promise<void>;
+    onBatchCreate?: (payload: BatchCreateEnvironmentsInput) => Promise<void>;
     onCancel: () => void;
     groups: string[];
     defaultGroup?: string;
@@ -69,6 +71,11 @@ const useStyles = makeStyles({
         alignItems: 'center',
         gap: '5px',
     },
+    twoCol: {
+        display: 'grid',
+        gridTemplateColumns: '1fr 112px',
+        gap: '10px',
+    },
     moreToggle: {
         display: 'flex',
         alignItems: 'center',
@@ -80,6 +87,7 @@ const useStyles = makeStyles({
 const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
     open,
     onOk,
+    onBatchCreate,
     onCancel,
     groups,
     defaultGroup,
@@ -92,6 +100,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
     const { isEn, t } = useI18n();
     const [loading, setLoading] = useState(false);
     const [name, setName] = useState('');
+    const [quantity, setQuantity] = useState('1');
     const [groupName, setGroupName] = useState('');
     const [notes, setNotes] = useState('');
     const [proxyId, setProxyId] = useState('');
@@ -131,6 +140,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
     const resetAndClose = () => {
         if (loading) return;
         setName('');
+        setQuantity('1');
         setGroupName('');
         setNotes('');
         setProxyId('');
@@ -141,11 +151,19 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
         onCancel();
     };
 
+    const parsedQuantity = Math.max(
+        1,
+        Math.min(50, Math.floor(Number(quantity) || 1)),
+    );
+    const isBulkMode = parsedQuantity > 1 && Boolean(onBatchCreate);
+
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         const nextErrors: { name?: string; groupName?: string } = {};
         if (!name.trim())
-            nextErrors.name = t('请输入环境名称', 'Please enter an environment name');
+            nextErrors.name = isBulkMode
+                ? t('请输入名称前缀', 'Please enter a name prefix')
+                : t('请输入环境名称', 'Please enter an environment name');
         if (!groupName.trim())
             nextErrors.groupName = t(
                 '请选择或输入分组名称',
@@ -157,17 +175,42 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
         try {
             setLoading(true);
             setSubmitError('');
-            await onOk(
-                name.trim(),
-                groupName.trim(),
-                notes.trim(),
-                {
+            if (isBulkMode && onBatchCreate) {
+                const isSequential = proxyId === '__sequential__';
+                await onBatchCreate({
+                    namePrefix: name.trim(),
+                    groupName: groupName.trim(),
+                    count: parsedQuantity,
+                    notes: notes.trim(),
                     browserEngine,
-                    ...(proxyId ? { proxyId } : {}),
-                    ...(tags.length > 0 ? { tags } : {}),
-                },
-            );
+                    proxyMode: isSequential
+                        ? 'sequential'
+                        : proxyId
+                          ? 'single'
+                          : 'none',
+                    proxyIds: isSequential
+                        ? managedProxies.map((p) => p.id)
+                        : proxyId
+                          ? [proxyId]
+                          : [],
+                    tags,
+                });
+            } else {
+                await onOk(
+                    name.trim(),
+                    groupName.trim(),
+                    notes.trim(),
+                    {
+                        browserEngine,
+                        ...(proxyId && proxyId !== '__sequential__'
+                            ? { proxyId }
+                            : {}),
+                        ...(tags.length > 0 ? { tags } : {}),
+                    },
+                );
+            }
             setName('');
+            setQuantity('1');
             setGroupName('');
             setNotes('');
             setProxyId('');
@@ -213,26 +256,61 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                     </MessageBar>
                                 )}
 
-                                <Field
-                                    label={t('环境名称', 'Environment Name')}
-                                    required
-                                    validationState={
-                                        fieldErrors.name ? 'error' : 'none'
-                                    }
-                                    validationMessage={fieldErrors.name}
-                                >
-                                    <Input
-                                        autoFocus
-                                        placeholder={t(
-                                            '例如：美国账号 01、AI 工作区',
-                                            'e.g., US Account 01, AI Workspace',
-                                        )}
-                                        value={name}
-                                        onChange={(_, data) =>
-                                            setName(data.value)
+                                <div className={onBatchCreate ? styles.twoCol : undefined}>
+                                    <Field
+                                        label={
+                                            isBulkMode
+                                                ? t('名称前缀', 'Name Prefix')
+                                                : t('环境名称', 'Environment Name')
                                         }
-                                    />
-                                </Field>
+                                        required
+                                        validationState={
+                                            fieldErrors.name ? 'error' : 'none'
+                                        }
+                                        validationMessage={fieldErrors.name}
+                                    >
+                                        <Input
+                                            autoFocus
+                                            placeholder={
+                                                isBulkMode
+                                                    ? t(
+                                                          '例如：美国商店',
+                                                          'e.g., US Storefront',
+                                                      )
+                                                    : t(
+                                                          '例如：美国账号 01、AI 工作区',
+                                                          'e.g., US Account 01, AI Workspace',
+                                                      )
+                                            }
+                                            value={name}
+                                            onChange={(_, data) =>
+                                                setName(data.value)
+                                            }
+                                        />
+                                    </Field>
+                                    {onBatchCreate && (
+                                        <Field label={t('创建数量', 'Quantity')}>
+                                            <Input
+                                                type="number"
+                                                min={1}
+                                                max={50}
+                                                step={1}
+                                                value={quantity}
+                                                onChange={(_, data) => {
+                                                    const val = data.value;
+                                                    setQuantity(val);
+                                                    if (
+                                                        (Number(val) || 1) <= 1 &&
+                                                        proxyId ===
+                                                            '__sequential__'
+                                                    ) {
+                                                        setProxyId('');
+                                                    }
+                                                }}
+                                            />
+                                        </Field>
+                                    )}
+                                </div>
 
                                 <Field
                                     label={
@@ -301,6 +379,15 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                         <option value="">
                                             {t('全局默认', 'Global Default')}
                                         </option>
+                                        {isBulkMode &&
+                                            managedProxies.length > 0 && (
+                                                <option value="__sequential__">
+                                                    {t(
+                                                        '按顺序轮询分配代理',
+                                                        'Sequential Proxy Assignment',
+                                                    )}
+                                                </option>
+                                            )}
                                         {managedProxies.map((item) => (
                                             <option
                                                 key={item.id}
@@ -314,6 +401,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                 </Field>
 
                                 {proxyId &&
+                                    proxyId !== '__sequential__' &&
                                     (() => {
                                         const sharedWith =
                                             allEnvironments.filter(

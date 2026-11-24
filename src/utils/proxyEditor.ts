@@ -25,4 +25,5 @@ export const createEmptyProxyEditor = (): ProxyEditorState => ({
     clearCredentials: false,
     line: '',
     config: '',
+    rotationUrl: '',
 });

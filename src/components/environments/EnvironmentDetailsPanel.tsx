@@ -64,6 +64,7 @@ interface EnvironmentDetailsPanelProps {
     onSave: (id: string, data: Partial<ChromeEnvironment>) => Promise<void>;
     onRegenerateFingerprint?: (id: string) => Promise<void>;
     onInspectProxyLogs?: (proxyId: string) => void;
+    onOpenCookieTransfer?: (mode: 'import' | 'export') => void;
 }
 
 function cleanError(error: unknown): string {
@@ -95,6 +96,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
     onSave,
     onRegenerateFingerprint,
     onInspectProxyLogs,
+    onOpenCookieTransfer,
 }) => {
     const styles = useEnvironmentDetailsStyles();
     const { isEn, t } = useI18n();
@@ -694,6 +696,16 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                     }
                     onClearCache={() => void handleClearCache()}
                     onOpenDataDir={() => void handleOpenDataDir()}
+                    onOpenCookieImport={
+                        onOpenCookieTransfer
+                            ? () => onOpenCookieTransfer('import')
+                            : undefined
+                    }
+                    onOpenCookieExport={
+                        onOpenCookieTransfer
+                            ? () => onOpenCookieTransfer('export')
+                            : undefined
+                    }
                 />
             </form>
 

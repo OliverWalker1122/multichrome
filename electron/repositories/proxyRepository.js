@@ -25,6 +25,7 @@ export function extractSummaryMetadata(data) {
         endpointKey: simple
             ? buildProxyEndpointKey(simple)
             : buildOutboundEndpointKey(main),
+        hasRotationUrl: Boolean(data?.rotationUrl),
     };
 }
 

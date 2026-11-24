@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button, Tooltip } from '@fluentui/react-components';
 import {
+    ArrowDownloadRegular,
+    ArrowUploadRegular,
     BroomRegular,
     CopyRegular,
     FolderOpenRegular,
@@ -31,6 +33,8 @@ export interface EnvironmentStorageMetaCardProps {
     onCopyId: () => void;
     onClearCache: () => void;
     onOpenDataDir: () => void;
+    onOpenCookieImport?: () => void;
+    onOpenCookieExport?: () => void;
 }
 
 const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
@@ -42,6 +46,8 @@ const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
     onCopyId,
     onClearCache,
     onOpenDataDir,
+    onOpenCookieImport,
+    onOpenCookieExport,
 }) => {
     const { isEn, t } = useI18n();
 
@@ -177,6 +183,54 @@ const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
                         </Tooltip>
                     </div>
                 </div>
+                {(onOpenCookieImport || onOpenCookieExport) && (
+                    <div className={styles.metaRow}>
+                        <span className={styles.metaKey}>Cookies</span>
+                        <div className={styles.inlineCopyRow}>
+                            <Tooltip
+                                content={
+                                    environment.isRunning
+                                        ? t(
+                                              '通过原生 CDP 通道免插件读写运行中浏览器的 Cookie（支持 JSON 与 Netscape）',
+                                              'Transfer JSON or Netscape cookies natively over CDP without extensions.',
+                                          )
+                                        : t(
+                                              '请先启动该环境后再导入或导出 Cookie',
+                                              'Launch this environment first to import or export cookies.',
+                                          )
+                                }
+                                relationship="description"
+                            >
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                    {onOpenCookieImport && (
+                                        <Button
+                                            type="button"
+                                            appearance="subtle"
+                                            size="small"
+                                            icon={<ArrowUploadRegular />}
+                                            disabled={!environment.isRunning}
+                                            onClick={onOpenCookieImport}
+                                        >
+                                            {t('导入', 'Import')}
+                                        </Button>
+                                    )}
+                                    {onOpenCookieExport && (
+                                        <Button
+                                            type="button"
+                                            appearance="subtle"
+                                            size="small"
+                                            icon={<ArrowDownloadRegular />}
+                                            disabled={!environment.isRunning}
+                                            onClick={onOpenCookieExport}
+                                        >
+                                            {t('导出', 'Export')}
+                                        </Button>
+                                    )}
+                                </div>
+                            </Tooltip>
+                        </div>
+                    </div>
+                )}
             </div>
         </>
     );

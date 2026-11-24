@@ -395,6 +395,16 @@ export function createGitHubProxyAgent(proxyAddress, options = {}) {
     return agent;
 }
 
+/**
+ * @param {string} urlStr
+ * @param {{
+ *   proxyAddress?: string;
+ *   timeoutMs?: number;
+ *   userAgent?: string;
+ *   accept?: string;
+ *   signal?: AbortSignal;
+ * }} [options]
+ */
 export function openOfficialGitHubStream(
     urlStr,
     options = {},
@@ -547,6 +557,54 @@ export async function fetchOfficialGitHubJson(
             } catch {
                 reject(new Error('解析版本信息失败'));
             }
+        });
+        res.on('error', reject);
+    });
+}
+
+/**
+ * @param {string} urlStr
+ * @param {{
+ *   proxyAddress?: string;
+ *   timeoutMs?: number;
+ *   userAgent?: string;
+ *   maxBytes?: number;
+ *   signal?: AbortSignal;
+ * }} [options]
+ */
+export async function fetchOfficialGitHubText(
+    urlStr,
+    {
+        proxyAddress = undefined,
+        timeoutMs = 15000,
+        userAgent = 'MultiChrome/1.6',
+        maxBytes = 1024 * 1024,
+        signal = undefined,
+    } = {},
+) {
+    const res = await openOfficialGitHubStream(urlStr, {
+        proxyAddress,
+        timeoutMs,
+        userAgent,
+        accept: 'text/plain, */*',
+        signal,
+    });
+
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let totalBytes = 0;
+        res.on('data', (chunk) => {
+            const buf = Buffer.from(chunk);
+            totalBytes += buf.length;
+            if (totalBytes > maxBytes) {
+                res.destroy();
+                reject(new Error('校验文件响应过大'));
+                return;
+            }
+            chunks.push(buf);
+        });
+        res.on('end', () => {
+            resolve(Buffer.concat(chunks).toString('utf8'));
         });
         res.on('error', reject);
     });

@@ -1,4 +1,6 @@
 import type {
+    BatchActionEnvironmentsInput,
+    BatchCreateEnvironmentsInput,
     BrowserEngineType,
     ChromeEnvironment,
     ClearEnvironmentCacheResult,
@@ -173,6 +175,50 @@ export const environmentApi = {
         const api = getElectronApi()?.chromeEnvironments;
         if (!api) throw new Error('Electron API failed to load');
         return api.deleteEmptyGroup(groupName);
+    },
+
+    batchCreate: async (
+        payload: BatchCreateEnvironmentsInput,
+    ): Promise<ChromeEnvironment[]> => {
+        const fn = getElectronApi()?.chromeEnvironments?.batchCreate;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(payload);
+    },
+
+    batchAction: async (
+        payload: BatchActionEnvironmentsInput,
+    ): Promise<{ succeededCount: number; skippedRunningCount: number }> => {
+        const fn = getElectronApi()?.chromeEnvironments?.batchAction;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(payload);
+    },
+
+    exportCookies: async (
+        id: string,
+        format: 'json' | 'netscape' = 'json',
+    ): Promise<{
+        count: number;
+        format: 'json' | 'netscape';
+        content: string;
+    }> => {
+        const fn = getElectronApi()?.chromeEnvironments?.exportCookies;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(id, format);
+    },
+
+    importCookies: async (
+        id: string,
+        rawText: string,
+    ): Promise<{ importedCount: number }> => {
+        const fn = getElectronApi()?.chromeEnvironments?.importCookies;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(id, rawText);
+    },
+
+    tileWindows: async (): Promise<{ tiledCount: number }> => {
+        const fn = getElectronApi()?.chromeEnvironments?.tileWindows;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn();
     },
 
     onStatusChanged: (handler: () => void): (() => void) =>

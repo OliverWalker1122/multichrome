@@ -393,6 +393,40 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                 'Credentials are stored encrypted in the app data directory and take effect on next browser launch.',
                             )}
                         </p>
+
+                        <Field
+                            label={
+                                <span
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                    }}
+                                >
+                                    {t('换 IP 链接（可选）', 'Rotation URL (Optional)')}
+                                    <InfoTip
+                                        content={t(
+                                            '填写移动或轮换住宅代理供应商提供的换 IP API 链接，可在代理详情一键触发并刷新出口信息',
+                                            'Optional provider webhook URL for 4G mobile or rotating residential proxies to rotate exit IP on demand.',
+                                        )}
+                                    />
+                                </span>
+                            }
+                        >
+                            <Input
+                                type="url"
+                                value={editor.rotationUrl}
+                                placeholder="https://api.provider.example/rotate?token=..."
+                                autoComplete="off"
+                                spellCheck={false}
+                                onChange={(_, data) =>
+                                    onChange({
+                                        ...editor,
+                                        rotationUrl: data.value,
+                                    })
+                                }
+                            />
+                        </Field>
                     </form>
                 )}
             </DrawerBody>

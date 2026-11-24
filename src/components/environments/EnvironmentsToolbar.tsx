@@ -21,6 +21,7 @@ import {
     DeleteRegular,
     DismissRegular,
     EditRegular,
+    GridRegular,
     MoreHorizontalRegular,
     SearchRegular,
     StopRegular,
@@ -49,6 +50,7 @@ export interface EnvironmentsToolbarProps {
     runningCount: number;
     allRunningCount: number;
     closingAll: boolean;
+    tilingWindows?: boolean;
     search: string;
     onSearchChange: (value: string) => void;
     statusFilter: RunStatus;
@@ -66,6 +68,7 @@ export interface EnvironmentsToolbarProps {
     sortOrder: EnvSortOrder;
     onSortOrderChange: React.Dispatch<React.SetStateAction<EnvSortOrder>>;
     onCreateClick: () => void;
+    onTileWindows?: () => void;
     onOpenCloseAllConfirm: () => void;
     onRequestRenameGroup?: (groupName: string) => void;
     onRequestDeleteGroup?: (groupName: string) => void;
@@ -81,6 +84,7 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
     runningCount,
     allRunningCount,
     closingAll,
+    tilingWindows = false,
     search,
     onSearchChange,
     statusFilter,
@@ -98,6 +102,7 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
     sortOrder,
     onSortOrderChange,
     onCreateClick,
+    onTileWindows,
     onOpenCloseAllConfirm,
     onRequestRenameGroup,
     onRequestDeleteGroup,
@@ -142,6 +147,24 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     onChange={(_, data) => onSearchChange(data.value)}
                 />
                 <div className={styles.headerActions}>
+                    {allRunningCount > 0 && onTileWindows && (
+                        <Tooltip
+                            content={t(
+                                '一键在主屏幕按网格自动排列所有正在运行的浏览器窗口',
+                                'Automatically arrange all running browser windows in a grid',
+                            )}
+                            relationship="label"
+                        >
+                            <Button
+                                appearance="subtle"
+                                icon={<GridRegular />}
+                                disabled={tilingWindows || closingAll}
+                                onClick={onTileWindows}
+                            >
+                                {t('排列窗口', 'Tile Windows')}
+                            </Button>
+                        </Tooltip>
+                    )}
                     {allRunningCount > 0 && (
                         <Button
                             appearance="subtle"

@@ -307,6 +307,7 @@ export interface ManagedProxy {
     status: 'running' | 'stopped' | 'error';
     localAddress?: string;
     lastError?: string;
+    hasRotationUrl?: boolean;
     exitInfo?: ProxyExitInfo;
 }
 
@@ -319,6 +320,7 @@ export interface SimpleProxyInput {
     port: number;
     username: string;
     password?: string;
+    rotationUrl?: string;
 }
 
 export type ProxyInput =
@@ -328,12 +330,14 @@ export type ProxyInput =
           name: string;
           mode: 'json';
           config: string;
+          rotationUrl?: string;
       }
     | {
           id?: string;
           name: string;
           mode: 'line';
           line: string;
+          rotationUrl?: string;
       };
 
 export interface ProxyConfigView {
@@ -427,6 +431,48 @@ export interface ProxyEditorState {
     clearCredentials: boolean;
     line: string;
     config: string;
+    rotationUrl: string;
+}
+
+export interface BatchCreateEnvironmentsInput {
+    namePrefix: string;
+    groupName: string;
+    count: number;
+    startNumber?: number;
+    notes?: string;
+    browserEngine?: BrowserEngineType;
+    proxyMode?: 'none' | 'single' | 'sequential';
+    proxyIds?: string[];
+    tags?: string[];
+}
+
+export interface BatchActionEnvironmentsInput {
+    ids: string[];
+    action: 'moveGroup' | 'bindProxy' | 'addTags' | 'delete';
+    groupName?: string;
+    proxyId?: string;
+    tags?: string[];
+}
+
+export interface BackupRestoreResult {
+    canceled: boolean;
+    restoredEnvironments?: number;
+    skippedEnvironments?: number;
+    restoredProxies?: number;
+    skippedProxies?: number;
+    exportedAt?: string;
+    appVersion?: string;
+}
+
+export interface AppUpdateCheckResult {
+    currentVersion: string;
+    latestVersion: string;
+    hasUpdate: boolean;
+    releaseUrl: string;
+    canDownloadAsset?: boolean;
+    assetName?: string;
+    assetSizeBytes?: number;
+    publishedAt?: string;
 }
 
 export interface RunningProfileOption {
@@ -473,9 +519,22 @@ export interface ElectronAPI {
         getEditor: (
             id: string,
             asJson?: boolean,
-        ) => Promise<{ mode: 'simple' | 'json'; config?: string }>;
+        ) => Promise<{
+            mode: 'simple' | 'json';
+            config?: string;
+            rotationUrl?: string;
+        }>;
         getConfig: (id: string, reveal?: boolean) => Promise<ProxyConfigView>;
         getCoreInfo: () => Promise<ProxyCoreInfo>;
+        rotateIp?: (id: string) => Promise<{
+            ok: boolean;
+            statusCode: number;
+            exitInfo?: ProxyExitInfo;
+        }>;
+        batchRemove?: (ids: string[]) => Promise<{
+            removedCount: number;
+            skippedInUseCount: number;
+        }>;
     };
     appLogs: {
         getLogs: () => Promise<AppLog[]>;
@@ -528,6 +587,28 @@ export interface ElectronAPI {
             options?: DeleteGroupOptions,
         ) => Promise<DeleteGroupResult>;
         deleteEmptyGroup: (groupName: string) => Promise<boolean>;
+        batchCreate?: (
+            payload: BatchCreateEnvironmentsInput,
+        ) => Promise<ChromeEnvironment[]>;
+        batchAction?: (
+            payload: BatchActionEnvironmentsInput,
+        ) => Promise<{
+            succeededCount: number;
+            skippedRunningCount: number;
+        }>;
+        exportCookies?: (
+            id: string,
+            format?: 'json' | 'netscape',
+        ) => Promise<{
+            count: number;
+            format: 'json' | 'netscape';
+            content: string;
+        }>;
+        importCookies?: (
+            id: string,
+            rawText: string,
+        ) => Promise<{ importedCount: number }>;
+        tileWindows?: () => Promise<{ tiledCount: number }>;
     };
     kernels?: {
         getStatus: () => Promise<KernelStatus>;
@@ -589,13 +670,21 @@ export interface ElectronAPI {
     app?: {
         getInfo: () => Promise<AppInfo>;
         openExternal?: (url: string) => Promise<boolean>;
-        checkUpdate?: () => Promise<{
-            currentVersion: string;
-            latestVersion: string;
-            hasUpdate: boolean;
-            releaseUrl: string;
-            publishedAt?: string;
+        checkUpdate?: () => Promise<AppUpdateCheckResult>;
+        downloadUpdate?: () => Promise<{
+            canceled: boolean;
+            filePath?: string;
+            fileName?: string;
+            sha256?: string;
         }>;
+        exportDiagnostics?: () => Promise<{
+            canceled: boolean;
+            filePath?: string;
+        }>;
+        exportBackup?: (
+            password: string,
+        ) => Promise<{ canceled: boolean; filePath?: string }>;
+        restoreBackup?: (password: string) => Promise<BackupRestoreResult>;
         setTheme: (theme: ThemeMode, isDark: boolean) => Promise<boolean>;
         platform: string;
     };

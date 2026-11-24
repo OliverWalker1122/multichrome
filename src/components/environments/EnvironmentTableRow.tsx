@@ -2,6 +2,7 @@ import React from 'react';
 import {
     Badge,
     Button,
+    Checkbox,
     Menu,
     MenuDivider,
     MenuItem,
@@ -40,6 +41,7 @@ export interface EnvironmentTableRowProps {
     styles: EnvironmentsStyles;
     env: ChromeEnvironment;
     selected: boolean;
+    checked: boolean;
     narrowWindow: boolean;
     showGroupCol: boolean;
     showProxyCol: boolean;
@@ -50,6 +52,7 @@ export interface EnvironmentTableRowProps {
     memoryBytes?: number;
     busy: boolean;
     selectionRowProps: React.HTMLAttributes<HTMLTableRowElement>;
+    onToggleChecked: () => void;
     onSelect: () => void;
     onOpenDetails: () => void;
     onOpenContextMenu: (event: React.MouseEvent) => void;
@@ -66,6 +69,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
     styles,
     env,
     selected,
+    checked,
     narrowWindow,
     showGroupCol,
     showProxyCol,
@@ -76,6 +80,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
     memoryBytes,
     busy,
     selectionRowProps,
+    onToggleChecked,
     onSelect,
     onOpenDetails,
     onOpenContextMenu,
@@ -118,6 +123,21 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                 onOpenDetails();
             }}
         >
+            <td
+                className={styles.td}
+                style={{ width: '36px', paddingLeft: '14px', paddingRight: '4px' }}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <Checkbox
+                    checked={checked}
+                    aria-label={
+                        isEn
+                            ? `Select ${env.name}`
+                            : `选择 ${env.name}`
+                    }
+                    onChange={onToggleChecked}
+                />
+            </td>
             <td className={styles.td}>
                 <div className={styles.nameTextWrap}>
                     <span className={styles.namePrimary} title={env.name}>

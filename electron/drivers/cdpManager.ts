@@ -1297,6 +1297,236 @@ export class CDPManager {
     }
 
     /**
+     * 通过短连接执行一次性浏览器级 CDP 操作（Cookie 读写 / 窗口网格排列）
+     */
+    private async withEphemeralBrowserClient<T>(
+        debugPort: number,
+        fn: (
+            call: (
+                method: string,
+                params?: Record<string, unknown>,
+            ) => Promise<Record<string, unknown>>,
+        ) => Promise<T>,
+    ): Promise<T> {
+        let wsUrl: string | null = null;
+        const waitDeadline = Date.now() + 6000;
+        while (Date.now() < waitDeadline) {
+            wsUrl = await this.getBrowserWebSocketUrl(debugPort);
+            if (wsUrl) break;
+            await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+        if (!wsUrl) {
+            throw new Error('浏览器调试端口暂不可达，请确认环境仍在运行');
+        }
+        const ws = new WebSocket(wsUrl);
+        await new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                reject(new Error('连接浏览器 CDP 超时'));
+            }, 4000);
+            ws.once('open', () => {
+                clearTimeout(timer);
+                resolve();
+            });
+            ws.once('error', (err) => {
+                clearTimeout(timer);
+                reject(err);
+            });
+        });
+
+        let nextId = 1;
+        const pending = new Map<
+            number,
+            {
+                resolve: (value: Record<string, unknown>) => void;
+                reject: (err: Error) => void;
+                timer: NodeJS.Timeout;
+            }
+        >();
+
+        ws.on('message', (raw) => {
+            try {
+                const msg = JSON.parse(raw.toString()) as {
+                    id?: number;
+                    result?: Record<string, unknown>;
+                    error?: { message?: string };
+                };
+                if (msg.id && pending.has(msg.id)) {
+                    const entry = pending.get(msg.id)!;
+                    clearTimeout(entry.timer);
+                    pending.delete(msg.id);
+                    if (msg.error) {
+                        entry.reject(
+                            new Error(msg.error.message || 'CDP 命令执行失败'),
+                        );
+                    } else {
+                        entry.resolve(msg.result || {});
+                    }
+                }
+            } catch {
+                /* ignore malformed frame */
+            }
+        });
+
+        const call = (
+            method: string,
+            params: Record<string, unknown> = {},
+        ): Promise<Record<string, unknown>> =>
+            new Promise((resolve, reject) => {
+                if (ws.readyState !== WebSocket.OPEN) {
+                    reject(new Error('CDP 连接已关闭'));
+                    return;
+                }
+                const id = nextId++;
+                const timer = setTimeout(() => {
+                    pending.delete(id);
+                    reject(new Error(`CDP 命令超时: ${method}`));
+                }, 5000);
+                pending.set(id, { resolve, reject, timer });
+                try {
+                    ws.send(JSON.stringify({ id, method, params }));
+                } catch (err) {
+                    clearTimeout(timer);
+                    pending.delete(id);
+                    reject(
+                        err instanceof Error
+                            ? err
+                            : new Error('CDP 命令发送失败'),
+                    );
+                }
+            });
+
+        try {
+            return await fn(call);
+        } finally {
+            for (const entry of pending.values()) {
+                clearTimeout(entry.timer);
+            }
+            pending.clear();
+            try {
+                ws.close();
+            } catch {
+                /* ignore */
+            }
+        }
+    }
+
+    public async getBrowserCookies(
+        debugPort: number,
+    ): Promise<Record<string, unknown>[]> {
+        return this.withEphemeralBrowserClient(debugPort, async (call) => {
+            const res = await call('Storage.getCookies');
+            return Array.isArray(res.cookies)
+                ? (res.cookies as Record<string, unknown>[])
+                : [];
+        });
+    }
+
+    public async setBrowserCookies(
+        debugPort: number,
+        cookies: Record<string, unknown>[],
+    ): Promise<number> {
+        if (!Array.isArray(cookies) || cookies.length === 0) return 0;
+        const cdpCookies = cookies.map((item) => {
+            const rawDomain =
+                typeof item.domain === 'string' ? item.domain.trim() : '';
+            const cleanHost = rawDomain.replace(/^\./, '');
+            const cookiePath =
+                typeof item.path === 'string' && item.path.startsWith('/')
+                    ? item.path
+                    : '/';
+            const scheme = item.secure ? 'https' : 'http';
+            const url = `${scheme}://${cleanHost}${cookiePath}`;
+            const isIpOrLocalhost =
+                cleanHost === 'localhost' ||
+                /^(?:\d{1,3}\.){3}\d{1,3}$/.test(cleanHost) ||
+                cleanHost.includes(':');
+            if (isIpOrLocalhost) {
+                const clone: Record<string, unknown> = {
+                    ...item,
+                    path: cookiePath,
+                    url,
+                };
+                delete clone.domain;
+                return clone;
+            }
+            return { ...item, domain: rawDomain, path: cookiePath, url };
+        });
+        await this.withEphemeralBrowserClient(debugPort, async (call) => {
+            await call('Storage.setCookies', { cookies: cdpCookies });
+        });
+        return cdpCookies.length;
+    }
+
+    private async fetchDebugTargets(
+        debugPort: number,
+    ): Promise<Array<{ id?: string; type?: string }>> {
+        return new Promise<Array<{ id?: string; type?: string }>>((resolve) => {
+            const req = http.get(
+                `http://127.0.0.1:${debugPort}/json/list`,
+                (res) => {
+                    let data = '';
+                    res.on('data', (chunk) => {
+                        data += chunk;
+                    });
+                    res.on('end', () => {
+                        try {
+                            const parsed = JSON.parse(data);
+                            resolve(Array.isArray(parsed) ? parsed : []);
+                        } catch {
+                            resolve([]);
+                        }
+                    });
+                },
+            );
+            req.on('error', () => resolve([]));
+            req.setTimeout(2000, () => {
+                req.destroy();
+                resolve([]);
+            });
+        });
+    }
+
+    public async setWindowBoundsForPort(
+        debugPort: number,
+        bounds: { left: number; top: number; width: number; height: number },
+    ): Promise<boolean> {
+        let pageTarget: { id?: string; type?: string } | undefined;
+        const waitDeadline = Date.now() + 4000;
+        while (Date.now() < waitDeadline) {
+            const targets = await this.fetchDebugTargets(debugPort);
+            pageTarget =
+                targets.find((item) => item.type === 'page' && item.id) ||
+                targets.find((item) => item.id);
+            if (pageTarget?.id) break;
+            await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+        if (!pageTarget?.id) return false;
+
+        return this.withEphemeralBrowserClient(debugPort, async (call) => {
+            const winInfo = await call('Browser.getWindowForTarget', {
+                targetId: pageTarget.id,
+            });
+            const windowId = Number(winInfo.windowId);
+            if (!Number.isInteger(windowId)) return false;
+            await call('Browser.setWindowBounds', {
+                windowId,
+                bounds: { windowState: 'normal' },
+            });
+            await call('Browser.setWindowBounds', {
+                windowId,
+                bounds: {
+                    left: Math.round(bounds.left),
+                    top: Math.round(bounds.top),
+                    width: Math.round(bounds.width),
+                    height: Math.round(bounds.height),
+                    windowState: 'normal',
+                },
+            });
+            return true;
+        });
+    }
+
+    /**
      * 清理所有连接
      */
     public cleanup(): void {

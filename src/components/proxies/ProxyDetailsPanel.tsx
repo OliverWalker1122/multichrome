@@ -40,6 +40,7 @@ interface ProxyDetailsPanelProps {
     onInspectLogs: (proxyId: string) => void;
     refreshingExit: boolean;
     onRefreshExit: (proxy: ManagedProxy) => void;
+    onRotateIp?: (proxy: ManagedProxy) => void;
     onDelete: (proxy: ManagedProxy) => void;
 }
 
@@ -219,6 +220,7 @@ const ProxyDetailsPanel: React.FC<ProxyDetailsPanelProps> = ({
     onInspectLogs,
     refreshingExit,
     onRefreshExit,
+    onRotateIp,
     onDelete,
 }) => {
     const styles = useStyles();
@@ -360,6 +362,26 @@ const ProxyDetailsPanel: React.FC<ProxyDetailsPanelProps> = ({
                 >
                     {t('完整配置', 'Config')}
                 </Button>
+
+                {proxy.hasRotationUrl && onRotateIp && (
+                    <Tooltip
+                        content={t(
+                            '请求供应商换 IP 接口并自动刷新出口地址',
+                            'Trigger upstream IP rotation webhook and refresh exit info',
+                        )}
+                        relationship="label"
+                    >
+                        <Button
+                            size="small"
+                            appearance="outline"
+                            icon={<ArrowClockwiseRegular />}
+                            disabled={!!busy}
+                            onClick={() => onRotateIp(proxy)}
+                        >
+                            {t('更换 IP', 'Rotate IP')}
+                        </Button>
+                    </Tooltip>
+                )}
 
                 <div style={{ flex: 1 }} />
 

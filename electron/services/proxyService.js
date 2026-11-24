@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { SingboxCore } from '../drivers/singboxCore.js';
 import { probeProxyExit } from '../drivers/proxyExitProbe.js';
+import { triggerProxyRotation } from '../drivers/proxyRotationClient.js';
 import { reserveEphemeralLoopbackPort } from '../drivers/portAllocator.js';
 import {
     ProxyRepository,
     extractSummaryMetadata,
 } from '../repositories/proxyRepository.js';
+import { validateProxyRotationUrl } from '../domain/proxyRotationPolicy.js';
 import {
     parseProxyLine,
     simpleProxyToConfig,
@@ -209,6 +211,7 @@ export class ProxyService {
                   : 'stopped',
             localAddress: runtime?.handle ? runtime.localAddress : undefined,
             lastError: runtime?.lastError || credentialError,
+            hasRotationUrl: Boolean(meta?.hasRotationUrl),
             exitInfo: { ...(runtime?.exitInfo || { status: 'idle' }) },
         };
     }
@@ -226,9 +229,14 @@ export class ProxyService {
 
     getEditor(id, asJson = false) {
         const data = this.repository.decodePayload(this.find(id));
+        const rotationUrl = data.rotationUrl || '';
         return data.mode === 'json' || asJson
-            ? { mode: 'json', config: JSON.stringify(data.config, null, 2) }
-            : { mode: 'simple' };
+            ? {
+                  mode: 'json',
+                  config: JSON.stringify(data.config, null, 2),
+                  rotationUrl,
+              }
+            : { mode: 'simple', rotationUrl };
     }
 
     getConfig(id, reveal = false) {
@@ -309,6 +317,24 @@ export class ProxyService {
         }
         if (!this.repository.encryptionAvailable())
             throw new Error('系统安全存储不可用，无法保存代理配置');
+        let previousRotationUrl = '';
+        if (input.rotationUrl === undefined && previous) {
+            try {
+                previousRotationUrl =
+                    this.repository.decodePayload(previous).rotationUrl || '';
+            } catch {
+                previousRotationUrl = '';
+            }
+        }
+        const rotationUrl =
+            input.rotationUrl !== undefined
+                ? validateProxyRotationUrl(input.rotationUrl)
+                : previousRotationUrl;
+        if (rotationUrl) {
+            data.rotationUrl = rotationUrl;
+        } else {
+            delete data.rotationUrl;
+        }
         await this.core.check(buildSingboxConfig(data.config, 0));
         if (this.closed) throw new Error('代理服务正在退出');
         if (previous) this.assertStopped(previous.id);
@@ -515,6 +541,100 @@ export class ProxyService {
         this.notifyChange('log', id);
     }
 
+    async rotateProxyIp(id) {
+        if (this.closed) throw new Error('代理服务正在退出');
+        const record = this.find(id);
+        const data = this.repository.decodePayload(record);
+        const rotationUrl = data.rotationUrl
+            ? validateProxyRotationUrl(data.rotationUrl)
+            : '';
+        if (!rotationUrl) {
+            throw new Error('此代理尚未配置换 IP 链接');
+        }
+        const res = await triggerProxyRotation(rotationUrl);
+        this.addLog(id, 'info', `已触发换 IP 请求（HTTP ${res.statusCode}）`);
+        const runtime = this.runtimes.get(id);
+        let exitInfo;
+        if (runtime?.handle && !runtime.stopping) {
+            await new Promise((r) => setTimeout(r, 900));
+            exitInfo = await this.refreshExitInfo(id, { force: true });
+        }
+        return {
+            ok: true,
+            statusCode: res.statusCode,
+            exitInfo,
+        };
+    }
+
+    exportDecryptedProxiesForBackup() {
+        return this.repository.getRecords().map((record) => ({
+            id: record.id,
+            name: record.name,
+            data: this.repository.decodePayload(record),
+        }));
+    }
+
+    importProxiesFromBackup(items) {
+        if (!Array.isArray(items) || items.length === 0) {
+            return { restoredCount: 0, skippedCount: 0 };
+        }
+        if (!this.repository.encryptionAvailable()) {
+            throw new Error('系统安全存储不可用，无法导入备份代理配置');
+        }
+        const existingIds = new Set(
+            this.repository.getRecords().map((record) => record.id),
+        );
+        const newRecords = [];
+        const newMetaEntries = [];
+        let skippedCount = 0;
+
+        for (const item of items) {
+            const id =
+                typeof item?.id === 'string' && item.id.trim()
+                    ? item.id.trim()
+                    : randomUUID();
+            if (existingIds.has(id)) {
+                skippedCount += 1;
+                continue;
+            }
+            const name = validateName(item?.name || 'Imported Proxy');
+            const rawData = item?.data;
+            if (!rawData || typeof rawData !== 'object') {
+                skippedCount += 1;
+                continue;
+            }
+            const config = normalizeProxyConfig(rawData.config);
+            const normalizedData = {
+                mode: rawData.mode === 'simple' && rawData.simple ? 'simple' : 'json',
+                ...(rawData.simple ? { simple: rawData.simple } : {}),
+                config,
+                ...(rawData.rotationUrl
+                    ? { rotationUrl: validateProxyRotationUrl(rawData.rotationUrl) }
+                    : {}),
+            };
+            const encrypted = this.repository.encryptPayload(normalizedData);
+            const record = {
+                id,
+                name,
+                payload: encrypted,
+                version: 2,
+            };
+            existingIds.add(id);
+            newRecords.push(record);
+            newMetaEntries.push({
+                id: record.id,
+                token: `v2:${record.payload}`,
+                meta: extractSummaryMetadata(normalizedData),
+            });
+        }
+
+        if (newRecords.length > 0) {
+            this.repository.appendBatch(newRecords, newMetaEntries);
+            this.notifyChange('state');
+        }
+        return { restoredCount: newRecords.length, skippedCount };
+    }
+
     cancelExitProbe(runtime) {
         runtime.exitAbort?.abort();
         runtime.exitAbort = null;
@@ -523,7 +643,7 @@ export class ProxyService {
         runtime.lastExitProbeAt = 0;
     }
 
-    async refreshExitInfo(id) {
+    async refreshExitInfo(id, { force = false } = {}) {
         if (this.closed) throw new Error('代理服务正在退出');
         this.find(id);
         const runtime = this.runtimes.get(id);
@@ -531,6 +651,7 @@ export class ProxyService {
             throw new Error('请先启动代理，再检测出口');
         if (runtime.exitProbePromise) return runtime.exitProbePromise;
         if (
+            !force &&
             runtime.exitInfo.status !== 'idle' &&
             this.now() - runtime.lastExitProbeAt < EXIT_PROBE_COOLDOWN_MS
         )

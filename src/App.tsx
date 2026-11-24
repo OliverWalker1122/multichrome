@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { FluentProvider, makeStyles, tokens } from '@fluentui/react-components';
 import {
+    BatchCreateEnvironmentsInput,
     BrowserEngineType,
     ChromeEnvironment,
     DeleteGroupOptions,
@@ -16,6 +17,7 @@ import {
     NotificationProvider,
     useNotification,
 } from './contexts/NotificationContext';
+import { environmentApi } from './services';
 import { useAppShellLifecycle } from './hooks/useAppShellLifecycle';
 import TitleBar from './components/layout/TitleBar';
 import NavigationSidebar, {
@@ -28,7 +30,7 @@ import CreateEnvironmentModal from './components/environments/CreateEnvironmentM
 import ApplicationLogsPanel from './components/layout/ApplicationLogsPanel';
 import ProxiesPage from './components/proxies/ProxiesPage';
 import TrashPage from './components/environments/TrashPage';
-import SettingsPage from './components/settings/SettingsPage';
+import SettingsPage, { SettingsTab } from './components/settings/SettingsPage';
 import DeleteGroupDialog from './components/environments/DeleteGroupDialog';
 import RenameGroupDialog from './components/environments/RenameGroupDialog';
 import LaunchGuardDialog from './components/environments/LaunchGuardDialog';
@@ -102,6 +104,10 @@ const AppShell: React.FC = () => {
     const [selectedProxyId, setSelectedProxyId] = useState<string | null>(null);
     const [envDetailsOpen, setEnvDetailsOpen] = useState(false);
     const [proxyDetailsOpen, setProxyDetailsOpen] = useState(false);
+    const [settingsTabRequest, setSettingsTabRequest] = useState<{
+        tab: SettingsTab;
+        tick: number;
+    }>({ tab: 'general', tick: 0 });
 
     const lifecycle = useAppShellLifecycle({
         activeSection,
@@ -210,6 +216,23 @@ const AppShell: React.FC = () => {
         );
     };
 
+    const handleBatchCreateEnvironments = async (
+        payload: BatchCreateEnvironmentsInput,
+    ) => {
+        const created = await environmentApi.batchCreate(payload);
+        await actions.refreshEnvironments();
+        if (created.length > 0) {
+            setSelectedEnvId(created[0].id);
+        }
+        setCreateModalOpen(false);
+        showNotification(
+            'success',
+            isEn
+                ? `Created ${created.length} profiles`
+                : `已批量创建 ${created.length} 个环境`,
+        );
+    };
+
     const handleCloneEnvironment = async (id: string) => {
         const cloned = await actions.cloneEnvironment(id);
         setSelectedEnvId(cloned.id);
@@ -298,6 +321,9 @@ const AppShell: React.FC = () => {
             lifecycle.kernelStatus.installedKernels.some(
                 (k) => k.id === lifecycle.kernelStatus?.activeKernelId,
             ),
+    );
+    const hasAnyBrowserEngine = Boolean(
+        lifecycle.kernelStatus?.systemChromeAvailable || hasFingerprintKernel,
     );
 
     const handleSaveEnvironment = async (
@@ -436,8 +462,19 @@ const AppShell: React.FC = () => {
                                     handleRegenerateFingerprint
                                 }
                                 hasFingerprintKernel={hasFingerprintKernel}
+                                hasAnyBrowserEngine={hasAnyBrowserEngine}
                                 onInspectProxyLogs={
                                     lifecycle.handleInspectProxyLogs
+                                }
+                                onNavigateComponents={() => {
+                                    setSettingsTabRequest((prev) => ({
+                                        tab: 'components',
+                                        tick: prev.tick + 1,
+                                    }));
+                                    setActiveSection('settings');
+                                }}
+                                onNavigateProxies={() =>
+                                    setActiveSection('proxies')
                                 }
                                 onRequestRenameGroup={(group) =>
                                     setRenameGroupTarget(group)
@@ -496,6 +533,14 @@ const AppShell: React.FC = () => {
                                 onKernelStatusChange={(nextStatus) => {
                                     lifecycle.setKernelStatus(nextStatus);
                                     lifecycle.triggerProxyRefresh();
+                                }}
+                                initialTab={settingsTabRequest.tab}
+                                tabRequestTick={settingsTabRequest.tick}
+                                onDataRestored={() => {
+                                    void settingsActions.loadSettings();
+                                    void actions.refreshEnvironments();
+                                    lifecycle.triggerProxyRefresh();
+                                    lifecycle.refreshTrashCount();
                                 }}
                             />
                         )}
@@ -569,6 +614,7 @@ const AppShell: React.FC = () => {
                 open={createModalOpen}
                 onCancel={() => setCreateModalOpen(false)}
                 onOk={handleCreateEnvironment}
+                onBatchCreate={handleBatchCreateEnvironments}
                 groups={groupsForModal}
                 defaultGroup={state.currentGroup}
                 defaultEngine={settings.fingerprint?.defaultEngine}

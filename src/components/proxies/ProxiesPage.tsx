@@ -1,6 +1,8 @@
 import React from 'react';
 import {
+    Badge,
     Button,
+    Checkbox,
     Input,
     Menu,
     MenuItem,
@@ -18,6 +20,7 @@ import {
     AddRegular,
     ArrowImportRegular,
     ArrowSortRegular,
+    DeleteRegular,
     DismissRegular,
     GlobeRegular,
     PulseRegular,
@@ -123,6 +126,27 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                         onChange={(_, data) => ctrl.setSearch(data.value)}
                     />
                     <div className={styles.headerActions}>
+                        {ctrl.activeSelectedProxyIds.length > 0 && (
+                            <Button
+                                appearance="subtle"
+                                icon={<DeleteRegular />}
+                                style={{
+                                    color: tokens.colorPaletteRedForeground1,
+                                }}
+                                disabled={!!ctrl.busy || !!ctrl.batchChecking}
+                                onClick={ctrl.handleBatchRemoveSelected}
+                            >
+                                <Badge
+                                    size="small"
+                                    appearance="tint"
+                                    color="danger"
+                                    style={{ marginRight: '6px' }}
+                                >
+                                    {ctrl.activeSelectedProxyIds.length}
+                                </Badge>
+                                {t('批量删除', 'Remove Selected')}
+                            </Button>
+                        )}
                         <Tooltip
                             content={t(
                                 '启动未运行的代理并刷新当前列表所有代理的出口 IP、地区与延迟',
@@ -296,12 +320,46 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             aria-label={t('代理列表', 'Proxies table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 612
-                                    : ctrl.nameWidth + 646,
+                                    ? 648
+                                    : ctrl.nameWidth + 682,
                             }}
                         >
                             <thead className={styles.thead}>
                                 <tr>
+                                    <th
+                                        className={styles.th}
+                                        style={{
+                                            width: '36px',
+                                            paddingLeft: '14px',
+                                            paddingRight: '4px',
+                                        }}
+                                    >
+                                        <Checkbox
+                                            checked={
+                                                ctrl.filtered.length > 0 &&
+                                                ctrl.filtered.every((p) =>
+                                                    ctrl.selectedProxyIds.has(
+                                                        p.id,
+                                                    ),
+                                                )
+                                                    ? true
+                                                    : ctrl.filtered.some((p) =>
+                                                            ctrl.selectedProxyIds.has(
+                                                                p.id,
+                                                            ),
+                                                        )
+                                                      ? 'mixed'
+                                                      : false
+                                            }
+                                            aria-label={t(
+                                                '全选代理列表',
+                                                'Select all proxies',
+                                            )}
+                                            onChange={
+                                                ctrl.toggleSelectAllFilteredProxies
+                                            }
+                                        />
+                                    </th>
                                     <th
                                         className={styles.th}
                                         style={{
@@ -362,7 +420,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                             }}
                                         >
                                             <td
-                                                colSpan={narrowWindow ? 4 : 5}
+                                                colSpan={narrowWindow ? 5 : 6}
                                                 style={{
                                                     padding: 0,
                                                     border: 'none',
@@ -389,6 +447,9 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                                 proxy={proxy}
                                                 assigned={assigned}
                                                 selected={selected}
+                                                checked={ctrl.selectedProxyIds.has(
+                                                    proxy.id,
+                                                )}
                                                 narrowWindow={narrowWindow}
                                                 busy={ctrl.busy}
                                                 refreshingExit={ctrl.refreshingExitIds.has(
@@ -398,6 +459,11 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                                     proxy,
                                                     index,
                                                 )}
+                                                onToggleChecked={() =>
+                                                    ctrl.toggleSelectProxyId(
+                                                        proxy.id,
+                                                    )
+                                                }
                                                 onSelect={() =>
                                                     onSelectProxy(proxy.id)
                                                 }
@@ -450,7 +516,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                             }}
                                         >
                                             <td
-                                                colSpan={narrowWindow ? 4 : 5}
+                                                colSpan={narrowWindow ? 5 : 6}
                                                 style={{
                                                     padding: 0,
                                                     border: 'none',
@@ -483,6 +549,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                         ctrl.selectedProxy.id,
                     )}
                     onRefreshExit={(proxy) => void ctrl.refreshExitInfo(proxy)}
+                    onRotateIp={(proxy) => void ctrl.handleRotateProxyIp(proxy)}
                     onDelete={(proxy) => ctrl.setDeleteProxy(proxy)}
                 />
             )}

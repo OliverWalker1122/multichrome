@@ -35,6 +35,14 @@ import PrivacySettingsSection from './PrivacySettingsSection';
 import { cleanIpcError, normalizeFpState } from './settingsShared';
 import { useSettingsStyles } from './settingsStyles';
 
+export type SettingsTab =
+    | 'general'
+    | 'browser'
+    | 'privacy'
+    | 'automation'
+    | 'components'
+    | 'about';
+
 export interface SettingsPageProps {
     currentSettings: AppSettings;
     onSave: (settings: AppSettings) => Promise<boolean>;
@@ -45,15 +53,10 @@ export interface SettingsPageProps {
     groups?: string[];
     kernelStatus: KernelStatus | null;
     onKernelStatusChange: (status: KernelStatus) => void;
+    initialTab?: SettingsTab;
+    tabRequestTick?: number;
+    onDataRestored?: () => void;
 }
-
-type SettingsTab =
-    | 'general'
-    | 'browser'
-    | 'privacy'
-    | 'automation'
-    | 'components'
-    | 'about';
 
 const SettingsPage: React.FC<SettingsPageProps> = ({
     currentSettings,
@@ -65,13 +68,18 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     groups = [],
     kernelStatus,
     onKernelStatusChange,
+    initialTab,
+    tabRequestTick,
+    onDataRestored,
 }) => {
     const styles = useSettingsStyles();
     const { locale, t } = useI18n();
     const { showNotification } = useNotification();
     const hostPlatform = systemApi.getPlatform() || 'win32';
 
-    const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+    const [activeTab, setActiveTab] = useState<SettingsTab>(
+        initialTab || 'general',
+    );
     const [dataPath, setDataPath] = useState(currentSettings.dataPath || '');
     const [proxyEnabled, setProxyEnabled] = useState(
         Boolean(currentSettings.globalProxy?.enabled),
@@ -108,6 +116,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     );
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (initialTab) {
+            setActiveTab(initialTab);
+        }
+    }, [initialTab, tabRequestTick]);
 
     useEffect(() => {
         setDataPath(currentSettings.dataPath || '');
@@ -381,6 +395,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 setTheme(next);
                                 void onThemePreview(next);
                             }}
+                            onDataRestored={onDataRestored}
                         />
                     )}
 

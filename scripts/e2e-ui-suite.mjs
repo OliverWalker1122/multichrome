@@ -1751,6 +1751,100 @@ async function main() {
         }
 
         // ---------------------------------------------------------------
+        // E2E-13: Bulk create, native CDP Cookie transfer, Window Tiling & Backup validation
+        // ---------------------------------------------------------------
+        let e2e13Error = '';
+        let batchCreateOk = false;
+        let cookieRoundTripOk = false;
+        let tileWindowsOk = false;
+        let backupValidationOk = false;
+        try {
+            const batchCreated = await cdp.eval(`
+                window.electronAPI.chromeEnvironments.batchCreate({
+                    namePrefix: 'BatchNode',
+                    groupName: 'BatchGroup',
+                    count: 2,
+                    startNumber: 1,
+                    browserEngine: 'system-chrome',
+                })
+            `);
+            batchCreateOk =
+                Array.isArray(batchCreated) &&
+                batchCreated.length === 2 &&
+                batchCreated[0].name === 'BatchNode 01' &&
+                batchCreated[1].name === 'BatchNode 02' &&
+                Number.isInteger(batchCreated[0]?.fingerprintConfig?.seed) &&
+                batchCreated[0]?.fingerprintConfig?.seed !==
+                    batchCreated[1]?.fingerprintConfig?.seed;
+
+            if (batchCreated?.[0]?.id) {
+                const firstId = batchCreated[0].id;
+                await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.launch(${JSON.stringify(firstId)})`,
+                );
+                await waitUntil(() =>
+                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => Boolean(list.find(e => e.id === ${JSON.stringify(firstId)})?.isRunning))`),
+                );
+
+                const sampleCookies = [
+                    {
+                        name: 'mc_e2e_session',
+                        value: 'ok_160',
+                        domain: '127.0.0.1',
+                        path: '/',
+                    },
+                ];
+                const importRes = await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.importCookies(${JSON.stringify(firstId)}, ${JSON.stringify(JSON.stringify(sampleCookies))})`,
+                );
+                const exportJson = await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.exportCookies(${JSON.stringify(firstId)}, 'json')`,
+                );
+                const exportNetscape = await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.exportCookies(${JSON.stringify(firstId)}, 'netscape')`,
+                );
+                cookieRoundTripOk =
+                    Number(importRes?.importedCount) === 1 &&
+                    exportJson?.format === 'json' &&
+                    String(exportJson?.content || '').includes('mc_e2e_session') &&
+                    String(exportJson?.content || '').includes('ok_160') &&
+                    exportNetscape?.format === 'netscape' &&
+                    String(exportNetscape?.content || '').includes('mc_e2e_session\tok_160');
+
+                const tileRes = await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.tileWindows()`,
+                );
+                tileWindowsOk = Number(tileRes?.tiledCount) >= 1;
+
+                await cdp.eval(
+                    `window.electronAPI.chromeEnvironments.close(${JSON.stringify(firstId)})`,
+                );
+                await waitUntil(() =>
+                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => !list.find(e => e.id === ${JSON.stringify(firstId)})?.isRunning)`),
+                );
+                for (const item of batchCreated) {
+                    await cdp.eval(
+                        `window.electronAPI.chromeEnvironments.delete(${JSON.stringify(item.id)})`,
+                    );
+                }
+            }
+
+            backupValidationOk = await cdp.eval(`(async () => {
+                try {
+                    await window.electronAPI.app.exportBackup('short');
+                    return false;
+                } catch (err) {
+                    const msg = err && err.message ? err.message : String(err);
+                    return msg.includes('8');
+                }
+            })()`);
+        } catch (err13) {
+            e2e13Error = err13 instanceof Error ? err13.message : String(err13);
+        } finally {
+            await cdp.eval(`window.electronAPI.chromeEnvironments.closeAll()`).catch(() => {});
+        }
+
+        // ---------------------------------------------------------------
         // E2E-10: Zero uncaught page exceptions
         // ---------------------------------------------------------------
         record(
@@ -1793,6 +1887,18 @@ async function main() {
                     realActiveSwitchAndParallelOk,
             ),
             `privatePort=${realPrivatePortIsolationOk}, passThrough=${realDiscoveryAndPassThroughOk}, overrideShield=${realOverrideShieldOk}, incognitoBlock=${realIncognitoBlockOk}, activeSwitch=${realActiveSwitchAndParallelOk}${e2e12Error ? `, err=${e2e12Error}` : ''}`,
+        );
+
+        record(
+            'E2E-13',
+            '批量创建环境 + 原生 CDP Cookie 导入导出 + 一键宫格平铺 + 加密备份密码校验',
+            Boolean(
+                batchCreateOk &&
+                    cookieRoundTripOk &&
+                    tileWindowsOk &&
+                    backupValidationOk,
+            ),
+            `batchCreate=${batchCreateOk}, cookie=${cookieRoundTripOk}, tile=${tileWindowsOk}, backupPwdCheck=${backupValidationOk}${e2e13Error ? `, err=${e2e13Error}` : ''}`,
         );
     } finally {
         cdp?.close();

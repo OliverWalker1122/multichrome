@@ -27,6 +27,8 @@ try {
                 ipcRenderer.invoke('proxies:refresh-exit-info', id),
             getLogs: (id) => ipcRenderer.invoke('proxies:logs', id),
             clearLogs: (id) => ipcRenderer.invoke('proxies:clear-logs', id),
+            rotateIp: (id) => ipcRenderer.invoke('proxies:rotate-ip', id),
+            batchRemove: (ids) => ipcRenderer.invoke('proxies:batch-remove', ids),
         },
         appLogs: {
             getLogs: () => ipcRenderer.invoke('app:logs'),
@@ -113,6 +115,25 @@ try {
             // 删除空分组
             deleteEmptyGroup: (groupName) =>
                 ipcRenderer.invoke('delete-empty-group', groupName),
+
+            // 批量创建环境
+            batchCreate: (payload) =>
+                ipcRenderer.invoke('batch-create-environments', payload),
+
+            // 批量操作环境
+            batchAction: (payload) =>
+                ipcRenderer.invoke('batch-action-environments', payload),
+
+            // 原生 CDP Cookie 导出
+            exportCookies: (id, format = 'json') =>
+                ipcRenderer.invoke('export-environment-cookies', id, format),
+
+            // 原生 CDP Cookie 导入
+            importCookies: (id, rawText) =>
+                ipcRenderer.invoke('import-environment-cookies', id, rawText),
+
+            // 一键宫格排列运行中窗口
+            tileWindows: () => ipcRenderer.invoke('tile-chrome-windows'),
         },
 
         // 回收站管理API
@@ -189,6 +210,12 @@ try {
             getInfo: () => ipcRenderer.invoke('app:get-info'),
             openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
             checkUpdate: () => ipcRenderer.invoke('app:check-update'),
+            downloadUpdate: () => ipcRenderer.invoke('app:download-update'),
+            exportDiagnostics: () => ipcRenderer.invoke('app:export-diagnostics'),
+            exportBackup: (password) =>
+                ipcRenderer.invoke('backup:export', password),
+            restoreBackup: (password) =>
+                ipcRenderer.invoke('backup:restore', password),
             setTheme: (theme, isDark) =>
                 ipcRenderer.invoke('window:set-theme', theme, isDark),
             platform: process.platform,

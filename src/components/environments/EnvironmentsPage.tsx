@@ -1,11 +1,26 @@
 import React from 'react';
 import {
+    Badge,
     Button,
+    Checkbox,
+    Menu,
+    MenuItem,
+    MenuList,
+    MenuPopover,
+    MenuTrigger,
     Spinner,
     mergeClasses,
     tokens,
 } from '@fluentui/react-components';
-import { AddRegular, WindowMultipleRegular } from '@fluentui/react-icons';
+import {
+    DeleteRegular,
+    DismissRegular,
+    FolderSwapRegular,
+    GlobeRegular,
+    PlayRegular,
+    StopRegular,
+    WindowMultipleRegular,
+} from '@fluentui/react-icons';
 import type {
     ChromeEnvironment,
     ManagedProxy,
@@ -17,12 +32,14 @@ import {
 } from '../../hooks/useEnvironmentsWorkspace';
 import { useI18n } from '../../i18n';
 import ColumnResizeHandle from '../common/ColumnResizeHandle';
+import CookieTransferDialog from './CookieTransferDialog';
 import EnvironmentDetailsPanel, {
     ENV_DETAILS_WIDTH,
 } from './EnvironmentDetailsPanel';
 import EnvironmentTableRow from './EnvironmentTableRow';
 import EnvironmentsActionDialogs from './EnvironmentsActionDialogs';
 import EnvironmentsToolbar from './EnvironmentsToolbar';
+import ZeroStateOnboardingCard from './ZeroStateOnboardingCard';
 import { useEnvironmentsStyles } from './environmentsStyles';
 
 export type { OptionalEnvColumn };
@@ -52,7 +69,10 @@ interface EnvironmentsPageProps {
     ) => Promise<void>;
     onRegenerateFingerprint?: (id: string) => Promise<void>;
     hasFingerprintKernel?: boolean;
+    hasAnyBrowserEngine?: boolean;
     onInspectProxyLogs: (proxyId: string) => void;
+    onNavigateComponents?: () => void;
+    onNavigateProxies?: () => void;
     onRequestRenameGroup?: (groupName: string) => void;
     onRequestDeleteGroup?: (groupName: string) => void;
 }
@@ -78,13 +98,16 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     onRefresh,
     onUpdateEnvironment,
     onRegenerateFingerprint,
-    hasFingerprintKernel,
+    hasFingerprintKernel = false,
+    hasAnyBrowserEngine = true,
     onInspectProxyLogs,
+    onNavigateComponents,
+    onNavigateProxies,
     onRequestRenameGroup,
     onRequestDeleteGroup,
 }) => {
     const styles = useEnvironmentsStyles();
-    const { t } = useI18n();
+    const { isEn, t } = useI18n();
     const ws = useEnvironmentsWorkspace({
         environments,
         allEnvironments,
@@ -108,11 +131,18 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     const showLastUsedCol = !narrowWindow;
     const showProxyCol = !narrowWindow;
     const visibleColumnCount =
-        3 +
+        4 +
         (showGroupCol ? 1 : 0) +
         (showProxyCol ? 1 : 0) +
         activeOptionalCols.length +
         (showLastUsedCol ? 1 : 0);
+
+    const allFilteredChecked =
+        ws.filtered.length > 0 &&
+        ws.filtered.every((item) => ws.selectedIds.has(item.id));
+    const someFilteredChecked =
+        !allFilteredChecked &&
+        ws.filtered.some((item) => ws.selectedIds.has(item.id));
 
     const headingTitle =
         currentGroup === '用户分组' ? t('环境', 'Environments') : currentGroup;
@@ -142,6 +172,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     runningCount={ws.runningCount}
                     allRunningCount={ws.allRunningCount}
                     closingAll={ws.closingAll}
+                    tilingWindows={ws.tilingWindows}
                     search={ws.search}
                     onSearchChange={ws.setSearch}
                     statusFilter={ws.statusFilter}
@@ -159,10 +190,137 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     sortOrder={ws.sortOrder}
                     onSortOrderChange={ws.setSortOrder}
                     onCreateClick={onCreateClick}
+                    onTileWindows={() => void ws.handleTileWindows()}
                     onOpenCloseAllConfirm={() => ws.setCloseAllConfirmOpen(true)}
                     onRequestRenameGroup={onRequestRenameGroup}
                     onRequestDeleteGroup={onRequestDeleteGroup}
                 />
+
+                {ws.activeSelectedIds.length > 0 && (
+                    <div
+                        className={styles.batchBar}
+                        role="region"
+                        aria-label={t('批量操作栏', 'Batch actions bar')}
+                    >
+                        <Badge
+                            appearance="tint"
+                            color="brand"
+                            className={styles.batchCountLabel}
+                        >
+                            {isEn
+                                ? `${ws.activeSelectedIds.length} selected`
+                                : `已选 ${ws.activeSelectedIds.length} 项`}
+                        </Badge>
+                        <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<PlayRegular />}
+                            disabled={ws.batchBusy}
+                            onClick={() => void ws.handleBatchLaunchSelected()}
+                        >
+                            {t('批量启动', 'Launch')}
+                        </Button>
+                        <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<StopRegular />}
+                            disabled={ws.batchBusy}
+                            onClick={() => void ws.handleBatchStopSelected()}
+                        >
+                            {t('批量关闭', 'Stop')}
+                        </Button>
+                        <Menu positioning="below-start">
+                            <MenuTrigger disableButtonEnhancement>
+                                <Button
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<FolderSwapRegular />}
+                                    disabled={ws.batchBusy}
+                                >
+                                    {t('移动分组', 'Move Group')}
+                                </Button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                                <MenuList>
+                                    {allGroups.map((group) => (
+                                        <MenuItem
+                                            key={group}
+                                            onClick={() =>
+                                                void ws.handleBatchAction({
+                                                    action: 'moveGroup',
+                                                    groupName: group,
+                                                })
+                                            }
+                                        >
+                                            {group}
+                                        </MenuItem>
+                                    ))}
+                                </MenuList>
+                            </MenuPopover>
+                        </Menu>
+                        <Menu positioning="below-start">
+                            <MenuTrigger disableButtonEnhancement>
+                                <Button
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<GlobeRegular />}
+                                    disabled={ws.batchBusy}
+                                >
+                                    {t('切换代理', 'Assign Proxy')}
+                                </Button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                                <MenuList>
+                                    <MenuItem
+                                        onClick={() =>
+                                            void ws.handleBatchAction({
+                                                action: 'bindProxy',
+                                                proxyId: '',
+                                            })
+                                        }
+                                    >
+                                        {t('全局默认', 'Global Default')}
+                                    </MenuItem>
+                                    {managedProxies.map((proxy) => (
+                                        <MenuItem
+                                            key={proxy.id}
+                                            onClick={() =>
+                                                void ws.handleBatchAction({
+                                                    action: 'bindProxy',
+                                                    proxyId: proxy.id,
+                                                })
+                                            }
+                                        >
+                                            {proxy.name}
+                                        </MenuItem>
+                                    ))}
+                                </MenuList>
+                            </MenuPopover>
+                        </Menu>
+                        <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<DeleteRegular />}
+                            style={{ color: tokens.colorPaletteRedForeground1 }}
+                            disabled={ws.batchBusy}
+                            onClick={() =>
+                                void ws.handleBatchAction({ action: 'delete' })
+                            }
+                        >
+                            {t('移入回收站', 'Move to Trash')}
+                        </Button>
+                        <div style={{ flex: 1 }} />
+                        <Button
+                            size="small"
+                            appearance="transparent"
+                            icon={<DismissRegular />}
+                            disabled={ws.batchBusy}
+                            onClick={ws.clearSelection}
+                        >
+                            {t('取消选择', 'Clear')}
+                        </Button>
+                    </div>
+                )}
 
                 {loading && environments.length === 0 ? (
                     <div className={styles.emptyState}>
@@ -175,51 +333,57 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                         />
                     </div>
                 ) : ws.filtered.length === 0 ? (
-                    <div className={styles.emptyState}>
-                        <WindowMultipleRegular style={{ fontSize: '36px' }} />
-                        <span
-                            style={{
-                                fontSize: '14px',
-                                fontWeight: 600,
-                                color: tokens.colorNeutralForeground1,
-                            }}
-                        >
-                            {hasActiveFilters
-                                ? t('未找到匹配的环境', 'No matching environments')
-                                : t('还没有 Chrome 环境', 'No Chrome environments yet')}
-                        </span>
-                        <span style={{ fontSize: '12px' }}>
-                            {hasActiveFilters
-                                ? t(
-                                      '尝试调整搜索词、运行状态或标签筛选条件。',
-                                      'Try adjusting the search keyword, status, or tag filters.',
-                                  )
-                                : t(
-                                      '点击右上角“新建环境”创建第一个独立隔离的浏览器环境。',
-                                      'Click "New Environment" in the top right to create your first isolated browser profile.',
-                                  )}
-                        </span>
-                        {hasActiveFilters ? (
-                            <Button
-                                appearance="secondary"
-                                onClick={() => {
-                                    ws.setSearch('');
-                                    ws.setStatusFilter('all');
-                                    ws.setSelectedTags([]);
+                    !hasActiveFilters &&
+                    environments.length === 0 &&
+                    onNavigateComponents &&
+                    onNavigateProxies ? (
+                        <ZeroStateOnboardingCard
+                            hasAnyBrowserEngine={hasAnyBrowserEngine}
+                            hasPrivacyKernel={hasFingerprintKernel}
+                            proxyCount={managedProxies.length}
+                            onOpenComponents={onNavigateComponents}
+                            onOpenProxies={onNavigateProxies}
+                            onCreateProfile={onCreateClick}
+                        />
+                    ) : (
+                        <div className={styles.emptyState}>
+                            <WindowMultipleRegular style={{ fontSize: '36px' }} />
+                            <span
+                                style={{
+                                    fontSize: '14px',
+                                    fontWeight: 600,
+                                    color: tokens.colorNeutralForeground1,
                                 }}
                             >
-                                {t('清空筛选条件', 'Clear Filters')}
-                            </Button>
-                        ) : (
-                            <Button
-                                appearance="primary"
-                                icon={<AddRegular />}
-                                onClick={onCreateClick}
-                            >
-                                {t('新建环境', 'New Environment')}
-                            </Button>
-                        )}
-                    </div>
+                                {hasActiveFilters
+                                    ? t('未找到匹配的环境', 'No matching environments')
+                                    : t('还没有 Chrome 环境', 'No Chrome environments yet')}
+                            </span>
+                            <span style={{ fontSize: '12px' }}>
+                                {hasActiveFilters
+                                    ? t(
+                                          '尝试调整搜索词、运行状态或标签筛选条件。',
+                                          'Try adjusting the search keyword, status, or tag filters.',
+                                      )
+                                    : t(
+                                          '点击右上角“新建环境”创建第一个独立隔离的浏览器环境。',
+                                          'Click "New Environment" in the top right to create your first isolated browser profile.',
+                                      )}
+                            </span>
+                            {hasActiveFilters && (
+                                <Button
+                                    appearance="secondary"
+                                    onClick={() => {
+                                        ws.setSearch('');
+                                        ws.setStatusFilter('all');
+                                        ws.setSelectedTags([]);
+                                    }}
+                                >
+                                    {t('清空筛选条件', 'Clear Filters')}
+                                </Button>
+                            )}
+                        </div>
+                    )
                 ) : (
                     <div ref={ws.tableWrapRef} className={styles.tableWrap}>
                         <table
@@ -227,16 +391,39 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             aria-label={t('环境列表', 'Environments table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 368
+                                    ? 404
                                     : ws.nameWidth +
                                       ws.proxyWidth +
-                                      312 +
+                                      348 +
                                       (showGroupCol ? 88 : 0) +
                                       activeOptionalCols.length * 140,
                             }}
                         >
                             <thead className={styles.thead}>
                                 <tr>
+                                    <th
+                                        className={styles.th}
+                                        style={{
+                                            width: '36px',
+                                            paddingLeft: '14px',
+                                            paddingRight: '4px',
+                                        }}
+                                    >
+                                        <Checkbox
+                                            checked={
+                                                allFilteredChecked
+                                                    ? true
+                                                    : someFilteredChecked
+                                                      ? 'mixed'
+                                                      : false
+                                            }
+                                            aria-label={t(
+                                                '全选当前列表',
+                                                'Select all environments',
+                                            )}
+                                            onChange={ws.toggleSelectAllFiltered}
+                                        />
+                                    </th>
                                     <th
                                         className={styles.th}
                                         style={{
@@ -387,6 +574,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 styles={styles}
                                                 env={env}
                                                 selected={selected}
+                                                checked={ws.selectedIds.has(env.id)}
                                                 narrowWindow={narrowWindow}
                                                 showGroupCol={showGroupCol}
                                                 showProxyCol={showProxyCol}
@@ -410,6 +598,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                     env,
                                                     index,
                                                 )}
+                                                onToggleChecked={() =>
+                                                    ws.toggleSelectId(env.id)
+                                                }
                                                 onSelect={() =>
                                                     onSelectEnv(env.id)
                                                 }
@@ -494,8 +685,17 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     onSave={onUpdateEnvironment}
                     onRegenerateFingerprint={onRegenerateFingerprint}
                     onInspectProxyLogs={onInspectProxyLogs}
+                    onOpenCookieTransfer={(mode) =>
+                        ws.setCookieTransfer({ env: ws.selectedEnv!, mode })
+                    }
                 />
             )}
+
+            <CookieTransferDialog
+                env={ws.cookieTransfer?.env || null}
+                mode={ws.cookieTransfer?.mode || null}
+                onClose={() => ws.setCookieTransfer(null)}
+            />
 
             <EnvironmentsActionDialogs
                 styles={styles}

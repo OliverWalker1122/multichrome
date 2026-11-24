@@ -1,4 +1,7 @@
+import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {
     app,
     dialog,
@@ -12,8 +15,19 @@ import type { EnvironmentService } from '../services/environmentService.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
 import type { KernelService } from '../services/kernelService.js';
 import type { ProxyService } from '../services/proxyService.js';
+import type { BackupService } from '../services/backupService.js';
 import { compareDotVersions } from '../domain/kernelPolicy.js';
-import { fetchOfficialGitHubJson } from '../drivers/githubProxyTransport.js';
+import { validateBackupPassword } from '../domain/encryptedBackup.js';
+import { buildSanitizedSupportBundle } from '../domain/supportBundle.js';
+import {
+    parseSha256Sums,
+    selectPlatformReleaseAsset,
+} from '../domain/updateAssetPolicy.js';
+import {
+    fetchOfficialGitHubJson,
+    fetchOfficialGitHubText,
+    openOfficialGitHubStream,
+} from '../drivers/githubProxyTransport.js';
 import {
     sanitizeAppSettingsPayload,
     validateId,
@@ -31,6 +45,12 @@ export interface SystemIpcDeps {
     kernelManager: KernelService;
     proxyManager: ProxyService;
     chromeManager: EnvironmentService;
+    backupService: BackupService;
+    getAutomationStatus: () => {
+        enabled?: boolean;
+        port?: number;
+        running?: boolean;
+    };
     applicationLogs: {
         getLogs: () => unknown[];
         clearLogs: () => void;
@@ -51,6 +71,8 @@ export function registerSystemIpc({
     kernelManager,
     proxyManager,
     chromeManager,
+    backupService,
+    getAutomationStatus,
     applicationLogs,
     isEnglishLocale,
     onSettingsSaved,
@@ -400,15 +422,248 @@ export function registerSystemIpc({
             payload.html_url.startsWith(`${APP_REPO_URL}/`)
                 ? payload.html_url
                 : `${APP_REPO_URL}/releases`;
+        const { installer, checksumAsset } = selectPlatformReleaseAsset(
+            Array.isArray(payload.assets) ? payload.assets : [],
+            process.platform,
+            process.arch,
+        );
         return {
             currentVersion,
             latestVersion,
             hasUpdate: compareDotVersions(latestVersion, currentVersion) > 0,
             releaseUrl: htmlUrl,
+            canDownloadAsset: Boolean(installer && checksumAsset),
+            assetName: installer?.name,
+            assetSizeBytes: installer?.sizeBytes,
             publishedAt:
                 typeof payload.published_at === 'string'
                     ? payload.published_at
                     : undefined,
+        };
+    });
+
+    ipcMain.handle('app:download-update', async () => {
+        const mainWindow = getMainWindow();
+        if (!mainWindow) {
+            throw new Error('主窗口未初始化');
+        }
+        const isEn = isEnglishLocale();
+        const currentVersion = app.getVersion();
+        const globalProxy = settingsManager.getSettings().globalProxy;
+        const proxyAddress =
+            globalProxy?.enabled && globalProxy.address?.trim()
+                ? globalProxy.address.trim()
+                : undefined;
+
+        const payload = (await fetchOfficialGitHubJson(APP_RELEASES_API_URL, {
+            proxyAddress,
+            timeoutMs: 12000,
+            userAgent: `MultiChrome/${currentVersion}`,
+        })) as Record<string, unknown>;
+
+        const { installer, checksumAsset } = selectPlatformReleaseAsset(
+            Array.isArray(payload.assets) ? payload.assets : [],
+            process.platform,
+            process.arch,
+        );
+        if (!installer || !checksumAsset) {
+            throw new Error('当前平台暂无可自动校验的官方安装包，请前往 Releases 页面手动下载');
+        }
+
+        const sumsText = await fetchOfficialGitHubText(
+            checksumAsset.downloadUrl,
+            {
+                proxyAddress,
+                timeoutMs: 15000,
+                userAgent: `MultiChrome/${currentVersion}`,
+            },
+        );
+        const expectedSha256 = parseSha256Sums(sumsText, installer.name);
+
+        const saveRes = await dialog.showSaveDialog(mainWindow, {
+            title: isEn ? 'Save Official Installer' : '保存官方安装包',
+            defaultPath: path.join(app.getPath('downloads'), installer.name),
+        });
+        if (saveRes.canceled || !saveRes.filePath) {
+            return { canceled: true };
+        }
+
+        const tempFile = `${saveRes.filePath}.part-${Date.now()}`;
+        try {
+            const resStream = await openOfficialGitHubStream(
+                installer.downloadUrl,
+                {
+                    proxyAddress,
+                    timeoutMs: 60000,
+                    userAgent: `MultiChrome/${currentVersion}`,
+                },
+            );
+            const hash = crypto.createHash('sha256');
+            const writer = fs.createWriteStream(tempFile);
+            await new Promise<void>((resolve, reject) => {
+                resStream.on('data', (chunk: Buffer) => {
+                    hash.update(chunk);
+                });
+                resStream.on('error', reject);
+                writer.on('error', reject);
+                writer.on('finish', resolve);
+                resStream.pipe(writer);
+            });
+            const actualSha256 = hash.digest('hex').toLowerCase();
+            if (actualSha256 !== expectedSha256) {
+                throw new Error(
+                    `安装包 SHA-256 校验失败（期望 ${expectedSha256.slice(0, 12)}…，实际 ${actualSha256.slice(0, 12)}…），已中止安装`,
+                );
+            }
+            fs.renameSync(tempFile, saveRes.filePath);
+            shell.showItemInFolder(saveRes.filePath);
+            return {
+                canceled: false,
+                filePath: saveRes.filePath,
+                fileName: installer.name,
+                sha256: actualSha256,
+            };
+        } catch (error) {
+            try {
+                fs.rmSync(tempFile, { force: true });
+            } catch {
+                /* ignore */
+            }
+            throw error;
+        }
+    });
+
+    ipcMain.handle('app:export-diagnostics', async () => {
+        const mainWindow = getMainWindow();
+        if (!mainWindow) {
+            throw new Error('主窗口未初始化');
+        }
+        const isEn = isEnglishLocale();
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const saveRes = await dialog.showSaveDialog(mainWindow, {
+            title: isEn
+                ? 'Export Sanitized Diagnostics'
+                : '导出脱敏诊断报告',
+            defaultPath: path.join(
+                app.getPath('downloads'),
+                `multichrome-diagnostics-${stamp}.json`,
+            ),
+            filters: [{ name: 'JSON', extensions: ['json'] }],
+        });
+        if (saveRes.canceled || !saveRes.filePath) {
+            return { canceled: true };
+        }
+
+        const settings = settingsManager.getSettings();
+        const kernelStatus = getKernelStatusPayload();
+        const activeKernel = kernelManager.getActiveKernel();
+        const activeSingbox = kernelManager.getActiveSingbox();
+        const envs = await chromeManager.getAllEnvironments();
+        const deleted = await chromeManager.getDeletedEnvironments();
+        const proxies = proxyManager.list();
+
+        const bundle = buildSanitizedSupportBundle({
+            appVersion: app.getVersion(),
+            locale: settings.locale || 'en-US',
+            platform: process.platform,
+            arch: process.arch,
+            osRelease: os.release(),
+            electronVersion: process.versions.electron || '',
+            chromeVersion: process.versions.chrome || '',
+            nodeVersion: process.version,
+            dbIntegrity: chromeManager.checkDatabaseIntegrity(),
+            activeProfiles: envs.length,
+            deletedProfiles: deleted.length,
+            runningProfiles: chromeManager.getRunningEnvironmentSummary().count,
+            systemChromeAvailable: kernelStatus.systemChromeAvailable,
+            activePrivacyKernelVersion: activeKernel?.version || null,
+            activeSingboxVersion: activeSingbox?.version || '1.14.4',
+            proxies,
+            automation: getAutomationStatus(),
+            recentLogs: applicationLogs.getLogs(),
+        });
+
+        fs.writeFileSync(
+            saveRes.filePath,
+            JSON.stringify(bundle, null, 2),
+            'utf8',
+        );
+        shell.showItemInFolder(saveRes.filePath);
+        return {
+            canceled: false,
+            filePath: saveRes.filePath,
+        };
+    });
+
+    ipcMain.handle('backup:export', async (_, password: unknown) => {
+        const mainWindow = getMainWindow();
+        if (!mainWindow) {
+            throw new Error('主窗口未初始化');
+        }
+        const validPassword = validateBackupPassword(password);
+        const isEn = isEnglishLocale();
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const saveRes = await dialog.showSaveDialog(mainWindow, {
+            title: isEn ? 'Export Encrypted Backup' : '导出加密备份',
+            defaultPath: path.join(
+                app.getPath('downloads'),
+                `multichrome-backup-${stamp}.mcbackup`,
+            ),
+            filters: [
+                {
+                    name: isEn
+                        ? 'MultiChrome Encrypted Backup'
+                        : 'MultiChrome 加密备份',
+                    extensions: ['mcbackup'],
+                },
+            ],
+        });
+        if (saveRes.canceled || !saveRes.filePath) {
+            return { canceled: true };
+        }
+        const encryptedText = await backupService.exportEncryptedBackup(
+            validPassword,
+        );
+        fs.writeFileSync(saveRes.filePath, encryptedText, 'utf8');
+        shell.showItemInFolder(saveRes.filePath);
+        return {
+            canceled: false,
+            filePath: saveRes.filePath,
+        };
+    });
+
+    ipcMain.handle('backup:restore', async (_, password: unknown) => {
+        const mainWindow = getMainWindow();
+        if (!mainWindow) {
+            throw new Error('主窗口未初始化');
+        }
+        const validPassword = validateBackupPassword(password);
+        const isEn = isEnglishLocale();
+        const openRes = await dialog.showOpenDialog(mainWindow, {
+            title: isEn ? 'Select Encrypted Backup' : '选择加密备份文件',
+            properties: ['openFile'],
+            filters: [
+                {
+                    name: isEn
+                        ? 'MultiChrome Encrypted Backup'
+                        : 'MultiChrome 加密备份',
+                    extensions: ['mcbackup'],
+                },
+                { name: isEn ? 'All Files' : '所有文件', extensions: ['*'] },
+            ],
+        });
+        if (openRes.canceled || openRes.filePaths.length === 0) {
+            return { canceled: true };
+        }
+        const rawContent = fs.readFileSync(openRes.filePaths[0], 'utf8');
+        const summary = await backupService.restoreEncryptedBackup(
+            rawContent,
+            validPassword,
+        );
+        onSettingsSaved();
+        return {
+            canceled: false,
+            ...summary,
         };
     });
 

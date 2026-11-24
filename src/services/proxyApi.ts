@@ -72,10 +72,34 @@ export const proxyApi = {
     getEditor: async (
         id: string,
         asJson?: boolean,
-    ): Promise<{ mode: 'simple' | 'json'; config?: string }> => {
+    ): Promise<{
+        mode: 'simple' | 'json';
+        config?: string;
+        rotationUrl?: string;
+    }> => {
         const api = getElectronApi()?.proxies;
         if (!api) throw new Error('Proxy API unavailable');
         return api.getEditor(id, asJson);
+    },
+
+    rotateIp: async (
+        id: string,
+    ): Promise<{
+        ok: boolean;
+        statusCode: number;
+        exitInfo?: ProxyExitInfo;
+    }> => {
+        const fn = getElectronApi()?.proxies?.rotateIp;
+        if (!fn) throw new Error('Proxy API unavailable');
+        return fn(id);
+    },
+
+    batchRemove: async (
+        ids: string[],
+    ): Promise<{ removedCount: number; skippedInUseCount: number }> => {
+        const fn = getElectronApi()?.proxies?.batchRemove;
+        if (!fn) throw new Error('Proxy API unavailable');
+        return fn(ids);
     },
 
     getConfig: async (id: string, reveal?: boolean): Promise<ProxyConfigView> => {

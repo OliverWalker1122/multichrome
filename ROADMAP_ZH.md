@@ -22,21 +22,21 @@ MultiChrome 定位为 **开源、本地优先、Fail-Closed 代理防泄露、�
 - [x] **12. 标准 CDP 透传守卫与极简环境 MCP**：默认关闭，开启后仅监听 `127.0.0.1`（强制 `Host` 白名单并拒绝浏览器 `Origin` 请求防 DNS Rebinding），兼容 `@playwright/mcp`、`chrome-devtools-mcp` 与 Playwright/Puppeteer，内置 4 项环境编排 MCP（Streamable HTTP `/mcp` 与 `stdio` 桥接）。
 - [x] **13. 受控内核版本清单 & 已验证推荐升级提醒**：将 `fingerprint-chromium` 与 `sing-box` 允许版本抽离至 `electron/domain/kernelManifest.json` 受控白名单（强制 SHA-256 校验），并在有推荐升级时提示一键更新。
 - [x] **14. 标签（Tags）多维分类**：支持彩色标签编辑与 AND/OR 多标签组合筛选。
+- [x] **15. 环境多选批量操作 & 批量创建**：多选勾选批量启动、关闭、移分组、绑定代理、添加标签与移入回收站；支持前缀编号一次批量新建最多 50 个环境并按单代理或顺序轮询分配。
+- [x] **16. 多窗口一键网格平铺**：按主显示器可用工作区自动计算网格并通过原生 CDP `Browser.setWindowBounds` 一键平铺所有运行中窗口。
+- [x] **17. 代理一键换 IP（Rotation Webhook URL）**：为 4G/5G 移动代理与动态住宅代理提供加密存储的换 IP Webhook 链接，一键触发后自动强制重测出口 IP 与地区。
+- [x] **18. 本地端到端加密（E2EE）备份与迁移包（`.mcbackup`）**：基于 `scrypt + AES-256-GCM` 使用密码本地加密导出与恢复便携设置、托管代理配置、环境元数据与 32-bit 指纹种子（零云端上传）。
+- [x] **19. 原生零扩展 Cookie 导入与导出**：通过私有 loopback CDP（`Storage.getCookies` / `Storage.setCookies`）直接导入导出标准 JSON 与 Netscape 格式 Cookie。
+- [x] **20. 脱敏诊断报告与 SHA-256 校验应用更新下载**：一键导出脱敏 JSON 诊断包；支持在「设置 → 关于」直接下载官方安装包并强制核对 `SHA256SUMS.txt` 与 SLSA 构建溯源证明。
 
 ---
 
 ## 后续规划（Backlog）
 
-### 批量效率与窗口控制
-- [ ] **环境多选批量操作 & 批量创建**：多选勾选批量启动、关闭、移分组、换代理、移入回收站；支持前缀编号批量新建环境并按序分配代理。
-- [ ] **多窗口一键网格平铺 & 主从同步器（Synchronizer）**：按屏幕分辨率自动平铺多开窗口；进阶支持主窗口点击/滚动/输入同步到选定从窗口（带随机微延迟）。
+### 窗口协同与跨机锁
+- [ ] **主从窗口同步器（Synchronizer）**：将主窗口点击、滚动与输入带随机微延迟同步到选定从窗口。
+- [ ] **远程同步防双开冲突锁**：数据目录放于 WebDAV / Syncthing 同步盘时通过锁文件避免多设备同时打开同一环境导致 Cookie 损坏。
 
-### 代理进阶与跨机迁移
-- [ ] **代理一键换 IP（Rotation Webhook URL）**：为 4G/5G 移动代理与动态住宅代理提供可选换 IP 链接，一键触发刷新并自动重新探测出口 IP 与地区。
-- [ ] **本地端到端加密（E2EE）跨机迁移包**：将 `环境元数据 + 确定性指纹 Seed + Profile 目录` 打包为 AES-256 密码加密归档，支持离线迁移或配合 WebDAV / Syncthing 自托管同步（零厂商云存储）。
-- [ ] **远程同步防双开冲突锁**：数据目录放于同步盘时通过锁文件避免多设备同时打开同一环境导致 Cookie 损坏。
-
-### 行为拟真与运维辅助
-- [ ] **Cookie 导入 / 导出**：通过 CDP 导入导出标准 JSON / Netscape 格式 Cookie。
+### 行为拟真辅助
 - [ ] **Cookie Robot（新环境预热）**：按自定义常见站点列表自动浏览预热，为全新 Profile 建立自然 Cookie 与历史轨迹。
 - [ ] **拟人化粘贴（Paste as Human）**：通过 CDP 模拟带随机间隔的逐字输入，规避严格表单对瞬间粘贴的风控。

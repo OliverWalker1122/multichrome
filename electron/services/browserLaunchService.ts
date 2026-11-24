@@ -36,6 +36,12 @@ import {
     normalizeDefaultFingerprintSettings,
 } from '../domain/fingerprintProfile.js';
 import { buildMemorySaverChromiumArgs } from '../domain/processMetrics.js';
+import { computeWindowGridBounds } from '../domain/windowTiling.js';
+import {
+    parseCookiesInput,
+    serializeCookiesJson,
+    serializeCookiesNetscape,
+} from '../domain/cookieCodec.js';
 import { resolveEffectiveStartupUrl } from '../domain/profileTemplatePolicy.js';
 import {
     resolveEffectiveLanguage,
@@ -1416,6 +1422,86 @@ export class BrowserLaunchService {
             log.error('关闭环境失败:', error);
             throw error;
         }
+    }
+
+    public async exportEnvironmentCookies(
+        id: string,
+        format: 'json' | 'netscape' = 'json',
+    ): Promise<{ count: number; format: 'json' | 'netscape'; content: string }> {
+        const procRecord = this.runningProcesses.get(id);
+        if (!procRecord) {
+            throw new Error('请先启动该浏览器环境后再导出 Cookie');
+        }
+        const debugPort =
+            procRecord.debugPort || this.cdpManager.getConnectionInfo(id)?.debugPort;
+        if (!debugPort) {
+            throw new Error('未能获取该环境的原生 CDP 通道');
+        }
+        const rawCookies = await this.cdpManager.getBrowserCookies(debugPort);
+        const safeFormat = format === 'netscape' ? 'netscape' : 'json';
+        const content =
+            safeFormat === 'netscape'
+                ? serializeCookiesNetscape(rawCookies)
+                : serializeCookiesJson(rawCookies);
+        return {
+            count: rawCookies.length,
+            format: safeFormat,
+            content,
+        };
+    }
+
+    public async importEnvironmentCookies(
+        id: string,
+        rawText: string,
+    ): Promise<{ importedCount: number }> {
+        const procRecord = this.runningProcesses.get(id);
+        if (!procRecord) {
+            throw new Error('请先启动该浏览器环境后再导入 Cookie');
+        }
+        const debugPort =
+            procRecord.debugPort || this.cdpManager.getConnectionInfo(id)?.debugPort;
+        if (!debugPort) {
+            throw new Error('未能获取该环境的原生 CDP 通道');
+        }
+        const parsed = parseCookiesInput(rawText);
+        const importedCount = await this.cdpManager.setBrowserCookies(
+            debugPort,
+            parsed,
+        );
+        return { importedCount };
+    }
+
+    public async tileRunningWindows(workArea: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }): Promise<{ tiledCount: number }> {
+        const entries = Array.from(this.runningProcesses.values())
+            .filter((item) => item.debugPort && item.debugPort > 0)
+            .sort((a, b) => a.launchedAt - b.launchedAt);
+        if (entries.length === 0) {
+            return { tiledCount: 0 };
+        }
+        const gridBounds = computeWindowGridBounds(entries.length, workArea);
+        let tiledCount = 0;
+        for (let i = 0; i < entries.length; i += 1) {
+            const port = entries[i].debugPort;
+            if (!port) continue;
+            try {
+                const ok = await this.cdpManager.setWindowBoundsForPort(
+                    port,
+                    gridBounds[i],
+                );
+                if (ok) tiledCount += 1;
+            } catch (err) {
+                log.warn(
+                    `[${entries[i].envId.substring(0, 8)}] 窗口排列跳过:`,
+                    err,
+                );
+            }
+        }
+        return { tiledCount };
     }
 
     public async closeAllEnvironments(): Promise<{

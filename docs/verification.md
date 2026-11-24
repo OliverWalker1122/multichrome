@@ -29,4 +29,4 @@ Audited via `npm run audit:live -- --proxy="<ProxyName>"` separately for the **C
 ## 3. CI & Automated Releases
 
 - **Continuous Integration ([ci.yml](../.github/workflows/ci.yml))**: Runs `npm run check`, `npm run lint`, `npm run prepare:singbox`, `npm test`, and `npm run build` on every push to `main` and every pull request, and updates test status badges.
-- **Release Pipeline ([release.yml](../.github/workflows/release.yml))**: Pushing a `v*` tag matching `package.json` (`git tag -a v1.5.0 -m "MultiChrome v1.5.0" && git push origin v1.5.0`) runs pre-release checks, builds Windows (`.exe`), macOS (`.dmg` / `.zip`), and Linux (`.AppImage` / `.deb`) installers in parallel, generates `SHA256SUMS.txt`, and publishes to GitHub Releases.
+- **Release Pipeline ([release.yml](../.github/workflows/release.yml))**: Pushing a `v*` tag matching `package.json` (`git tag -a v1.6.0 -m "MultiChrome v1.6.0" && git push origin v1.6.0`) runs pre-release checks, builds Windows (`.exe`), macOS (`.dmg` / `.zip`), and Linux (`.AppImage` / `.deb`) installers in parallel, generates `SHA256SUMS.txt` + SLSA build provenance attestations, and publishes to GitHub Releases.

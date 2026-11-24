@@ -45,6 +45,30 @@ export const systemApi = {
         return fn();
     },
 
+    downloadUpdate: async () => {
+        const fn = getElectronApi()?.app?.downloadUpdate;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn();
+    },
+
+    exportDiagnostics: async () => {
+        const fn = getElectronApi()?.app?.exportDiagnostics;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn();
+    },
+
+    exportBackup: async (password: string) => {
+        const fn = getElectronApi()?.app?.exportBackup;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(password);
+    },
+
+    restoreBackup: async (password: string) => {
+        const fn = getElectronApi()?.app?.restoreBackup;
+        if (!fn) throw new Error('Electron API failed to load');
+        return fn(password);
+    },
+
     setTheme: async (theme: ThemeMode, isDark: boolean): Promise<boolean> => {
         const fn = getElectronApi()?.app?.setTheme;
         if (!fn) return false;

@@ -8,6 +8,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   # 1. 发布前强制校验：版本号一致、类型检查、Lint、单元与集成测试
@@ -85,7 +87,7 @@ jobs:
   build-macos:
     name: Build macOS (arm64)
     needs: verify
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
 
@@ -174,6 +176,17 @@ jobs:
           ls -la
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: |
+            release-assets/*.exe
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.AppImage
+            release-assets/*.deb
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3

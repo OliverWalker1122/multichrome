@@ -48,4 +48,27 @@ export function registerProxyIpc({ ipcMain, integration, validateId }) {
             manager.clearLogs(id ? validateId(id) : undefined),
         ),
     );
+    ipcMain.handle('proxies:rotate-ip', (_, id) =>
+        manager.rotateProxyIp(validateId(id)),
+    );
+    ipcMain.handle('proxies:batch-remove', (_, ids) =>
+        integration.run(async () => {
+            if (!Array.isArray(ids) || ids.length === 0) {
+                throw new Error('请至少选择一个代理');
+            }
+            let removedCount = 0;
+            let skippedInUseCount = 0;
+            for (const rawId of ids) {
+                const validId = validateId(rawId);
+                try {
+                    await integration.assertProxyUnused(validId, true);
+                    await manager.remove(validId);
+                    removedCount += 1;
+                } catch {
+                    skippedInUseCount += 1;
+                }
+            }
+            return { removedCount, skippedInUseCount };
+        }),
+    );
 }

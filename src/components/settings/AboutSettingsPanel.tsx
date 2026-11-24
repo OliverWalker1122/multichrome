@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
 import { Button, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import {
+    ArrowDownloadRegular,
     ArrowSyncRegular,
+    DocumentTextRegular,
     OpenRegular,
     StarRegular,
 } from '@fluentui/react-icons';
+import type { AppUpdateCheckResult } from '../../types';
 import { useNotification } from '../../contexts/NotificationContext';
 import { translateBackendMessage, useI18n } from '../../i18n';
 import { systemApi } from '../../services';
@@ -29,12 +32,10 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
     const isLinux = hostPlatform === 'linux';
 
     const [checkingUpdate, setCheckingUpdate] = useState(false);
-    const [updateResult, setUpdateResult] = useState<{
-        currentVersion: string;
-        latestVersion: string;
-        hasUpdate: boolean;
-        releaseUrl: string;
-    } | null>(null);
+    const [downloadingUpdate, setDownloadingUpdate] = useState(false);
+    const [exportingDiag, setExportingDiag] = useState(false);
+    const [updateResult, setUpdateResult] =
+        useState<AppUpdateCheckResult | null>(null);
     const [updateError, setUpdateError] = useState('');
 
     const handleOpenRepo = async (
@@ -70,6 +71,46 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
         }
     };
 
+    const handleDownloadInstaller = async () => {
+        if (downloadingUpdate) return;
+        try {
+            setDownloadingUpdate(true);
+            setUpdateError('');
+            const res = await systemApi.downloadUpdate();
+            if (!res.canceled) {
+                const digestHint = res.sha256 ? res.sha256.slice(0, 12) : '';
+                showNotification(
+                    'success',
+                    isEn
+                        ? `Verified installer saved${digestHint ? ` (SHA-256 ${digestHint}…)` : ''}`
+                        : `已完成 SHA-256 校验并保存安装包${digestHint ? `（${digestHint}…）` : ''}`,
+                );
+            }
+        } catch (err) {
+            setUpdateError(cleanIpcError(err, locale));
+        } finally {
+            setDownloadingUpdate(false);
+        }
+    };
+
+    const handleExportDiagnostics = async () => {
+        if (exportingDiag) return;
+        try {
+            setExportingDiag(true);
+            const res = await systemApi.exportDiagnostics();
+            if (!res.canceled) {
+                showNotification(
+                    'success',
+                    t('脱敏诊断报告已导出', 'Sanitized diagnostics exported'),
+                );
+            }
+        } catch (err) {
+            showNotification('error', cleanIpcError(err, locale));
+        } finally {
+            setExportingDiag(false);
+        }
+    };
+
     return (
         <div className={styles.card}>
             <div className={styles.cardHeader}>
@@ -88,11 +129,20 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                 <div className={styles.componentRight}>
                     <Button
                         type="button"
-                        appearance="outline"
+                        appearance="subtle"
                         icon={<StarRegular />}
                         onClick={() => void handleOpenRepo()}
                     >
                         GitHub Star
+                    </Button>
+                    <Button
+                        type="button"
+                        appearance="subtle"
+                        disabled={exportingDiag}
+                        icon={<DocumentTextRegular />}
+                        onClick={() => void handleExportDiagnostics()}
+                    >
+                        {t('导出诊断报告', 'Export Diagnostics')}
                     </Button>
                     <Button
                         type="button"
@@ -133,19 +183,59 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                                       : `当前已是最新版本（v${updateResult.currentVersion}）`}
                             </span>
                             {updateResult.hasUpdate && (
-                                <Button
-                                    type="button"
-                                    size="small"
-                                    appearance="primary"
-                                    icon={<OpenRegular />}
-                                    onClick={() =>
-                                        void handleOpenRepo(
-                                            updateResult.releaseUrl,
-                                        )
-                                    }
-                                >
-                                    {t('前往下载', 'Download')}
-                                </Button>
+                                <div className={styles.componentRight}>
+                                    {updateResult.canDownloadAsset ? (
+                                        <>
+                                            <Button
+                                                type="button"
+                                                size="small"
+                                                appearance="subtle"
+                                                icon={<OpenRegular />}
+                                                onClick={() =>
+                                                    void handleOpenRepo(
+                                                        updateResult.releaseUrl,
+                                                    )
+                                                }
+                                            >
+                                                {t('查看详情', 'Release Notes')}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="small"
+                                                appearance="primary"
+                                                disabled={downloadingUpdate}
+                                                icon={<ArrowDownloadRegular />}
+                                                onClick={() =>
+                                                    void handleDownloadInstaller()
+                                                }
+                                            >
+                                                {downloadingUpdate
+                                                    ? t(
+                                                          '校验下载中…',
+                                                          'Verifying…',
+                                                      )
+                                                    : t(
+                                                          '下载安装包',
+                                                          'Download Installer',
+                                                      )}
+                                            </Button>
+                                        </>
+                                    ) : (
+                                        <Button
+                                            type="button"
+                                            size="small"
+                                            appearance="primary"
+                                            icon={<OpenRegular />}
+                                            onClick={() =>
+                                                void handleOpenRepo(
+                                                    updateResult.releaseUrl,
+                                                )
+                                            }
+                                        >
+                                            {t('前往下载', 'Download')}
+                                        </Button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </MessageBarBody>
@@ -159,7 +249,7 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                     {t('当前版本', 'Version')}
                 </span>
                 <span className={styles.infoVal}>
-                    v{appVersion || '1.5.0'}
+                    v{appVersion || '1.6.0'}
                 </span>
 
                 <span className={styles.infoKey}>

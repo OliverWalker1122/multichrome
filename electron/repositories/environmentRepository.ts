@@ -158,6 +158,16 @@ export class EnvironmentRepository {
         this.binaryStore.set('chromeExecutablePath', executablePath);
     }
 
+    public checkIntegrity(): string {
+        try {
+            const result = this.db.pragma('integrity_check', { simple: true });
+            return String(result || 'unknown');
+        } catch (error) {
+            log.warn('SQLite integrity_check 失败:', error);
+            return 'error';
+        }
+    }
+
     public close(): void {
         try {
             if (this.db && this.db.open) {

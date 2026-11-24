@@ -1,6 +1,7 @@
 import React from 'react';
 import {
     Button,
+    Checkbox,
     Menu,
     MenuDivider,
     MenuItem,
@@ -55,10 +56,12 @@ export interface ProxyTableRowProps {
     proxy: ManagedProxy;
     assigned: ChromeEnvironment[];
     selected: boolean;
+    checked: boolean;
     narrowWindow: boolean;
     busy: string;
     refreshingExit: boolean;
     selectionRowProps: React.HTMLAttributes<HTMLTableRowElement>;
+    onToggleChecked: () => void;
     onSelect: () => void;
     onOpenDetails: () => void;
     onOpenContextMenu: (event: React.MouseEvent) => void;
@@ -76,10 +79,12 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
     proxy,
     assigned,
     selected,
+    checked,
     narrowWindow,
     busy,
     refreshingExit,
     selectionRowProps,
+    onToggleChecked,
     onSelect,
     onOpenDetails,
     onOpenContextMenu,
@@ -109,6 +114,21 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                 onOpenDetails();
             }}
         >
+            <td
+                className={styles.td}
+                style={{ width: '36px', paddingLeft: '14px', paddingRight: '4px' }}
+                onClick={(event) => event.stopPropagation()}
+            >
+                <Checkbox
+                    checked={checked}
+                    aria-label={
+                        isEn
+                            ? `Select proxy ${proxy.name}`
+                            : `选择代理 ${proxy.name}`
+                    }
+                    onChange={onToggleChecked}
+                />
+            </td>
             <td className={styles.td}>
                 <div className={styles.nameTextWrap}>
                     <span className={styles.namePrimary} title={proxy.name}>

@@ -23,20 +23,34 @@
 
 MultiChrome 是一款基于 Electron 与 Fluent UI 构建的桌面端浏览器环境管理器，用于在一台设备上隔离并管理多个独立的浏览器配置、网络代理与运行环境。所有配置与凭据均保存在本地，不依赖云端服务。应用默认英文界面，可在顶栏或设置页一键切换为简体中文。
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png" />
+    <img src="docs/images/overview-zh.png" alt="MultiChrome 工作台总览" width="100%" />
+  </picture>
+</p>
+
 ## 主要功能
 
 - **双浏览器引擎支持**：支持按环境选择系统官方 Google Chrome，或按需下载的开源 `fingerprint-chromium` C++ 隐私指纹内核，默认纯原生零扩展、零 JS Hook 隐匿。
-- **独立代理隔离与多协议导入**：基于 `sing-box` 提供托管代理管理，支持 `http`/`https`/`socks5` 与 `vless://`、`vmess://`、`trojan://`、`ss://`、`hy2://`、`hysteria2://`、`tuic://` 分享链接及批量导入；提供单飞 HTTPS 出口测活与时区预解析、多环境复用查重提醒、REALITY/TLS 错误诊断，以及休眠恢复/长时间闲置/异常后启动前自动重建通道；代理异常时强制 Fail-Closed 阻断直连回退。
-- **环境一致性检查**：支持根据代理出口自动对齐时区、语言与地理位置，提供启动前「防呆一致性护栏」与一键健康自检面板。
-- **多环境生命周期与桌面体验**：采用 Windows 11 Fluent 2 亚克力毛玻璃界面，支持醒目的一键启动控件、分组色标与重命名、运行状态筛选、多标签分类、环境克隆、30 天回收站保护、运行态内存统计、缓存清理、书签/扩展模板分发与按页记忆的日志抽屉。
+- **独立代理隔离与换 IP**：基于 `sing-box` 提供托管代理管理，支持 `http`/`https`/`socks5` 与 `vless://`、`vmess://`、`trojan://`、`ss://`、`hy2://`、`hysteria2://`、`tuic://` 分享链接及批量导入；支持加密存储换 IP Webhook 链接（一键换 IP 并自动重测出口）、单飞 HTTPS 出口测活与时区预解析、多环境复用查重提醒、REALITY/TLS 错误诊断，以及休眠恢复/异常后自动重建通道；代理异常时强制 Fail-Closed 阻断直连回退。
+- **环境一致性与原生会话工具**：支持根据代理出口自动对齐时区、语言与地理位置，提供启动前防呆护栏、一键健康自检、原生零扩展 CDP Cookie 导入/导出（JSON 与 Netscape）以及运行中窗口一键宫格平铺。
+- **批量生产力与端到端加密备份**：支持前缀编号批量创建最多 50 个环境（自动分配独立指纹种子与顺序/单代理）、多选批量启动/关闭/移分组/换代理/加标签/回收站、基于 `scrypt + AES-256-GCM` 的 `.mcbackup` 本地加密备份与恢复、30 天回收站、实时内存统计与缓存清理。
 - **标准 CDP 守卫与 MCP 接入**：内置默认关闭的本地 `127.0.0.1` 受保护 CDP 入口（默认端口 `18922`，强制 `Host` 白名单与 `Origin` 拦截防 DNS Rebinding）与 4 项极简环境编排 MCP（Streamable HTTP `/mcp` 与 `stdio` 桥接），100% 兼容 `@playwright/mcp`、`chrome-devtools-mcp`、Playwright 与 Puppeteer，自动忽略外部对窗口尺寸、UA、语言与时区的误覆盖，拦截误创建无痕上下文并在代理断开时同步断开 CDP。
-- **全本地存储与双语界面**：代理凭据经系统安全存储加密保存，内置实时外联日志审计，默认英文并支持一键切换简体中文，适配 Windows、macOS 与 Linux。
+- **全本地核验与双语体验**：代理凭据经系统安全存储加密保存，支持导出脱敏诊断报告与 SHA-256 校验更新下载；内置实时外联日志审计，默认英文并支持一键切换简体中文，适配 Windows、macOS 与 Linux。
 
 ## 安装与使用
 
 从 [Releases](https://github.com/OliverWalker1122/multichrome/releases) 下载对应平台安装包即可使用。应用内置运行环境，无需额外安装框架或运行库。
 
 > 首次打开提示：本项目未购买商业代码签名证书。Windows 出现 SmartScreen 提示时点击「更多信息 → 仍要运行」；macOS 若提示无法验证开发者，可在「系统设置 → 隐私与安全性」中允许打开，或执行 `xattr -cr /Applications/MultiChrome.app`。
+
+可通过 GitHub Release 提供的 `SHA256SUMS.txt` 与 SLSA 构建溯源证明校验下载产物完整性：
+
+```bash
+sha256sum -c SHA256SUMS.txt
+gh attestation verify <downloaded-installer> --repo OliverWalker1122/multichrome
+```
 
 如需托管代理或自定义指纹内核，可在应用内 **「设置 → 组件」** 中按需从官方 GitHub Releases 下载并校验，或手动导入本地构建版本。
 
@@ -60,6 +74,7 @@ MultiChrome 提供四层验证体系（详见 [docs/verification_zh.md](docs/ver
 
 ## 文档
 
+- [更新日志](CHANGELOG.md) — 版本发布历史与新增特性（`v1.6.0`）
 - [架构与核心机制](docs/architecture_zh.md) ([English](docs/architecture.md)) — 双引擎设计、Fail-Closed 代理策略、供应链校验与自底向上分层结构
 - [测试体系与平台核验](docs/verification_zh.md) ([English](docs/verification.md)) — 四层测试说明、外部检测平台实测记录与自动发布流程
 - [开发与构建指南](docs/development_zh.md) ([English](docs/development.md)) — 本地开发、测试命令与三端打包说明

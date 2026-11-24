@@ -3,6 +3,7 @@ import type { EnvironmentService } from '../services/environmentService.js';
 import type { ProxyService } from '../services/proxyService.js';
 import type { ProxyCoordinator } from '../services/proxyCoordinator.js';
 import type { KernelService } from '../services/kernelService.js';
+import type { BackupService } from '../services/backupService.js';
 import type { SettingsManager } from '../repositories/settingsRepository.js';
 import { registerAutomationIpc } from './automationIpc.js';
 import { registerEnvironmentIpc } from './environmentIpc.js';
@@ -24,6 +25,7 @@ export interface RegisterAllIpcDeps {
     proxyService: ProxyService;
     proxyCoordinator: ProxyCoordinator;
     kernelService: KernelService;
+    backupService: BackupService;
     settingsRepository: SettingsManager;
     automationService: AutomationIpcServicePort;
     applicationLogs: {
@@ -62,6 +64,13 @@ export function registerAllIpcHandlers(deps: RegisterAllIpcDeps): void {
         kernelManager: deps.kernelService,
         proxyManager: deps.proxyService,
         chromeManager: deps.environmentService,
+        backupService: deps.backupService,
+        getAutomationStatus: () =>
+            deps.automationService.getStatus() as {
+                enabled?: boolean;
+                port?: number;
+                running?: boolean;
+            },
         applicationLogs: deps.applicationLogs,
         isEnglishLocale: deps.isEnglishLocale,
         onSettingsSaved: deps.onSettingsSaved,

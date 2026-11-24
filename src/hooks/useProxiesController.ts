@@ -17,6 +17,10 @@ import { useVirtualRows } from './useVirtualRows';
 
 export type ProxySortKey = 'original' | 'name' | 'status';
 
+function activeSelectedIdsIncludes(id: string, list: string[]): boolean {
+    return list.includes(id);
+}
+
 function errorMessage(error: unknown): string {
     return error instanceof Error
         ? error.message.replace(
@@ -98,6 +102,9 @@ export function useProxiesController({
     const [assignProxy, setAssignProxy] = useState<ManagedProxy | null>(null);
     const [assignEnvironmentId, setAssignEnvironmentId] = useState('');
     const [deleteProxy, setDeleteProxy] = useState<ManagedProxy | null>(null);
+    const [selectedProxyIds, setSelectedProxyIds] = useState<Set<string>>(
+        new Set(),
+    );
     const [batchImportOpen, setBatchImportOpen] = useState(false);
     const [batchText, setBatchText] = useState('');
     const [batchPrefix, setBatchPrefix] = useState(() => tr('代理', 'Proxy'));
@@ -358,6 +365,7 @@ export function useProxiesController({
                 username: proxy.username,
                 hasPassword: details.mode === 'simple' && proxy.hasPassword,
                 config: details.config || '',
+                rotationUrl: details.rotationUrl || '',
             });
         } catch (error) {
             showNotification('error', errorMessage(error));
@@ -373,6 +381,7 @@ export function useProxiesController({
             ...createEmptyProxyEditor(),
             id: editor.id,
             name: editor.name,
+            rotationUrl: editor.rotationUrl,
             mode,
         };
         if (mode !== 'json' || !editor.id) {
@@ -382,7 +391,11 @@ export function useProxiesController({
         setBusy('convert');
         try {
             const details = await proxyApi.getEditor(editor.id, true);
-            setEditor({ ...next, config: details.config || '' });
+            setEditor({
+                ...next,
+                config: details.config || '',
+                rotationUrl: details.rotationUrl || editor.rotationUrl,
+            });
         } catch (error) {
             setFormError(errorMessage(error));
         } finally {
@@ -397,7 +410,11 @@ export function useProxiesController({
         setBusy('save');
 
         let input: ProxyInput;
-        const identity = { id: editor.id, name: editor.name.trim() };
+        const identity = {
+            id: editor.id,
+            name: editor.name.trim(),
+            rotationUrl: editor.rotationUrl.trim(),
+        };
         if (editor.mode === 'line') {
             input = { ...identity, mode: 'line', line: editor.line.trim() };
         } else if (editor.mode === 'json') {
@@ -540,6 +557,69 @@ export function useProxiesController({
         });
     };
 
+    const activeSelectedProxyIds = useMemo(() => {
+        const existing = new Set(proxies.map((p) => p.id));
+        return Array.from(selectedProxyIds).filter((id) => existing.has(id));
+    }, [selectedProxyIds, proxies]);
+
+    const toggleSelectProxyId = (id: string) => {
+        setSelectedProxyIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAllFilteredProxies = () => {
+        const filteredIds = filtered.map((p) => p.id);
+        const allChecked =
+            filteredIds.length > 0 &&
+            filteredIds.every((id) => selectedProxyIds.has(id));
+        setSelectedProxyIds((prev) => {
+            const next = new Set(prev);
+            filteredIds.forEach((id) => {
+                if (allChecked) next.delete(id);
+                else next.add(id);
+            });
+            return next;
+        });
+    };
+
+    const clearSelectedProxyIds = () => setSelectedProxyIds(new Set());
+
+    const handleBatchRemoveSelected = () => {
+        if (activeSelectedProxyIds.length === 0) return;
+        void runAction('batch-remove', async () => {
+            const res = await proxyApi.batchRemove(activeSelectedProxyIds);
+            clearSelectedProxyIds();
+            if (
+                selectedProxyId &&
+                activeSelectedIdsIncludes(selectedProxyId, activeSelectedProxyIds)
+            ) {
+                onSelectProxy(null);
+            }
+            showNotification(
+                res.skippedInUseCount > 0 ? 'warning' : 'success',
+                isEn
+                    ? `Removed ${res.removedCount} proxy(ies)${res.skippedInUseCount > 0 ? ` (${res.skippedInUseCount} active or bound skipped)` : ''}`
+                    : `已删除 ${res.removedCount} 个代理${res.skippedInUseCount > 0 ? `（跳过 ${res.skippedInUseCount} 个运行中或已绑定代理）` : ''}`,
+            );
+        });
+    };
+
+    const handleRotateProxyIp = (proxy: ManagedProxy) => {
+        void runAction(`rotate:${proxy.id}`, async () => {
+            await proxyApi.rotateIp(proxy.id);
+            showNotification(
+                'success',
+                isEn
+                    ? `Triggered IP rotation for "${proxy.name}"`
+                    : `已触发「${proxy.name}」更换出口 IP`,
+            );
+        });
+    };
+
     return {
         search,
         setSearch,
@@ -564,6 +644,13 @@ export function useProxiesController({
         envBindingsByProxy,
         handleToggleService,
         refreshExitInfo,
+        handleRotateProxyIp,
+        selectedProxyIds,
+        activeSelectedProxyIds,
+        toggleSelectProxyId,
+        toggleSelectAllFilteredProxies,
+        clearSelectedProxyIds,
+        handleBatchRemoveSelected,
         editor,
         setEditor,
         formError,

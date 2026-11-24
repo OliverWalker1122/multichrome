@@ -28,6 +28,7 @@ import {
 } from './services/automationService.js';
 import { EnvironmentService } from './services/environmentService.js';
 import { KernelService } from './services/kernelService.js';
+import { BackupService } from './services/backupService.js';
 import { ProxyCoordinator } from './services/proxyCoordinator.js';
 import { ProxyService } from './services/proxyService.js';
 import { AutomationServer } from './transport/automationServer.js';
@@ -128,6 +129,13 @@ const environmentService = new EnvironmentService(
 const proxyCoordinator = new ProxyCoordinator({
     proxyManager: proxyService,
     chromeManager: environmentService,
+});
+
+const backupService = new BackupService({
+    environmentService,
+    proxyService,
+    settingsRepository,
+    getAppVersion: () => app.getVersion(),
 });
 
 // ---------------------------------------------------------------------------
@@ -240,6 +248,7 @@ app.whenReady().then(() => {
         proxyService,
         proxyCoordinator,
         kernelService,
+        backupService,
         settingsRepository,
         automationService,
         applicationLogs,

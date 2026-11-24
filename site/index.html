@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MultiChrome — Local-First Isolated Multi-Profile Browser</title>
+    <meta
+      name="description"
+      content="Open-source, local-first desktop manager for isolated Chrome & C++ privacy browser profiles, fail-closed sing-box proxy routing, E2EE offline backups, and guarded CDP automation."
+    />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <style>
+      :root {
+        --bg: #f6f8fc;
+        --surface: #ffffff;
+        --surface-muted: #eef2f8;
+        --border: #dde3ee;
+        --text: #0f172a;
+        --text-muted: #475569;
+        --brand: #1877f2;
+        --brand-hover: #1464cc;
+        --brand-ink: #ffffff;
+        --pill-bg: #e7f0fd;
+        --pill-text: #1256b5;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f131c;
+          --surface: #171d29;
+          --surface-muted: #1e2636;
+          --border: #283246;
+          --text: #f1f5f9;
+          --text-muted: #94a3b8;
+          --brand: #3b8ef5;
+          --brand-hover: #2579e8;
+          --brand-ink: #ffffff;
+          --pill-bg: #1a2c48;
+          --pill-text: #8ec0ff;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 36px 24px 64px;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 56px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        text-decoration: none;
+        color: var(--text);
+        font-weight: 700;
+        font-size: 18px;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+
+      .nav-links a {
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .nav-links a:hover {
+        color: var(--text);
+      }
+
+      .hero {
+        text-align: center;
+        max-width: 780px;
+        margin: 0 auto 40px;
+      }
+
+      .pill {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: var(--pill-bg);
+        color: var(--pill-text);
+        font-size: 12.5px;
+        font-weight: 600;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0 0 16px;
+        font-size: clamp(32px, 5vw, 48px);
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+
+      .subtitle {
+        margin: 0 auto 28px;
+        font-size: 17px;
+        color: var(--text-muted);
+        max-width: 650px;
+      }
+
+      .actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        padding: 0 22px;
+        border-radius: 10px;
+        font-size: 14.5px;
+        font-weight: 600;
+        text-decoration: none;
+        border: 1px solid var(--border);
+      }
+
+      .btn-primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: var(--brand-ink);
+      }
+
+      .btn-primary:hover {
+        background: var(--brand-hover);
+      }
+
+      .btn-secondary {
+        background: var(--surface);
+        color: var(--text);
+      }
+
+      .btn-secondary:hover {
+        background: var(--surface-muted);
+      }
+
+      .shot-frame {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 10px;
+        margin: 0 auto 56px;
+      }
+
+      .shot-frame img {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 10px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 16px;
+        margin-bottom: 56px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px 22px;
+      }
+
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+
+      .card p {
+        margin: 0;
+        font-size: 14px;
+        color: var(--text-muted);
+      }
+
+      .verify {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 22px 24px;
+        margin-bottom: 48px;
+      }
+
+      .verify h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      .verify p {
+        margin: 0 0 12px;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+
+      pre {
+        margin: 0;
+        padding: 14px 16px;
+        border-radius: 10px;
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        overflow-x: auto;
+        font-size: 13px;
+      }
+
+      footer {
+        border-top: 1px solid var(--border);
+        padding-top: 24px;
+        font-size: 13px;
+        color: var(--text-muted);
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      footer a {
+        color: var(--text);
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="nav">
+        <a class="brand" href="https://github.com/OliverWalker1122/multichrome">
+          <svg viewBox="0 0 512 512" width="32" height="32" aria-hidden="true">
+            <rect x="16" y="16" width="480" height="480" rx="108" fill="#1877F2" />
+            <rect x="176" y="116" width="232" height="180" rx="36" fill="#FFFFFF" />
+            <rect x="104" y="192" width="252" height="204" rx="40" fill="#1877F2" stroke="#1877F2" stroke-width="28" stroke-linejoin="round" />
+            <circle cx="364" cy="154" r="10" fill="#1877F2" />
+            <rect x="104" y="192" width="252" height="204" rx="36" fill="#FFFFFF" />
+            <rect x="104" y="252" width="252" height="15" fill="#1877F2" />
+            <circle cx="146" cy="223" r="10.5" fill="#1877F2" />
+            <circle cx="180" cy="223" r="10.5" fill="#1877F2" />
+          </svg>
+          <span>MultiChrome</span>
+        </a>
+        <nav class="nav-links">
+          <a href="https://github.com/OliverWalker1122/multichrome/releases">Releases</a>
+          <a href="https://github.com/OliverWalker1122/multichrome/blob/main/docs/architecture.md">Architecture</a>
+          <a href="https://github.com/OliverWalker1122/multichrome/blob/main/docs/verification.md">Verification</a>
+          <a href="https://github.com/OliverWalker1122/multichrome/blob/main/CHANGELOG.md">Changelog</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <span class="pill">Open Source · Local-First · MIT License</span>
+        <h1>Isolated Browser Profiles Without the Cloud</h1>
+        <p class="subtitle">
+          Run multiple isolated Google Chrome and C++ privacy browser environments side by side
+          with fail-closed <code>sing-box</code> proxy tunnels, native CDP cookie &amp; grid tooling,
+          and password-encrypted offline backups.
+        </p>
+        <div class="actions">
+          <a
+            class="btn btn-primary"
+            href="https://github.com/OliverWalker1122/multichrome/releases/latest"
+          >
+            Download Latest Release
+          </a>
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/OliverWalker1122/multichrome"
+          >
+            View Source on GitHub
+          </a>
+        </div>
+      </section>
+
+      <div class="shot-frame">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="./images/overview-dark.png" />
+          <img
+            src="./images/overview-light.png"
+            alt="MultiChrome isolated browser profile workspace"
+          />
+        </picture>
+      </div>
+
+      <section class="grid">
+        <article class="card">
+          <h3>Dual Browser Engines</h3>
+          <p>
+            Choose official Google Chrome or the on-demand C++ <code>fingerprint-chromium</code>
+            privacy kernel per profile — zero JS prototype hooks or forced extensions.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Fail-Closed Proxy Isolation</h3>
+          <p>
+            Managed <code>sing-box</code> routing blocks direct fallback, QUIC bypass, and DNS or
+            WebRTC leaks across HTTP, SOCKS5, VLESS, VMess, Trojan, SS, Hysteria2, and TUIC.
+          </p>
+        </article>
+        <article class="card">
+          <h3>E2EE Offline Backups</h3>
+          <p>
+            Export and restore portable settings, re-encrypted proxy configs, and profile
+            fingerprint seeds locally via <code>scrypt + AES-256-GCM</code> (<code>.mcbackup</code>).
+          </p>
+        </article>
+        <article class="card">
+          <h3>Batch &amp; Window Tiling</h3>
+          <p>
+            Bulk-create numbered profiles with sequential proxy assignment, act on multi-selected
+            profiles, and tile running windows cleanly across the display.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Native CDP Cookie Transfer</h3>
+          <p>
+            Import and export standard JSON or Netscape HTTP cookies directly over private CDP
+            without installing extra extensions.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Guarded CDP &amp; 4-Tool MCP</h3>
+          <p>
+            Opt-in loopback <code>127.0.0.1</code> CDP guard (default port <code>18922</code>)
+            with DNS-rebinding defense and Streamable HTTP / stdio MCP for external agents.
+          </p>
+        </article>
+      </section>
+
+      <section class="verify">
+        <h2>Verify Before You Run</h2>
+        <p>
+          Every GitHub Release publishes SHA-256 checksums and SLSA build provenance attestations
+          for Windows, macOS, and Linux installers.
+        </p>
+        <pre><code>sha256sum -c SHA256SUMS.txt
+gh attestation verify &lt;downloaded-installer&gt; --repo OliverWalker1122/multichrome</code></pre>
+      </section>
+
+      <footer>
+        <span>
+          MultiChrome is an independent open-source project and is not affiliated with Google LLC.
+          Google Chrome is a trademark of Google LLC.
+        </span>
+        <span>
+          <a href="https://github.com/OliverWalker1122/multichrome/blob/main/LICENSE">MIT License</a>
+        </span>
+      </footer>
+    </div>
+  </body>
+</html>

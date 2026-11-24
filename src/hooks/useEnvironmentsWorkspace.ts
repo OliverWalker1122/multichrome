@@ -147,6 +147,13 @@ export function useEnvironmentsWorkspace({
         null,
     );
     const [healthTargetId, setHealthTargetId] = useState<string | null>(null);
+    const [cookieTransfer, setCookieTransfer] = useState<{
+        env: ChromeEnvironment;
+        mode: 'import' | 'export';
+    } | null>(null);
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    const [batchBusy, setBatchBusy] = useState(false);
+    const [tilingWindows, setTilingWindows] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
 
     const proxyMap = useMemo(() => {
@@ -402,6 +409,162 @@ export function useEnvironmentsWorkspace({
         });
     };
 
+    const toggleSelectId = (id: string) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const toggleSelectAllFiltered = () => {
+        const filteredIds = filtered.map((item) => item.id);
+        const allSelected =
+            filteredIds.length > 0 &&
+            filteredIds.every((id) => selectedIds.has(id));
+        if (allSelected) {
+            setSelectedIds((prev) => {
+                const next = new Set(prev);
+                filteredIds.forEach((id) => next.delete(id));
+                return next;
+            });
+        } else {
+            setSelectedIds((prev) => {
+                const next = new Set(prev);
+                filteredIds.forEach((id) => next.add(id));
+                return next;
+            });
+        }
+    };
+
+    const clearSelection = () => setSelectedIds(new Set());
+
+    const activeSelectedIds = useMemo(() => {
+        const existingIds = new Set(environments.map((e) => e.id));
+        return Array.from(selectedIds).filter((id) => existingIds.has(id));
+    }, [selectedIds, environments]);
+
+    const handleBatchLaunchSelected = async () => {
+        if (batchBusy || activeSelectedIds.length === 0) return;
+        const targets = environments.filter(
+            (e) => activeSelectedIds.includes(e.id) && !e.isRunning,
+        );
+        if (targets.length === 0) return;
+        setBatchBusy(true);
+        try {
+            let launched = 0;
+            for (const env of targets) {
+                try {
+                    await onLaunch(env.id);
+                    launched += 1;
+                } catch {
+                    // onLaunch handles its own notifications
+                }
+            }
+            if (launched > 0) {
+                showNotification(
+                    'success',
+                    isEn
+                        ? `Launched ${launched} environment(s)`
+                        : `已启动 ${launched} 个环境`,
+                );
+            }
+        } finally {
+            setBatchBusy(false);
+        }
+    };
+
+    const handleBatchStopSelected = async () => {
+        if (batchBusy || activeSelectedIds.length === 0) return;
+        const targets = environments.filter(
+            (e) => activeSelectedIds.includes(e.id) && e.isRunning,
+        );
+        if (targets.length === 0) return;
+        setBatchBusy(true);
+        try {
+            let stopped = 0;
+            for (const env of targets) {
+                try {
+                    await onClose(env.id);
+                    stopped += 1;
+                } catch {
+                    // ignore individual failure
+                }
+            }
+            showNotification(
+                'success',
+                isEn
+                    ? `Stopped ${stopped} environment(s)`
+                    : `已关闭 ${stopped} 个环境`,
+            );
+        } finally {
+            setBatchBusy(false);
+        }
+    };
+
+    const handleBatchAction = async (payload: {
+        action: 'moveGroup' | 'bindProxy' | 'delete';
+        groupName?: string;
+        proxyId?: string;
+    }) => {
+        if (batchBusy || activeSelectedIds.length === 0) return;
+        setBatchBusy(true);
+        try {
+            const res = await environmentApi.batchAction({
+                ids: activeSelectedIds,
+                ...payload,
+            });
+            if (payload.action === 'delete') {
+                clearSelection();
+            }
+            await onRefresh();
+            showNotification(
+                res.skippedRunningCount > 0 ? 'warning' : 'success',
+                isEn
+                    ? `Updated ${res.succeededCount} environment(s)${res.skippedRunningCount > 0 ? ` (${res.skippedRunningCount} running skipped)` : ''}`
+                    : `已处理 ${res.succeededCount} 个环境${res.skippedRunningCount > 0 ? `（跳过 ${res.skippedRunningCount} 个运行中环境）` : ''}`,
+            );
+        } catch (err) {
+            showNotification(
+                'error',
+                err instanceof Error
+                    ? err.message
+                    : t('批量操作失败', 'Batch action failed'),
+            );
+        } finally {
+            setBatchBusy(false);
+        }
+    };
+
+    const handleTileWindows = async () => {
+        if (tilingWindows || allRunningCount === 0) return;
+        setTilingWindows(true);
+        try {
+            const res = await environmentApi.tileWindows();
+            showNotification(
+                res.tiledCount > 0 ? 'success' : 'info',
+                res.tiledCount > 0
+                    ? isEn
+                        ? `Tiled ${res.tiledCount} running window(s)`
+                        : `已宫格排列 ${res.tiledCount} 个运行中窗口`
+                    : t(
+                          '暂无可排列的浏览器窗口',
+                          'No browser windows available to tile',
+                      ),
+            );
+        } catch (err) {
+            showNotification(
+                'error',
+                err instanceof Error
+                    ? err.message
+                    : t('窗口排列失败', 'Failed to tile windows'),
+            );
+        } finally {
+            setTilingWindows(false);
+        }
+    };
+
     return {
         search,
         setSearch,
@@ -435,6 +598,19 @@ export function useEnvironmentsWorkspace({
         setDeleteTarget,
         healthTargetId,
         setHealthTargetId,
+        cookieTransfer,
+        setCookieTransfer,
+        selectedIds,
+        activeSelectedIds,
+        toggleSelectId,
+        toggleSelectAllFiltered,
+        clearSelection,
+        batchBusy,
+        handleBatchLaunchSelected,
+        handleBatchStopSelected,
+        handleBatchAction,
+        tilingWindows,
+        handleTileWindows,
         busyId,
         proxyMap,
         proxyUsageMap,

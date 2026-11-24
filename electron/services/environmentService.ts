@@ -24,6 +24,7 @@ import {
     normalizeDefaultFingerprintSettings,
     normalizeFingerprintConfig,
 } from '../domain/fingerprintProfile.js';
+import { buildBulkEnvironmentSpecs } from '../domain/bulkEnvironmentPolicy.js';
 import { normalizeEnvironmentTags } from '../domain/environmentTags.js';
 import { evaluateLaunchConsistency } from '../domain/launchGuard.js';
 import { evaluateEnvironmentHealth } from '../domain/healthCheck.js';
@@ -582,6 +583,258 @@ export class EnvironmentService {
 
     public closeAllEnvironments() {
         return this.launchService.closeAllEnvironments();
+    }
+
+    public exportEnvironmentCookies(
+        id: string,
+        format: 'json' | 'netscape' = 'json',
+    ) {
+        return this.launchService.exportEnvironmentCookies(id, format);
+    }
+
+    public importEnvironmentCookies(id: string, rawText: string) {
+        return this.launchService.importEnvironmentCookies(id, rawText);
+    }
+
+    public tileRunningWindows(workArea: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }) {
+        return this.launchService.tileRunningWindows(workArea);
+    }
+
+    public async batchCreateEnvironments(input: {
+        namePrefix: string;
+        groupName: string;
+        count: number;
+        startNumber?: number;
+        notes?: string;
+        browserEngine?: BrowserEngineType;
+        proxyMode?: 'none' | 'single' | 'sequential';
+        proxyIds?: string[];
+        tags?: string[];
+    }): Promise<ChromeEnvironment[]> {
+        const fpDefaults = normalizeDefaultFingerprintSettings(
+            this.settingsManager.getSettings().fingerprint,
+        );
+        const hasActiveKernel = Boolean(this.kernelManager.getActiveKernel());
+        const requestedEngine = input.browserEngine
+            ? (normalizeBrowserEngine(input.browserEngine) as BrowserEngineType)
+            : fpDefaults.defaultEngine === 'fingerprint-chromium' &&
+                hasActiveKernel
+              ? 'fingerprint-chromium'
+              : 'system-chrome';
+
+        const specs = buildBulkEnvironmentSpecs(
+            { ...input, browserEngine: requestedEngine },
+            fpDefaults,
+        );
+        const created: ChromeEnvironment[] = [];
+        const baseTime = Date.now();
+        for (let i = 0; i < specs.length; i += 1) {
+            const spec = specs[i];
+            const id = uuidv4();
+            const envId = id.substring(0, 8);
+            const dataDir = path.join(this.environmentsDataDir, envId);
+            fs.mkdirSync(dataDir, { recursive: true });
+            const iso = new Date(baseTime + i).toISOString();
+            const env: ChromeEnvironment = {
+                id,
+                name: spec.name,
+                groupName: spec.groupName,
+                notes: spec.notes,
+                dataDir,
+                tags: spec.tags,
+                proxyId: spec.proxyId,
+                browserEngine: spec.browserEngine as BrowserEngineType,
+                fingerprintConfig: spec.fingerprintConfig as FingerprintConfig,
+                createdAt: iso,
+                lastUsed: iso,
+                isRunning: false,
+            };
+            this.repository.insert(env);
+            created.push(env);
+        }
+        log.info(
+            `批量创建环境完成: 数量=${created.length}, 分组=${input.groupName}`,
+        );
+        return created;
+    }
+
+    public async batchActionEnvironments(input: {
+        ids: string[];
+        action: 'moveGroup' | 'bindProxy' | 'addTags' | 'delete';
+        groupName?: string;
+        proxyId?: string;
+        tags?: string[];
+    }): Promise<{ succeededCount: number; skippedRunningCount: number }> {
+        const uniqueIds = Array.from(
+            new Set(
+                (Array.isArray(input.ids) ? input.ids : [])
+                    .map((id) => (typeof id === 'string' ? id.trim() : ''))
+                    .filter(Boolean),
+            ),
+        );
+        if (uniqueIds.length === 0) {
+            return { succeededCount: 0, skippedRunningCount: 0 };
+        }
+        const fpDefaults = normalizeDefaultFingerprintSettings(
+            this.settingsManager.getSettings().fingerprint,
+        );
+        let succeededCount = 0;
+        let skippedRunningCount = 0;
+
+        for (const id of uniqueIds) {
+            const existing = this.repository.findActiveById(
+                id,
+                this.launchService.isRunning(id),
+            );
+            if (!existing) continue;
+
+            if (input.action === 'delete') {
+                const deleted = await this.deleteEnvironment(id);
+                if (deleted) succeededCount += 1;
+                continue;
+            }
+
+            if (input.action === 'moveGroup') {
+                const targetGroup = input.groupName?.trim();
+                if (!targetGroup) throw new Error('请选择目标分组');
+                this.repository.update(
+                    id,
+                    { groupName: targetGroup },
+                    fpDefaults,
+                    this.launchService.isRunning(id),
+                );
+                succeededCount += 1;
+                continue;
+            }
+
+            if (input.action === 'bindProxy') {
+                if (this.launchService.isRunning(id)) {
+                    skippedRunningCount += 1;
+                    continue;
+                }
+                const nextProxyId = input.proxyId?.trim() || undefined;
+                this.repository.update(
+                    id,
+                    {
+                        proxyId: nextProxyId ?? (null as unknown as string),
+                        proxy: null as unknown as string,
+                        proxyLabel: null as unknown as string,
+                    },
+                    fpDefaults,
+                    false,
+                );
+                succeededCount += 1;
+                continue;
+            }
+
+            if (input.action === 'addTags') {
+                const merged = normalizeEnvironmentTags([
+                    ...(existing.tags || []),
+                    ...(Array.isArray(input.tags) ? input.tags : []),
+                ]);
+                this.repository.update(
+                    id,
+                    { tags: merged },
+                    fpDefaults,
+                    this.launchService.isRunning(id),
+                );
+                succeededCount += 1;
+            }
+        }
+        return { succeededCount, skippedRunningCount };
+    }
+
+    public importEnvironmentsFromBackup(
+        envs: Array<Partial<ChromeEnvironment>>,
+    ): { restoredCount: number; skippedCount: number } {
+        if (!Array.isArray(envs) || envs.length === 0) {
+            return { restoredCount: 0, skippedCount: 0 };
+        }
+        const fpDefaults = normalizeDefaultFingerprintSettings(
+            this.settingsManager.getSettings().fingerprint,
+        );
+        let restoredCount = 0;
+        let skippedCount = 0;
+
+        for (const raw of envs) {
+            const id =
+                typeof raw?.id === 'string' && raw.id.trim()
+                    ? raw.id.trim()
+                    : uuidv4();
+            if (this.repository.findAnyById(id, false)) {
+                skippedCount += 1;
+                continue;
+            }
+            const name =
+                typeof raw?.name === 'string' && raw.name.trim()
+                    ? raw.name.trim()
+                    : `Profile ${id.substring(0, 6)}`;
+            const groupName =
+                typeof raw?.groupName === 'string' && raw.groupName.trim()
+                    ? raw.groupName.trim()
+                    : '默认分组';
+            const dataDir = path.join(
+                this.environmentsDataDir,
+                id.substring(0, 8),
+            );
+            fs.mkdirSync(dataDir, { recursive: true });
+            const now = new Date().toISOString();
+            const env: ChromeEnvironment = {
+                id,
+                name,
+                groupName,
+                notes: typeof raw?.notes === 'string' ? raw.notes : '',
+                dataDir,
+                tags: normalizeEnvironmentTags(raw?.tags),
+                proxy: typeof raw?.proxy === 'string' ? raw.proxy : undefined,
+                proxyId:
+                    typeof raw?.proxyId === 'string' ? raw.proxyId : undefined,
+                proxyLabel:
+                    typeof raw?.proxyLabel === 'string'
+                        ? raw.proxyLabel
+                        : undefined,
+                userAgent:
+                    typeof raw?.userAgent === 'string'
+                        ? raw.userAgent
+                        : undefined,
+                timezone:
+                    typeof raw?.timezone === 'string'
+                        ? raw.timezone
+                        : undefined,
+                language:
+                    typeof raw?.language === 'string'
+                        ? raw.language
+                        : undefined,
+                startupUrl:
+                    typeof raw?.startupUrl === 'string'
+                        ? raw.startupUrl
+                        : undefined,
+                browserEngine: normalizeBrowserEngine(
+                    raw?.browserEngine || fpDefaults.defaultEngine,
+                ) as BrowserEngineType,
+                fingerprintConfig: normalizeFingerprintConfig(
+                    raw?.fingerprintConfig,
+                    fpDefaults,
+                ) as FingerprintConfig,
+                createdAt:
+                    typeof raw?.createdAt === 'string' ? raw.createdAt : now,
+                lastUsed:
+                    typeof raw?.lastUsed === 'string' ? raw.lastUsed : now,
+                isRunning: false,
+            };
+            this.repository.insert(env);
+            restoredCount += 1;
+        }
+        return { restoredCount, skippedCount };
+    }
+
+    public checkDatabaseIntegrity(): string {
+        return this.repository.checkIntegrity();
     }
 
     public getRunningEnvironmentSummary(): {
