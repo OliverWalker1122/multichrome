@@ -70,3 +70,5 @@ MultiChrome 提供四层验证体系（详见 [docs/verification_zh.md](docs/ver
 ## 许可证
 
 本项目采用 [MIT License](LICENSE)。按需下载的第三方组件（`sing-box`、`fingerprint-chromium`）各自遵循其上游开源许可证。
+
+MultiChrome 是独立的开源项目，与 Google LLC 不存在隶属、认可或赞助关系。Google Chrome 是 Google LLC 的商标。

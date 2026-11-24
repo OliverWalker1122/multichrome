@@ -70,3 +70,5 @@ MultiChrome uses a 4-layer verification suite (see [docs/verification.md](docs/v
 ## License
 
 Released under the [MIT License](LICENSE). Optional user-downloaded components (`sing-box`, `fingerprint-chromium`) remain subject to their respective upstream licenses.
+
+MultiChrome is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Google LLC. Google Chrome is a trademark of Google LLC.

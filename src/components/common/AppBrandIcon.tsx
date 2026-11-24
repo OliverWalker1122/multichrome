@@ -1,5 +1,5 @@
 import React from 'react';
-const appIcon = new URL('../../../assets/icon.png', import.meta.url).href;
+const appIcon = new URL('../../../assets/icon.svg', import.meta.url).href;
 
 interface AppBrandIconProps {
     size?: number;
