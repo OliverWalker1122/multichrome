@@ -101,6 +101,24 @@ const OPTS = parseArgs(process.argv.slice(2));
 const realUserData = path.join(app.getPath('appData'), 'multichrome');
 app.setPath('userData', realUserData);
 
+function redactPublicIps(input) {
+    if (typeof input === 'string') {
+        return input.replace(
+            /\b(?!127\.0\.0\.1\b)(?:\d{1,3}\.){3}\d{1,3}\b/g,
+            '[REDACTED_EXIT_IP]',
+        );
+    }
+    if (Array.isArray(input)) {
+        return input.map(redactPublicIps);
+    }
+    if (input && typeof input === 'object') {
+        return Object.fromEntries(
+            Object.entries(input).map(([k, v]) => [k, redactPublicIps(v)]),
+        );
+    }
+    return input;
+}
+
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
@@ -351,6 +369,7 @@ const SITE_SPECS = {
 function disposeChromeManager(manager) {
     if (!manager) return;
     try {
+        manager.stopStatusMonitoring?.();
         if (manager.statusCheckInterval) {
             clearInterval(manager.statusCheckInterval);
             manager.statusCheckInterval = null;
@@ -359,6 +378,7 @@ function disposeChromeManager(manager) {
         // ignore
     }
     try {
+        manager.closeDatabase?.();
         manager.db?.close?.();
     } catch {
         // ignore
@@ -441,8 +461,9 @@ async function auditEnvironment(chromeManager, env, label, reports) {
                 spec.extractJs,
                 spec.pollMs,
             );
-            report.sites[siteKey] = res;
-            console.log(JSON.stringify(res, null, 2));
+            const sanitizedRes = redactPublicIps(res);
+            report.sites[siteKey] = sanitizedRes;
+            console.log(JSON.stringify(sanitizedRes, null, 2));
         }
     } catch (err) {
         report.error = err.message;
@@ -686,6 +707,6 @@ app.whenReady().then(async () => {
                 // ignore best-effort cleanup
             }
         }
-        app.quit();
+        app.exit(process.exitCode || 0);
     }
 });

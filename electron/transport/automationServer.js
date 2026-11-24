@@ -161,7 +161,7 @@ export class AutomationServer {
      */
     constructor({
         backend,
-        serverVersion = '1.4.0',
+        serverVersion = '1.5.0',
         logger = console,
         maxBodyBytes = MAX_AUTOMATION_BODY_BYTES,
         cdpGuardOptions = {},

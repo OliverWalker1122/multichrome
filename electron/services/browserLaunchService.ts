@@ -473,11 +473,13 @@ export class BrowserLaunchService {
         }
         const task = this.launchEnvironmentInternal(id);
         this.launchingEnvironments.set(id, task);
-        void task.finally(() => {
-            if (this.launchingEnvironments.get(id) === task) {
-                this.launchingEnvironments.delete(id);
-            }
-        });
+        void task
+            .finally(() => {
+                if (this.launchingEnvironments.get(id) === task) {
+                    this.launchingEnvironments.delete(id);
+                }
+            })
+            .catch(() => {});
         return task;
     }
 
