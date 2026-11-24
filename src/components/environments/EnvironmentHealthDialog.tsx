@@ -28,8 +28,10 @@ import { environmentApi } from '../../services';
 interface EnvironmentHealthDialogProps {
     env: ChromeEnvironment | null;
     mode?: 'inspect' | 'launch';
+    batchQueueCount?: number;
     onClose: () => void;
     onConfirmLaunch?: () => Promise<void> | void;
+    onConfirmLaunchAll?: () => Promise<void> | void;
 }
 
 const useStyles = makeStyles({
@@ -110,11 +112,13 @@ const useStyles = makeStyles({
 const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
     env,
     mode = 'inspect',
+    batchQueueCount = 0,
     onClose,
     onConfirmLaunch,
+    onConfirmLaunchAll,
 }) => {
     const styles = useStyles();
-    const { t } = useI18n();
+    const { isEn, t } = useI18n();
     const [loading, setLoading] = useState(false);
     const [launching, setLaunching] = useState(false);
     const [error, setError] = useState('');
@@ -162,6 +166,19 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
         }
     };
 
+    const handleConfirmLaunchAll = async () => {
+        if (!onConfirmLaunchAll || launching || loading) return;
+        setLaunching(true);
+        try {
+            await onConfirmLaunchAll();
+        } finally {
+            setLaunching(false);
+        }
+    };
+
+    const showBatchLaunchAll =
+        mode === 'launch' && batchQueueCount > 1 && Boolean(onConfirmLaunchAll);
+
     return (
         <Dialog
             open={true}
@@ -173,6 +190,18 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                 <DialogBody>
                     <DialogTitle>
                         {t('健康自检', 'Health Check')} · {env.name}
+                        {showBatchLaunchAll && (
+                            <Badge
+                                size="small"
+                                appearance="tint"
+                                color="brand"
+                                style={{ marginLeft: '8px' }}
+                            >
+                                {isEn
+                                    ? `${batchQueueCount} queued`
+                                    : `共 ${batchQueueCount} 项`}
+                            </Badge>
+                        )}
                     </DialogTitle>
                     <DialogContent>
                         {loading && !report ? (
@@ -311,7 +340,9 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                 </Button>
                                 <Button
                                     className={styles.actionBtn}
-                                    appearance="primary"
+                                    appearance={
+                                        showBatchLaunchAll ? 'outline' : 'primary'
+                                    }
                                     icon={<PlayRegular />}
                                     disabled={loading || launching}
                                     onClick={() => void handleConfirmLaunch()}
@@ -322,6 +353,21 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                           ? t('仍要继续启动', 'Launch Anyway')
                                           : t('继续启动', 'Continue Launch')}
                                 </Button>
+                                {showBatchLaunchAll && (
+                                    <Button
+                                        className={styles.actionBtn}
+                                        appearance="primary"
+                                        icon={<PlayRegular />}
+                                        disabled={loading || launching}
+                                        onClick={() =>
+                                            void handleConfirmLaunchAll()
+                                        }
+                                    >
+                                        {isEn
+                                            ? `Launch All (${batchQueueCount})`
+                                            : `启动全部（${batchQueueCount}）`}
+                                    </Button>
+                                )}
                             </>
                         ) : (
                             <Button

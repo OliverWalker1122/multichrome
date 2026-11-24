@@ -95,7 +95,7 @@ export const useProxiesStyles = makeStyles({
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         '&:first-child': { paddingLeft: '24px' },
-        '&:last-child': { paddingRight: '18px' },
+        '&:last-child': { paddingRight: '14px' },
     },
     row: {
         height: '50px',
@@ -122,7 +122,14 @@ export const useProxiesStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
         '&:first-child': { paddingLeft: '24px' },
-        '&:last-child': { paddingRight: '18px' },
+        '&:last-child': { paddingRight: '14px' },
+    },
+    checkboxCell: {
+        width: '44px',
+        paddingLeft: '14px',
+        paddingRight: '4px',
+        overflow: 'visible',
+        textOverflow: 'clip',
     },
     nameTextWrap: {
         display: 'flex',
@@ -172,6 +179,7 @@ export const useProxiesStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '4px',
+        whiteSpace: 'nowrap',
     },
     runButton: {
         minWidth: '64px',

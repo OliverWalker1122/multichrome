@@ -145,6 +145,7 @@ export async function findAvailableAutomationPort({
 export class DebugPortReservationPool {
     constructor() {
         this.reservedPorts = new Set();
+        this.pendingPorts = new Set();
     }
 
     async isPortAvailable(port) {
@@ -167,12 +168,22 @@ export class DebugPortReservationPool {
 
         for (let i = 0; i < maxAttempts; i += 1) {
             const port = minPort + ((startOffset + i * 97) % span);
-            if (port === 9222 || port === 18922 || this.reservedPorts.has(port)) {
+            if (
+                port === 9222 ||
+                port === 18922 ||
+                this.reservedPorts.has(port) ||
+                this.pendingPorts.has(port)
+            ) {
                 continue;
             }
-            if (await this.isPortAvailable(port)) {
-                this.reservedPorts.add(port);
-                return port;
+            this.pendingPorts.add(port);
+            try {
+                if (await this.isPortAvailable(port)) {
+                    this.reservedPorts.add(port);
+                    return port;
+                }
+            } finally {
+                this.pendingPorts.delete(port);
             }
         }
 
@@ -190,7 +201,8 @@ export class DebugPortReservationPool {
                 osPort > 1024 &&
                 osPort !== 9222 &&
                 osPort !== 18922 &&
-                !this.reservedPorts.has(osPort)
+                !this.reservedPorts.has(osPort) &&
+                !this.pendingPorts.has(osPort)
             ) {
                 this.reservedPorts.add(osPort);
                 return osPort;
@@ -203,6 +215,7 @@ export class DebugPortReservationPool {
     release(port) {
         if (typeof port === 'number') {
             this.reservedPorts.delete(port);
+            this.pendingPorts.delete(port);
         }
     }
 }

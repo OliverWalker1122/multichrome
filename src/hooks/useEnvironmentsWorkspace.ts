@@ -71,8 +71,15 @@ export interface UseEnvironmentsWorkspaceParams {
     selectedEnvId: string | null;
     onSelectEnv: (id: string | null) => void;
     onToggleDetails: (open?: boolean) => void;
-    onLaunch: (id: string) => Promise<void>;
-    onClose: (id: string) => Promise<void>;
+    onLaunch: (id: string) => Promise<boolean>;
+    onBatchLaunch?: (
+        ids: string[],
+    ) => Promise<{
+        launchedCount: number;
+        deferredCount: number;
+        failedCount: number;
+    }>;
+    onClose: (id: string) => Promise<boolean>;
     onRefresh: () => Promise<void>;
 }
 
@@ -84,6 +91,7 @@ export function useEnvironmentsWorkspace({
     onSelectEnv,
     onToggleDetails,
     onLaunch,
+    onBatchLaunch,
     onClose,
     onRefresh,
 }: UseEnvironmentsWorkspaceParams) {
@@ -447,20 +455,27 @@ export function useEnvironmentsWorkspace({
 
     const handleBatchLaunchSelected = async () => {
         if (batchBusy || activeSelectedIds.length === 0) return;
-        const targets = environments.filter(
-            (e) => activeSelectedIds.includes(e.id) && !e.isRunning,
-        );
-        if (targets.length === 0) return;
+        const targetIds = environments
+            .filter((e) => activeSelectedIds.includes(e.id) && !e.isRunning)
+            .map((e) => e.id);
+        if (targetIds.length === 0) return;
         setBatchBusy(true);
         try {
             let launched = 0;
-            for (const env of targets) {
-                try {
-                    await onLaunch(env.id);
-                    launched += 1;
-                } catch {
-                    // onLaunch handles its own notifications
-                }
+            if (onBatchLaunch) {
+                const res = await onBatchLaunch(targetIds);
+                launched = res.launchedCount;
+            } else {
+                const results = await Promise.all(
+                    targetIds.map(async (id) => {
+                        try {
+                            return Boolean(await onLaunch(id));
+                        } catch {
+                            return false;
+                        }
+                    }),
+                );
+                launched = results.filter(Boolean).length;
             }
             if (launched > 0) {
                 showNotification(
@@ -483,15 +498,16 @@ export function useEnvironmentsWorkspace({
         if (targets.length === 0) return;
         setBatchBusy(true);
         try {
-            let stopped = 0;
-            for (const env of targets) {
-                try {
-                    await onClose(env.id);
-                    stopped += 1;
-                } catch {
-                    // ignore individual failure
-                }
-            }
+            const results = await Promise.all(
+                targets.map(async (env) => {
+                    try {
+                        return Boolean(await onClose(env.id));
+                    } catch {
+                        return false;
+                    }
+                }),
+            );
+            const stopped = results.filter(Boolean).length;
             showNotification(
                 'success',
                 isEn

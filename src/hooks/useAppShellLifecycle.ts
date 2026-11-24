@@ -37,7 +37,7 @@ export interface UseAppShellLifecycleOptions {
     selectedProxyId: string | null;
     onSelectProxyId: (id: string | null) => void;
     settings: AppSettings;
-    launchEnvironment: (id: string) => Promise<void>;
+    launchEnvironment: (id: string) => Promise<boolean>;
     updateEnvironment: (
         id: string,
         data: Partial<ChromeEnvironment>,
@@ -426,62 +426,206 @@ export function useAppShellLifecycle({
         }
     }, [logTarget, logContextKey, clearingLogs, showNotification, t]);
 
-    const [launchGuardState, setLaunchGuardState] = useState<{
-        env: ChromeEnvironment;
-        report: LaunchConsistencyReport;
-    } | null>(null);
-    const [launchHealthEnv, setLaunchHealthEnv] =
-        useState<ChromeEnvironment | null>(null);
+    const [launchGuardQueue, setLaunchGuardQueue] = useState<
+        Array<{ env: ChromeEnvironment; report: LaunchConsistencyReport }>
+    >([]);
+    const [launchHealthQueue, setLaunchHealthQueue] = useState<
+        ChromeEnvironment[]
+    >([]);
+
+    const launchGuardState = launchGuardQueue[0] || null;
+    const launchHealthEnv = launchHealthQueue[0] || null;
+
+    const launchWithConcurrency = useCallback(
+        async (ids: string[], concurrency = 4): Promise<number> => {
+            if (ids.length === 0) return 0;
+            let cursor = 0;
+            let launchedCount = 0;
+            const workers = Array.from(
+                { length: Math.min(concurrency, ids.length) },
+                async () => {
+                    while (cursor < ids.length) {
+                        const targetId = ids[cursor];
+                        cursor += 1;
+                        if (await launchEnvironment(targetId)) {
+                            launchedCount += 1;
+                        }
+                    }
+                },
+            );
+            await Promise.all(workers);
+            return launchedCount;
+        },
+        [launchEnvironment],
+    );
 
     const handleLaunchWithGuard = useCallback(
-        async (id: string) => {
+        async (id: string): Promise<boolean> => {
             const env = environments.find((item) => item.id === id);
             if (env && settings.requireHealthCheckOnLaunch) {
-                setLaunchHealthEnv(env);
-                return;
+                setLaunchHealthQueue((prev) =>
+                    prev.some((item) => item.id === env.id)
+                        ? prev
+                        : [...prev, env],
+                );
+                return false;
             }
             if (env) {
                 try {
                     const report =
                         await environmentApi.checkLaunchConsistency(id);
                     if (report && !report.ok && report.issues.length > 0) {
-                        setLaunchGuardState({ env, report });
-                        return;
+                        setLaunchGuardQueue((prev) =>
+                            prev.some((item) => item.env.id === env.id)
+                                ? prev
+                                : [...prev, { env, report }],
+                        );
+                        return false;
                     }
                 } catch {
                     // guard check failure does not block launch
                 }
             }
-            await launchEnvironment(id);
+            return launchEnvironment(id);
         },
         [environments, launchEnvironment, settings.requireHealthCheckOnLaunch],
     );
 
+    const handleBatchLaunchWithGuard = useCallback(
+        async (
+            ids: string[],
+        ): Promise<{
+            launchedCount: number;
+            deferredCount: number;
+            failedCount: number;
+        }> => {
+            const targets = ids
+                .map((id) => environments.find((item) => item.id === id))
+                .filter((env): env is ChromeEnvironment =>
+                    Boolean(env && !env.isRunning),
+                );
+            if (targets.length === 0) {
+                return { launchedCount: 0, deferredCount: 0, failedCount: 0 };
+            }
+
+            if (settings.requireHealthCheckOnLaunch) {
+                setLaunchHealthQueue((prev) => {
+                    const existingIds = new Set(prev.map((item) => item.id));
+                    const next = targets.filter(
+                        (item) => !existingIds.has(item.id),
+                    );
+                    return [...prev, ...next];
+                });
+                return {
+                    launchedCount: 0,
+                    deferredCount: targets.length,
+                    failedCount: 0,
+                };
+            }
+
+            const checks = await Promise.all(
+                targets.map(async (env) => {
+                    try {
+                        const report =
+                            await environmentApi.checkLaunchConsistency(env.id);
+                        return { env, report };
+                    } catch {
+                        return { env, report: null };
+                    }
+                }),
+            );
+
+            const cleanIds: string[] = [];
+            const guarded: Array<{
+                env: ChromeEnvironment;
+                report: LaunchConsistencyReport;
+            }> = [];
+
+            for (const item of checks) {
+                if (
+                    item.report &&
+                    !item.report.ok &&
+                    item.report.issues.length > 0
+                ) {
+                    guarded.push({ env: item.env, report: item.report });
+                } else {
+                    cleanIds.push(item.env.id);
+                }
+            }
+
+            if (guarded.length > 0) {
+                setLaunchGuardQueue((prev) => {
+                    const existingIds = new Set(prev.map((x) => x.env.id));
+                    const additions = guarded.filter(
+                        (x) => !existingIds.has(x.env.id),
+                    );
+                    return [...prev, ...additions];
+                });
+            }
+
+            const launchedCount = await launchWithConcurrency(cleanIds);
+            return {
+                launchedCount,
+                deferredCount: guarded.length,
+                failedCount: Math.max(0, cleanIds.length - launchedCount),
+            };
+        },
+        [
+            environments,
+            launchWithConcurrency,
+            settings.requireHealthCheckOnLaunch,
+        ],
+    );
+
     const handleConfirmHealthLaunch = useCallback(async () => {
-        if (!launchHealthEnv) return;
-        const targetId = launchHealthEnv.id;
-        setLaunchHealthEnv(null);
-        await launchEnvironment(targetId);
-    }, [launchEnvironment, launchHealthEnv]);
+        const current = launchHealthQueue[0];
+        if (!current) return;
+        setLaunchHealthQueue((prev) => prev.slice(1));
+        await launchEnvironment(current.id);
+    }, [launchEnvironment, launchHealthQueue]);
+
+    const handleConfirmHealthLaunchAll = useCallback(async () => {
+        const queuedIds = launchHealthQueue.map((item) => item.id);
+        if (queuedIds.length === 0) return;
+        setLaunchHealthQueue([]);
+        const launchedCount = await launchWithConcurrency(queuedIds);
+        if (launchedCount > 0) {
+            showNotification(
+                'success',
+                locale === 'en-US'
+                    ? `Launched ${launchedCount} environment(s)`
+                    : `已启动 ${launchedCount} 个环境`,
+            );
+        }
+    }, [launchHealthQueue, launchWithConcurrency, locale, showNotification]);
+
+    const handleDismissHealthLaunch = useCallback(() => {
+        setLaunchHealthQueue([]);
+    }, []);
 
     const handleAutoAlignAndLaunch = useCallback(async () => {
-        if (!launchGuardState) return;
-        const { env, report } = launchGuardState;
+        const current = launchGuardQueue[0];
+        if (!current) return;
+        const { env, report } = current;
         if (report.suggestedPatch) {
             await updateEnvironment(env.id, report.suggestedPatch, {
                 throwOnError: true,
             });
         }
-        setLaunchGuardState(null);
+        setLaunchGuardQueue((prev) => prev.slice(1));
         await launchEnvironment(env.id);
-    }, [launchEnvironment, launchGuardState, updateEnvironment]);
+    }, [launchEnvironment, launchGuardQueue, updateEnvironment]);
 
     const handleForceLaunch = useCallback(async () => {
-        if (!launchGuardState) return;
-        const targetId = launchGuardState.env.id;
-        setLaunchGuardState(null);
-        await launchEnvironment(targetId);
-    }, [launchEnvironment, launchGuardState]);
+        const current = launchGuardQueue[0];
+        if (!current) return;
+        setLaunchGuardQueue((prev) => prev.slice(1));
+        await launchEnvironment(current.env.id);
+    }, [launchEnvironment, launchGuardQueue]);
+
+    const handleCancelLaunchGuard = useCallback(() => {
+        setLaunchGuardQueue((prev) => prev.slice(1));
+    }, []);
 
     return {
         windowWidth,
@@ -520,11 +664,15 @@ export function useAppShellLifecycle({
         handleInspectProxyLogs,
         handleClearLogs,
         launchGuardState,
-        setLaunchGuardState,
+        launchGuardQueueCount: launchGuardQueue.length,
+        handleCancelLaunchGuard,
         launchHealthEnv,
-        setLaunchHealthEnv,
+        launchHealthQueueCount: launchHealthQueue.length,
+        handleDismissHealthLaunch,
         handleLaunchWithGuard,
+        handleBatchLaunchWithGuard,
         handleConfirmHealthLaunch,
+        handleConfirmHealthLaunchAll,
         handleAutoAlignAndLaunch,
         handleForceLaunch,
     };

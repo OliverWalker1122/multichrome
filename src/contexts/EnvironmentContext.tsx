@@ -103,8 +103,8 @@ interface EnvironmentContextType {
         regenerateFingerprint: (
             id: string,
         ) => Promise<ChromeEnvironment | undefined>;
-        launchEnvironment: (id: string) => Promise<void>;
-        closeEnvironment: (id: string) => Promise<void>;
+        launchEnvironment: (id: string) => Promise<boolean>;
+        closeEnvironment: (id: string) => Promise<boolean>;
         deleteEnvironment: (id: string) => Promise<void>;
         updateEnvironment: (
             id: string,
@@ -280,7 +280,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
     );
 
     const launchEnvironment = useCallback(
-        async (id: string) => {
+        async (id: string): Promise<boolean> => {
             if (!environmentApi.isAvailable()) {
                 handleError(
                     new Error(
@@ -291,7 +291,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
                     ),
                     tr('启动环境', 'Launch Environment'),
                 );
-                return;
+                return false;
             }
 
             try {
@@ -307,15 +307,17 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
                         },
                     });
                 }
+                return true;
             } catch (err) {
                 handleError(err, tr('启动环境', 'Launch Environment'));
+                return false;
             }
         },
         [handleError],
     );
 
     const closeEnvironment = useCallback(
-        async (id: string) => {
+        async (id: string): Promise<boolean> => {
             if (!environmentApi.isAvailable()) {
                 handleError(
                     new Error(
@@ -326,7 +328,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
                     ),
                     tr('关闭环境', 'Close Environment'),
                 );
-                return;
+                return false;
             }
 
             try {
@@ -338,9 +340,11 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
                         payload: { ...updatedEnv, isRunning: false },
                     });
                 }
+                return true;
             } catch (err) {
                 handleError(err, tr('关闭环境', 'Close Environment'));
                 void loadEnvironments(true);
+                return false;
             }
         },
         [handleError, loadEnvironments],

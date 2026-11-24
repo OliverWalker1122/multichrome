@@ -453,6 +453,9 @@ const AppShell: React.FC = () => {
                                 overlayDetails={overlayDetails}
                                 onCreateClick={() => setCreateModalOpen(true)}
                                 onLaunch={lifecycle.handleLaunchWithGuard}
+                                onBatchLaunch={
+                                    lifecycle.handleBatchLaunchWithGuard
+                                }
                                 onClose={actions.closeEnvironment}
                                 onClone={handleCloneEnvironment}
                                 onDelete={actions.deleteEnvironment}
@@ -642,7 +645,8 @@ const AppShell: React.FC = () => {
             <LaunchGuardDialog
                 env={lifecycle.launchGuardState?.env || null}
                 report={lifecycle.launchGuardState?.report || null}
-                onCancel={() => lifecycle.setLaunchGuardState(null)}
+                remainingCount={lifecycle.launchGuardQueueCount}
+                onCancel={lifecycle.handleCancelLaunchGuard}
                 onAutoAlignAndLaunch={lifecycle.handleAutoAlignAndLaunch}
                 onForceLaunch={lifecycle.handleForceLaunch}
             />
@@ -650,8 +654,10 @@ const AppShell: React.FC = () => {
             <EnvironmentHealthDialog
                 env={lifecycle.launchHealthEnv}
                 mode="launch"
-                onClose={() => lifecycle.setLaunchHealthEnv(null)}
+                batchQueueCount={lifecycle.launchHealthQueueCount}
+                onClose={lifecycle.handleDismissHealthLaunch}
                 onConfirmLaunch={lifecycle.handleConfirmHealthLaunch}
+                onConfirmLaunchAll={lifecycle.handleConfirmHealthLaunchAll}
             />
         </div>
     );

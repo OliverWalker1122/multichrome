@@ -125,11 +125,18 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
         >
             <td
                 className={styles.td}
-                style={{ width: '36px', paddingLeft: '14px', paddingRight: '4px' }}
+                style={{
+                    width: '44px',
+                    paddingLeft: '14px',
+                    paddingRight: '4px',
+                    overflow: 'visible',
+                    textOverflow: 'clip',
+                }}
                 onClick={(event) => event.stopPropagation()}
             >
                 <Checkbox
                     checked={checked}
+                    style={{ marginLeft: '-2px' }}
                     aria-label={
                         isEn
                             ? `Select ${env.name}`

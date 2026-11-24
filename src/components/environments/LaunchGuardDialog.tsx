@@ -25,6 +25,7 @@ import { useI18n } from '../../i18n';
 interface LaunchGuardDialogProps {
     env: ChromeEnvironment | null;
     report: LaunchConsistencyReport | null;
+    remainingCount?: number;
     onCancel: () => void;
     onAutoAlignAndLaunch: () => Promise<void>;
     onForceLaunch: () => Promise<void>;
@@ -91,6 +92,7 @@ const useStyles = makeStyles({
 const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
     env,
     report,
+    remainingCount = 1,
     onCancel,
     onAutoAlignAndLaunch,
     onForceLaunch,
@@ -131,7 +133,20 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
             <DialogSurface style={{ maxWidth: '520px', width: '92vw' }}>
                 <DialogBody>
                     <DialogTitle>
-                        {t('启动前一致性护栏', 'Pre-Launch Consistency Guard')} · {env.name}
+                        {t('启动前一致性护栏', 'Pre-Launch Consistency Guard')} ·{' '}
+                        {env.name}
+                        {remainingCount > 1 && (
+                            <Badge
+                                size="small"
+                                appearance="tint"
+                                color="brand"
+                                style={{ marginLeft: '8px' }}
+                            >
+                                {isEn
+                                    ? `+${remainingCount - 1} more`
+                                    : `后续还有 ${remainingCount - 1} 项`}
+                            </Badge>
+                        )}
                     </DialogTitle>
                     <DialogContent>
                         <MessageBar

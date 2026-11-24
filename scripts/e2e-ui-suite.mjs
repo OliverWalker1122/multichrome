@@ -1751,83 +1751,381 @@ async function main() {
         }
 
         // ---------------------------------------------------------------
-        // E2E-13: Bulk create, native CDP Cookie transfer, Window Tiling & Backup validation
+        // E2E-13: Pixel geometry & zero-clipping UI audit (Checkboxes / Actions / BatchBar)
         // ---------------------------------------------------------------
         let e2e13Error = '';
-        let batchCreateOk = false;
-        let cookieRoundTripOk = false;
-        let tileWindowsOk = false;
+        let envCheckboxesUnclipped = false;
+        let envActionsUnclipped = false;
+        let batchBarGapOk = false;
+        let proxyLayoutUnclipped = false;
+        try {
+            await cdp.eval(`document.querySelector('nav button[aria-label="环境"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"])'))`),
+            );
+            await cdp.eval(`document.querySelector('aside button[title="全部环境"]')?.click()`);
+            await sleep(200);
+
+            // Toggle optional "时区" column ON via toolbar Columns popover to test exact 8-column layout
+            await cdp.eval(`window.__e2e.clickExact('列', 'main button')`);
+            await waitUntil(() =>
+                cdp.eval(`Array.from(document.querySelectorAll('label')).some(l => (l.textContent || '').includes('时区'))`),
+            );
+            await cdp.eval(`(() => {
+                const lbl = Array.from(document.querySelectorAll('label')).find(l => (l.textContent || '').includes('时区'));
+                const cb = lbl?.closest('span, div')?.querySelector('input[type="checkbox"]') || lbl?.previousElementSibling;
+                if (cb) cb.click();
+            })()`);
+            await waitUntil(() =>
+                cdp.eval(`Array.from(document.querySelectorAll('table[aria-label="环境列表"] thead th')).some(th => (th.textContent || '').includes('时区'))`),
+            );
+            // Dismiss Columns popover and select first row checkbox to mount Batch Bar
+            await cdp.eval(`document.querySelector('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"]) input[type="checkbox"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('[aria-label="批量操作栏"]'))`),
+            );
+            await sleep(150);
+
+            const envGeom = await cdp.eval(`(() => {
+                const table = document.querySelector('table[aria-label="环境列表"]');
+                const wrap = table.parentElement;
+                const thBox = table.querySelector('thead th:first-child');
+                const tdBox = table.querySelector('tbody tr:not([aria-hidden="true"]) td:first-child');
+                const measureCb = (cell) => {
+                    const cellRect = cell.getBoundingClientRect();
+                    const ind = cell.querySelector('[class*="indicator"]') || cell.querySelector('input[type="checkbox"]');
+                    const r = ind.getBoundingClientRect();
+                    return {
+                        cellLeft: cellRect.left,
+                        cellRight: cellRect.right,
+                        left: r.left,
+                        right: r.right,
+                        width: r.width,
+                        height: r.height,
+                        ok: r.width >= 14 && r.height >= 14 && r.left >= cellRect.left - 0.5 && r.right <= cellRect.right + 0.5,
+                    };
+                };
+                const hdr = measureCb(thBox);
+                const rowCb = measureCb(tdBox);
+
+                const row = table.querySelector('tbody tr:not([aria-hidden="true"])');
+                const actionTd = row.lastElementChild;
+                const tdRect = actionTd.getBoundingClientRect();
+                const launchBtn = Array.from(actionTd.querySelectorAll('button')).find(b => (b.innerText || '').includes('启动') || (b.innerText || '').includes('关闭'));
+                const menuBtn = actionTd.querySelector('.mc-environment-row-menu');
+                const lRect = launchBtn.getBoundingClientRect();
+                const mRect = menuBtn.getBoundingClientRect();
+
+                wrap.scrollLeft = wrap.scrollWidth;
+                const wrapRect = wrap.getBoundingClientRect();
+                const mAfterScroll = menuBtn.getBoundingClientRect();
+
+                const filterRect = document.querySelector('[aria-label="按运行状态筛选"]').getBoundingClientRect();
+                const batchRect = document.querySelector('[aria-label="批量操作栏"]').getBoundingClientRect();
+
+                return {
+                    hdr,
+                    rowCb,
+                    actionsOk: lRect.left >= tdRect.left - 0.5 && mRect.right <= tdRect.right + 0.5 && mRect.width >= 24 && mAfterScroll.right <= wrapRect.right + 0.5,
+                    batchGap: batchRect.top - filterRect.bottom,
+                };
+            })()`);
+
+            envCheckboxesUnclipped = Boolean(envGeom?.hdr?.ok && envGeom?.rowCb?.ok);
+            envActionsUnclipped = Boolean(envGeom?.actionsOk);
+            batchBarGapOk = Number(envGeom?.batchGap) >= 4;
+
+            // Clear selection & toggle "时区" OFF cleanly
+            await cdp.eval(`window.__e2e.clickByText('取消选择', '[aria-label="批量操作栏"] button')`);
+            await cdp.eval(`window.__e2e.clickExact('列', 'main button')`);
+            await waitUntil(() =>
+                cdp.eval(`Array.from(document.querySelectorAll('label')).some(l => (l.textContent || '').includes('时区'))`),
+            );
+            await cdp.eval(`(() => {
+                const lbl = Array.from(document.querySelectorAll('label')).find(l => (l.textContent || '').includes('时区'));
+                const cb = lbl?.closest('span, div')?.querySelector('input[type="checkbox"]') || lbl?.previousElementSibling;
+                if (cb) cb.click();
+            })()`);
+            await sleep(100);
+            await cdp.eval(`document.body.click()`);
+
+            // Audit Proxies table checkbox & action geometry
+            await cdp.eval(`document.querySelector('nav button[aria-label="代理"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('table[aria-label="代理列表"] tbody tr:not([aria-hidden="true"])'))`),
+            );
+            await sleep(150);
+            const proxyGeom = await cdp.eval(`(() => {
+                const table = document.querySelector('table[aria-label="代理列表"]');
+                const measureCb = (cell) => {
+                    const cellRect = cell.getBoundingClientRect();
+                    const ind = cell.querySelector('[class*="indicator"]') || cell.querySelector('input[type="checkbox"]');
+                    const r = ind.getBoundingClientRect();
+                    return r.width >= 14 && r.height >= 14 && r.left >= cellRect.left - 0.5 && r.right <= cellRect.right + 0.5;
+                };
+                const hdrOk = measureCb(table.querySelector('thead th:first-child'));
+                const row = table.querySelector('tbody tr:not([aria-hidden="true"])');
+                const rowOk = measureCb(row.firstElementChild);
+                const actionTd = row.lastElementChild;
+                const tdRect = actionTd.getBoundingClientRect();
+                const btns = Array.from(actionTd.querySelectorAll('button'));
+                const lastBtnRect = btns[btns.length - 1].getBoundingClientRect();
+                const firstBtnRect = btns[0].getBoundingClientRect();
+                return Boolean(hdrOk && rowOk && firstBtnRect.left >= tdRect.left - 0.5 && lastBtnRect.right <= tdRect.right + 0.5 && lastBtnRect.width >= 24);
+            })()`);
+            proxyLayoutUnclipped = Boolean(proxyGeom);
+        } catch (err13) {
+            e2e13Error = err13 instanceof Error ? err13.message : String(err13);
+        }
+
+        // ---------------------------------------------------------------
+        // E2E-14: Real UI Multi-Window Simultaneous Launch (3 profiles) + Tiling + Cookies + Health Queue
+        // ---------------------------------------------------------------
+        let e2e14Error = '';
+        let uiBulkCreateOk = false;
+        let simultaneousLaunch3Ok = false;
+        let uiTile3Ok = false;
+        let uiCookieTransferOk = false;
+        let simultaneousStop3Ok = false;
+        let healthQueueBatchOk = false;
         let backupValidationOk = false;
         try {
-            const batchCreated = await cdp.eval(`
-                window.electronAPI.chromeEnvironments.batchCreate({
-                    namePrefix: 'BatchNode',
-                    groupName: 'BatchGroup',
-                    count: 2,
-                    startNumber: 1,
-                    browserEngine: 'system-chrome',
-                })
-            `);
-            batchCreateOk =
-                Array.isArray(batchCreated) &&
-                batchCreated.length === 2 &&
-                batchCreated[0].name === 'BatchNode 01' &&
-                batchCreated[1].name === 'BatchNode 02' &&
-                Number.isInteger(batchCreated[0]?.fingerprintConfig?.seed) &&
-                batchCreated[0]?.fingerprintConfig?.seed !==
-                    batchCreated[1]?.fingerprintConfig?.seed;
+            await cdp.eval(`document.querySelector('nav button[aria-label="环境"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('table[aria-label="环境列表"]'))`),
+            );
 
-            if (batchCreated?.[0]?.id) {
-                const firstId = batchCreated[0].id;
-                await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.launch(${JSON.stringify(firstId)})`,
+            // 1) Create 3 environments via real UI modal
+            await cdp.eval(`window.__e2e.clickExact('新建环境', 'main button')`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('[role="dialog"] input[type="number"]'))`),
+            );
+            await cdp.eval(`(() => {
+                const dlg = document.querySelector('[role="dialog"]');
+                const qty = dlg.querySelector('input[type="number"]');
+                window.__e2e.setReactValue(qty, '3');
+            })()`);
+            await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[role="dialog"]')?.innerText || '').includes('名称前缀')`),
+            );
+            await cdp.eval(`(() => {
+                const dlg = document.querySelector('[role="dialog"]');
+                const nameInput = dlg.querySelector('input[placeholder*="美国商店"], input[placeholder*="US Storefront"], input[type="text"]');
+                const groupInput = dlg.querySelector('input[placeholder*="选择或输入分组名称"]');
+                const engineSel = dlg.querySelector('select');
+                if (nameInput) window.__e2e.setReactValue(nameInput, 'MultiWin');
+                if (groupInput) window.__e2e.setReactValue(groupInput, 'MultiGroup');
+                if (engineSel) {
+                    engineSel.value = 'system-chrome';
+                    engineSel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            await sleep(100);
+            await cdp.eval(`document.querySelector('[role="dialog"] button[type="submit"]')?.click()`);
+            uiBulkCreateOk = await waitUntil(() =>
+                cdp.eval(`(() => {
+                    const txt = window.__e2e.bodyText();
+                    return txt.includes('MultiWin 01') && txt.includes('MultiWin 02') && txt.includes('MultiWin 03');
+                })()`),
+                8000,
+            );
+
+            // Filter to MultiGroup in sidebar and check all 3 rows via real checkboxes
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('aside button[title="MultiGroup"]'))`),
+            );
+            await cdp.eval(`document.querySelector('aside button[title="MultiGroup"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"])').length === 3`),
+            );
+            await cdp.eval(`document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"]) input[type="checkbox"]').forEach(cb => cb.click())`);
+            await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[aria-label="批量操作栏"]')?.innerText || '').includes('已选 3 项')`),
+            );
+
+            // 2) Click real Batch Launch button and verify ALL 3 windows launch simultaneously
+            await cdp.eval(`window.__e2e.clickByText('批量启动', '[aria-label="批量操作栏"] button')`);
+            simultaneousLaunch3Ok = await waitUntil(
+                () =>
+                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 3)`),
+                30000,
+                300,
+            );
+
+            // 3) Click real Tile Windows button in toolbar
+            const tileBtnVisible = await waitUntil(() =>
+                cdp.eval(`window.__e2e.clickExact('排列窗口', 'main button')`),
+                5000,
+            );
+            if (tileBtnVisible) {
+                uiTile3Ok = await waitUntil(() =>
+                    cdp.eval(`(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已宫格排列 3 个运行中窗口')`),
+                    8000,
                 );
+            }
+
+            // 4) Open MultiWin 01 details -> real CookieTransferDialog Import & Export (JSON + Netscape)
+            await cdp.eval(`(() => {
+                const row = Array.from(document.querySelectorAll('table[aria-label="环境列表"] tbody tr')).find(r => (r.innerText || '').includes('MultiWin 01'));
+                row?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+            })()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('[data-details-panel]'))`),
+            );
+            await cdp.eval(`(() => {
+                const btn = Array.from(document.querySelectorAll('[data-details-panel] button')).find(b => b.innerText.trim() === '导入');
+                btn?.click();
+            })()`);
+            await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[role="dialog"]')?.innerText || '').includes('导入 Cookie · MultiWin 01')`),
+            );
+            await cdp.eval(`(() => {
+                const dlg = document.querySelector('[role="dialog"]');
+                const ta = dlg.querySelector('textarea');
+                if (ta) window.__e2e.setReactValue(ta, JSON.stringify([{ name: 'mc_e2e_session', value: 'ok_160', domain: '127.0.0.1', path: '/' }]));
+            })()`);
+            await sleep(100);
+            await cdp.eval(`window.__e2e.clickExact('导入并写入', '[role="dialog"] button')`);
+            await waitUntil(() =>
+                cdp.eval(`!document.querySelector('[role="dialog"]')`),
+                8000,
+            );
+            await cdp.eval(`(() => {
+                const btn = Array.from(document.querySelectorAll('[data-details-panel] button')).find(b => b.innerText.trim() === '导出');
+                btn?.click();
+            })()`);
+            const exportedJsonOk = await waitUntil(() =>
+                cdp.eval(`(() => {
+                    const ta = document.querySelector('[role="dialog"] textarea');
+                    return Boolean(ta && ta.value.includes('mc_e2e_session') && ta.value.includes('ok_160'));
+                })()`),
+                8000,
+            );
+            await cdp.eval(`(() => {
+                const sel = document.querySelector('[role="dialog"] select');
+                if (sel) {
+                    sel.value = 'netscape';
+                    sel.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            const exportedNetscapeOk = await waitUntil(() =>
+                cdp.eval(`(() => {
+                    const ta = document.querySelector('[role="dialog"] textarea');
+                    return Boolean(ta && ta.value.includes('mc_e2e_session\\tok_160'));
+                })()`),
+                8000,
+            );
+            uiCookieTransferOk = Boolean(exportedJsonOk && exportedNetscapeOk);
+            await cdp.eval(`window.__e2e.clickExact('关闭', '[role="dialog"] button')`);
+            await waitUntil(() => cdp.eval(`!document.querySelector('[role="dialog"]')`));
+            await cdp.eval(`document.querySelector('[data-details-panel] button[aria-label="关闭详情面板"]')?.click()`);
+
+            // 5) Simultaneous Batch Stop via real Batch Bar button
+            await cdp.eval(`window.__e2e.clickByText('批量关闭', '[aria-label="批量操作栏"] button')`);
+            simultaneousStop3Ok = await waitUntil(
+                () =>
+                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 0)`),
+                15000,
+            );
+
+            // 6) Enable Pre-Launch Check in Settings -> verify Batch Health Queue "启动全部（2）" launches 2 windows together
+            await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-privacy"]'))`),
+            );
+            await cdp.eval(`document.querySelector('[data-testid="settings-tab-privacy"]').click()`);
+            const toggleHealthSetting = async (expectedState) => {
+                const desired = Boolean(expectedState);
                 await waitUntil(() =>
-                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => Boolean(list.find(e => e.id === ${JSON.stringify(firstId)})?.isRunning))`),
+                    cdp.eval(`Array.from(document.querySelectorAll('span')).some(s => (s.textContent || '').trim() === '启动前安全检查')`),
                 );
-
-                const sampleCookies = [
-                    {
-                        name: 'mc_e2e_session',
-                        value: 'ok_160',
-                        domain: '127.0.0.1',
-                        path: '/',
-                    },
-                ];
-                const importRes = await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.importCookies(${JSON.stringify(firstId)}, ${JSON.stringify(JSON.stringify(sampleCookies))})`,
+                await cdp.eval(`(() => {
+                    const lbl = Array.from(document.querySelectorAll('span')).find(s => (s.textContent || '').trim() === '启动前安全检查');
+                    const row = lbl?.closest('div');
+                    const sw = row?.querySelector('input[type="checkbox"]');
+                    if (sw && Boolean(sw.checked) !== ${desired}) {
+                        sw.click();
+                    }
+                })()`);
+                await sleep(150);
+                const btnDirty = await waitUntil(() =>
+                    cdp.eval(`(document.querySelector('main button[type="submit"]')?.innerText || '').includes('保存设置')`),
+                    3000,
                 );
-                const exportJson = await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.exportCookies(${JSON.stringify(firstId)}, 'json')`,
-                );
-                const exportNetscape = await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.exportCookies(${JSON.stringify(firstId)}, 'netscape')`,
-                );
-                cookieRoundTripOk =
-                    Number(importRes?.importedCount) === 1 &&
-                    exportJson?.format === 'json' &&
-                    String(exportJson?.content || '').includes('mc_e2e_session') &&
-                    String(exportJson?.content || '').includes('ok_160') &&
-                    exportNetscape?.format === 'netscape' &&
-                    String(exportNetscape?.content || '').includes('mc_e2e_session\tok_160');
-
-                const tileRes = await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.tileWindows()`,
-                );
-                tileWindowsOk = Number(tileRes?.tiledCount) >= 1;
-
-                await cdp.eval(
-                    `window.electronAPI.chromeEnvironments.close(${JSON.stringify(firstId)})`,
-                );
-                await waitUntil(() =>
-                    cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => !list.find(e => e.id === ${JSON.stringify(firstId)})?.isRunning)`),
-                );
-                for (const item of batchCreated) {
-                    await cdp.eval(
-                        `window.electronAPI.chromeEnvironments.delete(${JSON.stringify(item.id)})`,
+                if (btnDirty) {
+                    await cdp.eval(`window.__e2e.clickExact('保存设置', 'main button')`);
+                    await waitUntil(() =>
+                        cdp.eval(`(document.querySelector('main button[type="submit"]')?.innerText || '').includes('已保存')`),
+                        5000,
                     );
                 }
+                const savedSetting = await cdp.eval(`window.electronAPI.settings.getSettings().then(s => Boolean(s.requireHealthCheckOnLaunch))`);
+                if (savedSetting !== desired) {
+                    throw new Error(`Failed to persist requireHealthCheckOnLaunch=${desired}, got ${savedSetting}`);
+                }
+            };
+            await toggleHealthSetting(true);
+
+            await cdp.eval(`document.querySelector('nav button[aria-label="环境"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('aside button[title="MultiGroup"]'))`),
+            );
+            await cdp.eval(`document.querySelector('aside button[title="MultiGroup"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"])').length === 3`),
+            );
+            // EnvironmentsPage remounted cleanly with empty selection: select first 2 rows
+            await cdp.eval(`(() => {
+                const cbs = document.querySelectorAll('table[aria-label="环境列表"] tbody tr:not([aria-hidden="true"]) input[type="checkbox"]');
+                if (cbs[0]) cbs[0].click();
+                if (cbs[1]) cbs[1].click();
+            })()`);
+            await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[aria-label="批量操作栏"]')?.innerText || '').includes('已选 2 项')`),
+                5000,
+            );
+            await cdp.eval(`window.__e2e.clickByText('批量启动', '[aria-label="批量操作栏"] button')`);
+            const healthAllBtnReady = await waitUntil(() =>
+                cdp.eval(`Boolean(Array.from(document.querySelectorAll('[role="dialog"] button')).find(b => !b.disabled && (b.innerText || '').includes('启动全部（2）')))`),
+                10000,
+            );
+            if (healthAllBtnReady) {
+                await cdp.eval(`window.__e2e.clickByText('启动全部（2）', '[role="dialog"] button')`);
+                healthQueueBatchOk = await waitUntil(
+                    () =>
+                        cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 2)`),
+                    25000,
+                    300,
+                );
             }
+
+            // Cleanup settings toggle, close running windows, and batch-delete MultiGroup items via UI
+            await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-privacy"]'))`),
+            );
+            await cdp.eval(`document.querySelector('[data-testid="settings-tab-privacy"]').click()`);
+            await toggleHealthSetting(false);
+
+            await cdp.eval(`document.querySelector('nav button[aria-label="环境"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`Boolean(document.querySelector('table[aria-label="环境列表"] thead input[type="checkbox"]'))`),
+            );
+            await cdp.eval(`window.electronAPI.chromeEnvironments.closeAll()`).catch(() => {});
+            await waitUntil(() =>
+                cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup' && e.isRunning).length === 0)`),
+                12000,
+            );
+            await cdp.eval(`document.querySelector('table[aria-label="环境列表"] thead input[type="checkbox"]')?.click()`);
+            await waitUntil(() =>
+                cdp.eval(`(document.querySelector('[aria-label="批量操作栏"]')?.innerText || '').includes('已选 3 项')`),
+                5000,
+            );
+            await cdp.eval(`window.__e2e.clickByText('移入回收站', '[aria-label="批量操作栏"] button')`);
+            await waitUntil(() =>
+                cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => list.filter(e => e.groupName === 'MultiGroup').length === 0)`),
+                8000,
+            );
 
             backupValidationOk = await cdp.eval(`(async () => {
                 try {
@@ -1838,8 +2136,8 @@ async function main() {
                     return msg.includes('8');
                 }
             })()`);
-        } catch (err13) {
-            e2e13Error = err13 instanceof Error ? err13.message : String(err13);
+        } catch (err14) {
+            e2e14Error = err14 instanceof Error ? err14.message : String(err14);
         } finally {
             await cdp.eval(`window.electronAPI.chromeEnvironments.closeAll()`).catch(() => {});
         }
@@ -1891,14 +2189,29 @@ async function main() {
 
         record(
             'E2E-13',
-            '批量创建环境 + 原生 CDP Cookie 导入导出 + 一键宫格平铺 + 加密备份密码校验',
+            '表格复选框与操作列零裁切校验（含时区列与代理列表）+ 批量操作栏间距检查',
             Boolean(
-                batchCreateOk &&
-                    cookieRoundTripOk &&
-                    tileWindowsOk &&
+                envCheckboxesUnclipped &&
+                    envActionsUnclipped &&
+                    batchBarGapOk &&
+                    proxyLayoutUnclipped,
+            ),
+            `envCb=${envCheckboxesUnclipped}, envActions=${envActionsUnclipped}, batchGap=${batchBarGapOk}, proxyLayout=${proxyLayoutUnclipped}${e2e13Error ? `, err=${e2e13Error}` : ''}`,
+        );
+
+        record(
+            'E2E-14',
+            '真实界面批量新建（3 环境）+ 多选同时 3 窗口并发启动 + 宫格平铺 + UI Cookie 导入导出 + 并发批量关闭 + 安全检查排队全启',
+            Boolean(
+                uiBulkCreateOk &&
+                    simultaneousLaunch3Ok &&
+                    uiTile3Ok &&
+                    uiCookieTransferOk &&
+                    simultaneousStop3Ok &&
+                    healthQueueBatchOk &&
                     backupValidationOk,
             ),
-            `batchCreate=${batchCreateOk}, cookie=${cookieRoundTripOk}, tile=${tileWindowsOk}, backupPwdCheck=${backupValidationOk}${e2e13Error ? `, err=${e2e13Error}` : ''}`,
+            `bulkCreate=${uiBulkCreateOk}, launch3=${simultaneousLaunch3Ok}, tile3=${uiTile3Ok}, cookieUI=${uiCookieTransferOk}, stop3=${simultaneousStop3Ok}, healthQueue2=${healthQueueBatchOk}, backupPwdCheck=${backupValidationOk}${e2e14Error ? `, err=${e2e14Error}` : ''}`,
         );
     } finally {
         cdp?.close();

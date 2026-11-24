@@ -58,8 +58,15 @@ interface EnvironmentsPageProps {
     workspaceWidth: number;
     overlayDetails: boolean;
     onCreateClick: () => void;
-    onLaunch: (id: string) => Promise<void>;
-    onClose: (id: string) => Promise<void>;
+    onLaunch: (id: string) => Promise<boolean>;
+    onBatchLaunch?: (
+        ids: string[],
+    ) => Promise<{
+        launchedCount: number;
+        deferredCount: number;
+        failedCount: number;
+    }>;
+    onClose: (id: string) => Promise<boolean>;
     onClone?: (id: string) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
     onRefresh: () => Promise<void>;
@@ -92,6 +99,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     overlayDetails,
     onCreateClick,
     onLaunch,
+    onBatchLaunch,
     onClose,
     onClone,
     onDelete,
@@ -116,9 +124,18 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         onSelectEnv,
         onToggleDetails,
         onLaunch,
+        onBatchLaunch,
         onClose,
         onRefresh,
     });
+
+    const optionalColWidths: Record<OptionalEnvColumn, number> = {
+        timezone: 176,
+        language: 84,
+        notes: 150,
+        createdAt: 116,
+        id: 104,
+    };
 
     const listWidth =
         workspaceWidth -
@@ -130,6 +147,10 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     const showGroupCol = !narrowWindow && currentGroup === '用户分组';
     const showLastUsedCol = !narrowWindow;
     const showProxyCol = !narrowWindow;
+    const optionalColsWidth = activeOptionalCols.reduce(
+        (sum, key) => sum + (optionalColWidths[key] || 120),
+        0,
+    );
     const visibleColumnCount =
         4 +
         (showGroupCol ? 1 : 0) +
@@ -391,12 +412,15 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             aria-label={t('环境列表', 'Environments table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 404
-                                    : ws.nameWidth +
-                                      ws.proxyWidth +
-                                      348 +
+                                    ? 424
+                                    : 44 +
+                                      ws.nameWidth +
+                                      88 +
                                       (showGroupCol ? 88 : 0) +
-                                      activeOptionalCols.length * 140,
+                                      (showProxyCol ? ws.proxyWidth : 0) +
+                                      optionalColsWidth +
+                                      (showLastUsedCol ? 100 : 0) +
+                                      152,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -404,12 +428,15 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     <th
                                         className={styles.th}
                                         style={{
-                                            width: '36px',
+                                            width: '44px',
                                             paddingLeft: '14px',
                                             paddingRight: '4px',
+                                            overflow: 'visible',
+                                            textOverflow: 'clip',
                                         }}
                                     >
                                         <Checkbox
+                                            style={{ marginLeft: '-2px' }}
                                             checked={
                                                 allFilteredChecked
                                                     ? true
@@ -529,7 +556,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: '132px' }}
+                                        style={{ width: '152px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>
@@ -677,8 +704,12 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     overlay={overlayDetails}
                     hasFingerprintKernel={hasFingerprintKernel}
                     onClose={() => onToggleDetails(false)}
-                    onLaunch={onLaunch}
-                    onStop={onClose}
+                    onLaunch={async (id) => {
+                        await onLaunch(id);
+                    }}
+                    onStop={async (id) => {
+                        await onClose(id);
+                    }}
                     onClone={onClone}
                     onInspectHealth={(env) => ws.setHealthTargetId(env.id)}
                     onDelete={(env) => ws.setDeleteTarget(env)}

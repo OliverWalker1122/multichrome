@@ -101,7 +101,7 @@ export const useEnvironmentsStyles = makeStyles({
             paddingLeft: '24px',
         },
         '&:last-child': {
-            paddingRight: '18px',
+            paddingRight: '14px',
         },
     },
     row: {
@@ -132,8 +132,15 @@ export const useEnvironmentsStyles = makeStyles({
             paddingLeft: '24px',
         },
         '&:last-child': {
-            paddingRight: '18px',
+            paddingRight: '14px',
         },
+    },
+    checkboxCell: {
+        width: '44px',
+        paddingLeft: '14px',
+        paddingRight: '4px',
+        overflow: 'visible',
+        textOverflow: 'clip',
     },
     groupLabel: {
         display: 'flex',
@@ -211,6 +218,7 @@ export const useEnvironmentsStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'flex-start',
         gap: '4px',
+        whiteSpace: 'nowrap',
     },
     runButton: {
         minWidth: '64px',
@@ -389,7 +397,7 @@ export const useEnvironmentsStyles = makeStyles({
         alignItems: 'center',
         flexWrap: 'wrap',
         gap: '6px',
-        margin: '0 24px 8px 24px',
+        margin: '8px 24px 8px 24px',
         padding: '6px 12px',
         borderRadius: '8px',
         backgroundColor: 'var(--glass-card-inner)',

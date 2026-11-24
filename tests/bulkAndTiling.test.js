@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBulkEnvironmentSpecs } from '../electron/domain/bulkEnvironmentPolicy.js';
 import { computeWindowGridBounds } from '../electron/domain/windowTiling.js';
+import { DebugPortReservationPool } from '../electron/drivers/portAllocator.js';
 
 test('buildBulkEnvironmentSpecs creates unique fingerprint seeds and sequential proxy distribution', () => {
     const specs = buildBulkEnvironmentSpecs(
@@ -88,4 +89,20 @@ test('computeWindowGridBounds calculates non-overlapping integer grids within di
     assert.equal(six.length, 6);
     assert.ok(six[0].top === six[2].top);
     assert.ok(six[3].top > six[0].top);
+});
+
+test('DebugPortReservationPool yields distinct ports under concurrent acquire()', async () => {
+    const pool = new DebugPortReservationPool();
+    const ports = await Promise.all(
+        Array.from({ length: 8 }, () => pool.acquire(25000, 25020, 40)),
+    );
+    try {
+        assert.equal(ports.length, 8);
+        assert.equal(new Set(ports).size, 8);
+        for (const p of ports) {
+            assert.ok(Number.isInteger(p) && p > 1024);
+        }
+    } finally {
+        for (const p of ports) pool.release(p);
+    }
 });

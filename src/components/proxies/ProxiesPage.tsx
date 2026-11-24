@@ -320,8 +320,8 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             aria-label={t('代理列表', 'Proxies table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 648
-                                    : ctrl.nameWidth + 682,
+                                    ? 676
+                                    : 44 + ctrl.nameWidth + 666,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -329,12 +329,15 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                     <th
                                         className={styles.th}
                                         style={{
-                                            width: '36px',
+                                            width: '44px',
                                             paddingLeft: '14px',
                                             paddingRight: '4px',
+                                            overflow: 'visible',
+                                            textOverflow: 'clip',
                                         }}
                                     >
                                         <Checkbox
+                                            style={{ marginLeft: '-2px' }}
                                             checked={
                                                 ctrl.filtered.length > 0 &&
                                                 ctrl.filtered.every((p) =>
@@ -404,7 +407,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                     </th>
                                     <th
                                         className={styles.th}
-                                        style={{ width: '132px' }}
+                                        style={{ width: '152px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>
