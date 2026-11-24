@@ -4,7 +4,7 @@ import http from 'node:http';
 import {
     probeProxyExitInfo,
     resolveProxyIPViaHttpProxy,
-} from '../electron/proxyProbeClient.js';
+} from '../electron/drivers/proxyProbeClient.js';
 
 for (const authenticated of [false, true]) {
     test(`生产 HTTP 出口探测${authenticated ? '有认证' : '无认证'}完整发送请求头并及时取得 IP`, async (t) => {

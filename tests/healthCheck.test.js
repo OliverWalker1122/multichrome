@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateEnvironmentHealth } from '../electron/healthCheck.js';
+import { evaluateEnvironmentHealth } from '../electron/domain/healthCheck.js';
 
 test('evaluateEnvironmentHealth returns overall pass when proxy, geo, language, WebRTC and C++ kernel are healthy', () => {
     const report = evaluateEnvironmentHealth({

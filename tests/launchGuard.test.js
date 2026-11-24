@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     evaluateLaunchConsistency,
     getTimeZoneOffsetMinutes,
-} from '../electron/launchGuard.js';
+} from '../electron/domain/launchGuard.js';
 
 test('evaluateLaunchConsistency passes cleanly when timezone/language align or use defaults', () => {
     const res = evaluateLaunchConsistency({

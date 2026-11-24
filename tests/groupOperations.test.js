@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     DEFAULT_GROUP_NAME,
-    executeDeleteGroup,
-    executeRenameGroup,
     normalizeDeleteGroupOptions,
     normalizeRenameGroupOptions,
-} from '../electron/groupOperations.js';
+} from '../electron/domain/groupPolicy.js';
+import {
+    executeDeleteGroup,
+    executeRenameGroup,
+} from '../electron/repositories/groupRepository.js';
 
 function createMockEnvDb(initialRows) {
     const rows = initialRows.map((row) => ({ ...row }));

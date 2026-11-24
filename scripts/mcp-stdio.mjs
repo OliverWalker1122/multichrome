@@ -5,8 +5,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const candidates = [
-    path.resolve(__dirname, '..', 'electron', 'mcpStdioBridge.js'),
-    path.resolve(__dirname, '..', 'dist', 'electron', 'mcpStdioBridge.js'),
+    path.resolve(
+        __dirname,
+        '..',
+        'electron',
+        'transport',
+        'mcpStdioBridge.js',
+    ),
+    path.resolve(
+        __dirname,
+        '..',
+        'dist',
+        'electron',
+        'transport',
+        'mcpStdioBridge.js',
+    ),
 ];
 
 const bridgePath = candidates.find((candidate) => fs.existsSync(candidate));

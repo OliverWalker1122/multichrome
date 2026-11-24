@@ -10,7 +10,7 @@ import {
     normalizeTagName,
     parseStoredEnvironmentTags,
     parseTagInput,
-} from '../electron/environmentTags.js';
+} from '../electron/domain/environmentTags.js';
 
 test('normalizeTagName trims, collapses spaces, and enforces max length', () => {
     assert.equal(normalizeTagName('  US   West  '), 'US West');

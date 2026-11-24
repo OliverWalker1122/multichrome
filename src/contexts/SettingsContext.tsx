@@ -1,7 +1,15 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+} from 'react';
 import { AppLocale, AppSettings, ThemeMode } from '../types';
 import { useErrorHandler } from '../hooks/useErrorHandler';
-import { getStoredLocale, saveStoredLocale } from '../i18n';
+import { getStoredLocale, I18nProvider, saveStoredLocale } from '../i18n';
+import { systemApi } from '../services';
 
 interface SettingsContextType {
     settings: AppSettings;
@@ -17,14 +25,18 @@ interface SettingsContextType {
     };
 }
 
-const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
+const SettingsContext = createContext<SettingsContextType | undefined>(
+    undefined,
+);
 
 function getSystemPrefersDark(): boolean {
     if (typeof window === 'undefined' || !window.matchMedia) return true;
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
+    children,
+}) => {
     const [settings, setSettings] = useState<AppSettings>({
         dataPath: '',
         globalProxy: { enabled: false, address: '' },
@@ -33,14 +45,15 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         locale: getStoredLocale(),
     });
     const [loading, setLoading] = useState<boolean>(true);
-    const [systemDark, setSystemDark] = useState<boolean>(getSystemPrefersDark);
+    const [systemDark, setSystemDark] =
+        useState<boolean>(getSystemPrefersDark);
     const { handleError } = useErrorHandler();
 
     const themeMode: ThemeMode = settings.theme || 'system';
     const locale: AppLocale = settings.locale === 'en-US' ? 'en-US' : 'zh-CN';
-    const isDark = themeMode === 'dark' || (themeMode === 'system' && systemDark);
+    const isDark =
+        themeMode === 'dark' || (themeMode === 'system' && systemDark);
 
-    // 同步界面语言到 document 与本地缓存
     useEffect(() => {
         saveStoredLocale(locale);
         document.title =
@@ -49,37 +62,37 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 : 'MultiChrome - Chrome多环境管理工具';
     }, [locale]);
 
-    // 监听系统深浅色切换
     useEffect(() => {
         if (typeof window === 'undefined' || !window.matchMedia) return;
         const mql = window.matchMedia('(prefers-color-scheme: dark)');
-        const listener = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+        const listener = (event: MediaQueryListEvent) =>
+            setSystemDark(event.matches);
         mql.addEventListener('change', listener);
         return () => mql.removeEventListener('change', listener);
     }, []);
 
-    // 同步原生 Windows 标题栏按钮覆盖颜色
     useEffect(() => {
         document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-        void window.electronAPI?.app?.setTheme(themeMode, isDark).catch(() => {
-            // 忽略非 Electron 环境调用
+        void systemApi.setTheme(themeMode, isDark).catch(() => {
+            // ignore outside Electron
         });
     }, [themeMode, isDark]);
 
     const loadSettings = useCallback(async () => {
-        if (!window.electronAPI || !window.electronAPI.settings) {
+        if (!systemApi.hasSettingsApi()) {
             setLoading(false);
             return;
         }
 
         try {
             setLoading(true);
-            const appSettings = await window.electronAPI.settings.getSettings();
+            const appSettings = await systemApi.getSettings();
             setSettings({
                 ...appSettings,
                 theme: appSettings.theme || 'system',
                 locale:
-                    appSettings.locale === 'en-US' || appSettings.locale === 'zh-CN'
+                    appSettings.locale === 'en-US' ||
+                    appSettings.locale === 'zh-CN'
                         ? appSettings.locale
                         : getStoredLocale(),
             });
@@ -95,7 +108,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const saveSettings = useCallback(
         async (newSettings: AppSettings): Promise<boolean> => {
-            if (!window.electronAPI || !window.electronAPI.settings) {
+            if (!systemApi.hasSettingsApi()) {
                 handleError(
                     new Error(
                         getStoredLocale() === 'en-US'
@@ -108,7 +121,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
 
             try {
-                const success = await window.electronAPI.settings.saveSettings(newSettings);
+                const success = await systemApi.saveSettings(newSettings);
                 if (success) {
                     setSettings(newSettings);
                 }
@@ -128,11 +141,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         async (nextTheme: ThemeMode) => {
             const nextSettings: AppSettings = { ...settings, theme: nextTheme };
             setSettings(nextSettings);
-            if (window.electronAPI?.settings && nextSettings.dataPath) {
+            if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
                 try {
-                    await window.electronAPI.settings.saveSettings(nextSettings);
+                    await systemApi.saveSettings(nextSettings);
                 } catch {
-                    // 仅切换实时外观；数据目录未就绪时由设置页保存
+                    // keep live theme if dataPath is not ready
                 }
             }
         },
@@ -142,13 +155,16 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const setLocale = useCallback(
         async (nextLocale: AppLocale) => {
             saveStoredLocale(nextLocale);
-            const nextSettings: AppSettings = { ...settings, locale: nextLocale };
+            const nextSettings: AppSettings = {
+                ...settings,
+                locale: nextLocale,
+            };
             setSettings(nextSettings);
-            if (window.electronAPI?.settings && nextSettings.dataPath) {
+            if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
                 try {
-                    await window.electronAPI.settings.saveSettings(nextSettings);
+                    await systemApi.saveSettings(nextSettings);
                 } catch {
-                    // 数据目录未就绪时保留前端本地缓存
+                    // keep local cache if dataPath is not ready
                 }
             }
         },
@@ -158,6 +174,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     useEffect(() => {
         void loadSettings();
     }, [loadSettings]);
+
+    const i18nValue = useMemo(
+        () => ({ locale, setLocale }),
+        [locale, setLocale],
+    );
 
     const contextValue: SettingsContextType = {
         settings,
@@ -173,7 +194,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         },
     };
 
-    return <SettingsContext.Provider value={contextValue}>{children}</SettingsContext.Provider>;
+    return (
+        <SettingsContext.Provider value={contextValue}>
+            <I18nProvider value={i18nValue}>{children}</I18nProvider>
+        </SettingsContext.Provider>
+    );
 };
 
 export const useSettings = (): SettingsContextType => {

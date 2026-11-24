@@ -6,7 +6,7 @@ import {
     normalizeProxyConfig,
     buildSingboxConfig,
     redactConfig,
-} from '../electron/singboxConfig.js';
+} from '../electron/domain/singboxConfig.js';
 
 test('一行代理支持认证URL、供应商四段格式和IPv6，正确还原编码', () => {
     assert.deepEqual(

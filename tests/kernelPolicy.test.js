@@ -8,7 +8,7 @@ import {
     getAllowedSingboxReleases,
     getKernelUpdateSummary,
     loadKernelManifest,
-} from '../electron/kernelPolicy.js';
+} from '../electron/domain/kernelPolicy.js';
 
 test('kernelManifest.json contains valid SHA-256 entries and exactly one recommended version per core', () => {
     const manifest = loadKernelManifest();

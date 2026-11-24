@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
+import React, {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useReducer,
+    useRef,
+} from 'react';
 import {
     BrowserEngineType,
     ChromeEnvironment,
@@ -9,6 +16,7 @@ import {
 } from '../types';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { tr } from '../i18n';
+import { environmentApi } from '../services';
 
 interface EnvironmentState {
     environments: ChromeEnvironment[];
@@ -33,7 +41,10 @@ const initialState: EnvironmentState = {
     emptyGroups: [],
 };
 
-function environmentReducer(state: EnvironmentState, action: EnvironmentAction): EnvironmentState {
+function environmentReducer(
+    state: EnvironmentState,
+    action: EnvironmentAction,
+): EnvironmentState {
     switch (action.type) {
         case 'SET_LOADING':
             return { ...state, loading: action.payload };
@@ -53,7 +64,9 @@ function environmentReducer(state: EnvironmentState, action: EnvironmentAction):
         case 'REMOVE_ENVIRONMENT':
             return {
                 ...state,
-                environments: state.environments.filter((env) => env.id !== action.payload),
+                environments: state.environments.filter(
+                    (env) => env.id !== action.payload,
+                ),
             };
         case 'ADD_ENVIRONMENT':
             return {
@@ -87,7 +100,9 @@ interface EnvironmentContextType {
             id: string,
             customName?: string,
         ) => Promise<ChromeEnvironment>;
-        regenerateFingerprint: (id: string) => Promise<ChromeEnvironment | undefined>;
+        regenerateFingerprint: (
+            id: string,
+        ) => Promise<ChromeEnvironment | undefined>;
         launchEnvironment: (id: string) => Promise<void>;
         closeEnvironment: (id: string) => Promise<void>;
         deleteEnvironment: (id: string) => Promise<void>;
@@ -110,21 +125,29 @@ interface EnvironmentContextType {
     };
 }
 
-const EnvironmentContext = createContext<EnvironmentContextType | undefined>(undefined);
+const EnvironmentContext = createContext<EnvironmentContextType | undefined>(
+    undefined,
+);
 
-export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({
+    children,
+}) => {
     const [state, dispatch] = useReducer(environmentReducer, initialState);
     const { handleError } = useErrorHandler();
     const envsRef = useRef<ChromeEnvironment[]>([]);
     envsRef.current = state.environments;
 
-    // 加载环境列表（silent=true 时不触发 loading 闪烁，避免列表跳动或抢焦点）
     const loadEnvironments = useCallback(
         async (silent = false) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 if (!silent) {
                     handleError(
-                        new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                        new Error(
+                            tr(
+                                'Electron API未正确加载',
+                                'Electron API failed to load',
+                            ),
+                        ),
                         tr('加载环境列表', 'Load Environments'),
                     );
                     dispatch({ type: 'SET_LOADING', payload: false });
@@ -136,11 +159,14 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 if (!silent) {
                     dispatch({ type: 'SET_LOADING', payload: true });
                 }
-                const envs = await window.electronAPI.chromeEnvironments.getAll();
+                const envs = await environmentApi.getAll();
                 dispatch({ type: 'SET_ENVIRONMENTS', payload: envs });
             } catch (err) {
                 if (!silent) {
-                    handleError(err, tr('加载Chrome环境', 'Load Chrome Environments'));
+                    handleError(
+                        err,
+                        tr('加载Chrome环境', 'Load Chrome Environments'),
+                    );
                 }
             } finally {
                 if (!silent) {
@@ -152,12 +178,11 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
     );
 
     const loadEmptyGroups = useCallback(async () => {
-        if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+        if (!environmentApi.isAvailable()) {
             return;
         }
-
         try {
-            const emptyGroupsList = await window.electronAPI.chromeEnvironments.getEmptyGroups();
+            const emptyGroupsList = await environmentApi.getEmptyGroups();
             dispatch({ type: 'SET_EMPTY_GROUPS', payload: emptyGroupsList });
         } catch (err) {
             handleError(err, tr('加载空分组', 'Load Empty Groups'));
@@ -178,7 +203,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 tags?: string[];
             },
         ) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 const err = new Error(
                     tr('Electron API未正确加载', 'Electron API failed to load'),
                 );
@@ -187,7 +212,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
             }
 
             try {
-                const newEnv = await window.electronAPI.chromeEnvironments.create(
+                const newEnv = await environmentApi.create(
                     name,
                     groupName,
                     notes,
@@ -206,7 +231,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const cloneEnvironment = useCallback(
         async (id: string, customName?: string) => {
-            if (!window.electronAPI?.chromeEnvironments?.clone) {
+            if (!environmentApi.isAvailable()) {
                 const err = new Error(
                     tr('Electron API未正确加载', 'Electron API failed to load'),
                 );
@@ -214,10 +239,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 throw err;
             }
             try {
-                const cloned = await window.electronAPI.chromeEnvironments.clone(
-                    id,
-                    customName,
-                );
+                const cloned = await environmentApi.clone(id, customName);
                 dispatch({ type: 'ADD_ENVIRONMENT', payload: cloned });
                 return cloned;
             } catch (err) {
@@ -230,19 +252,27 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const regenerateFingerprint = useCallback(
         async (id: string) => {
-            if (!window.electronAPI?.chromeEnvironments?.regenerateFingerprint) {
+            if (!environmentApi.isAvailable()) {
                 handleError(
-                    new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                    new Error(
+                        tr(
+                            'Electron API未正确加载',
+                            'Electron API failed to load',
+                        ),
+                    ),
                     tr('重新生成指纹', 'Regenerate Fingerprint'),
                 );
                 return undefined;
             }
             try {
-                const updated = await window.electronAPI.chromeEnvironments.regenerateFingerprint(id);
+                const updated = await environmentApi.regenerateFingerprint(id);
                 dispatch({ type: 'UPDATE_ENVIRONMENT', payload: updated });
                 return updated;
             } catch (err) {
-                handleError(err, tr('重新生成指纹', 'Regenerate Fingerprint'));
+                handleError(
+                    err,
+                    tr('重新生成指纹', 'Regenerate Fingerprint'),
+                );
                 return undefined;
             }
         },
@@ -251,16 +281,21 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const launchEnvironment = useCallback(
         async (id: string) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 handleError(
-                    new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                    new Error(
+                        tr(
+                            'Electron API未正确加载',
+                            'Electron API failed to load',
+                        ),
+                    ),
                     tr('启动环境', 'Launch Environment'),
                 );
                 return;
             }
 
             try {
-                await window.electronAPI.chromeEnvironments.launch(id);
+                await environmentApi.launch(id);
                 const updatedEnv = envsRef.current.find((env) => env.id === id);
                 if (updatedEnv) {
                     dispatch({
@@ -281,16 +316,21 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const closeEnvironment = useCallback(
         async (id: string) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 handleError(
-                    new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                    new Error(
+                        tr(
+                            'Electron API未正确加载',
+                            'Electron API failed to load',
+                        ),
+                    ),
                     tr('关闭环境', 'Close Environment'),
                 );
                 return;
             }
 
             try {
-                await window.electronAPI.chromeEnvironments.close(id);
+                await environmentApi.close(id);
                 const updatedEnv = envsRef.current.find((env) => env.id === id);
                 if (updatedEnv) {
                     dispatch({
@@ -308,16 +348,21 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const deleteEnvironment = useCallback(
         async (id: string) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 handleError(
-                    new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                    new Error(
+                        tr(
+                            'Electron API未正确加载',
+                            'Electron API failed to load',
+                        ),
+                    ),
                     tr('删除环境', 'Delete Environment'),
                 );
                 return;
             }
 
             try {
-                await window.electronAPI.chromeEnvironments.delete(id);
+                await environmentApi.delete(id);
                 dispatch({ type: 'REMOVE_ENVIRONMENT', payload: id });
                 void loadEmptyGroups();
             } catch (err) {
@@ -333,18 +378,19 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
             data: Partial<ChromeEnvironment>,
             options?: { throwOnError?: boolean },
         ) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 const err = new Error(
                     tr('Electron API未正确加载', 'Electron API failed to load'),
                 );
-                if (!options?.throwOnError)
+                if (!options?.throwOnError) {
                     handleError(err, tr('更新环境', 'Update Environment'));
+                }
                 if (options?.throwOnError) throw err;
                 return undefined;
             }
 
             try {
-                const updatedEnv = await window.electronAPI.chromeEnvironments.update(id, data);
+                const updatedEnv = await environmentApi.update(id, data);
                 dispatch({ type: 'UPDATE_ENVIRONMENT', payload: updatedEnv });
                 void loadEmptyGroups();
                 return updatedEnv;
@@ -361,19 +407,19 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const renameGroup = useCallback(
         async (oldName: string, newName: string) => {
-            if (!window.electronAPI?.chromeEnvironments?.renameGroup) {
+            if (!environmentApi.isAvailable()) {
                 const err = new Error(
                     tr('Electron API未正确加载', 'Electron API failed to load'),
                 );
                 handleError(err, tr('重命名分组', 'Rename Group'));
                 throw err;
             }
-            const result = await window.electronAPI.chromeEnvironments.renameGroup(
-                oldName,
-                newName,
-            );
+            const result = await environmentApi.renameGroup(oldName, newName);
             if (state.currentGroup === oldName) {
-                dispatch({ type: 'SET_CURRENT_GROUP', payload: result.newName });
+                dispatch({
+                    type: 'SET_CURRENT_GROUP',
+                    payload: result.newName,
+                });
             }
             await Promise.all([loadEnvironments(true), loadEmptyGroups()]);
             return result;
@@ -383,7 +429,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const deleteGroup = useCallback(
         async (groupName: string, options?: DeleteGroupOptions) => {
-            if (!window.electronAPI?.chromeEnvironments?.deleteGroup) {
+            if (!environmentApi.isAvailable()) {
                 const err = new Error(
                     tr('Electron API未正确加载', 'Electron API failed to load'),
                 );
@@ -391,10 +437,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 throw err;
             }
 
-            const result = await window.electronAPI.chromeEnvironments.deleteGroup(
-                groupName,
-                options,
-            );
+            const result = await environmentApi.deleteGroup(groupName, options);
             if (state.currentGroup === groupName) {
                 dispatch({ type: 'SET_CURRENT_GROUP', payload: '用户分组' });
             }
@@ -406,19 +449,28 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     const deleteEmptyGroup = useCallback(
         async (groupName: string) => {
-            if (!window.electronAPI || !window.electronAPI.chromeEnvironments) {
+            if (!environmentApi.isAvailable()) {
                 handleError(
-                    new Error(tr('Electron API未正确加载', 'Electron API failed to load')),
+                    new Error(
+                        tr(
+                            'Electron API未正确加载',
+                            'Electron API failed to load',
+                        ),
+                    ),
                     tr('删除分组', 'Delete Group'),
                 );
                 return;
             }
 
             try {
-                const success = await window.electronAPI.chromeEnvironments.deleteEmptyGroup(groupName);
+                const success =
+                    await environmentApi.deleteEmptyGroup(groupName);
                 if (success) {
                     if (state.currentGroup === groupName) {
-                        dispatch({ type: 'SET_CURRENT_GROUP', payload: '用户分组' });
+                        dispatch({
+                            type: 'SET_CURRENT_GROUP',
+                            payload: '用户分组',
+                        });
                     }
                     void loadEmptyGroups();
                 }
@@ -438,7 +490,7 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }, [loadEnvironments, loadEmptyGroups]);
 
     useEffect(() => {
-        if (window.electronAPI && window.electronAPI.chromeEnvironments) {
+        if (environmentApi.isAvailable()) {
             void loadEnvironments(false);
             void loadEmptyGroups();
         } else {
@@ -455,21 +507,11 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
         }
     }, [loadEnvironments, loadEmptyGroups, handleError]);
 
-    // 后台状态同步：静默刷新，不重置滚动条、不抢焦点
     useEffect(() => {
         const handleStatusChange = () => {
             void loadEnvironments(true);
         };
-
-        if (window.electronAPI && window.electronAPI.on) {
-            window.electronAPI.on('chrome-status-changed', handleStatusChange);
-        }
-
-        return () => {
-            if (window.electronAPI && window.electronAPI.removeListener) {
-                window.electronAPI.removeListener('chrome-status-changed', handleStatusChange);
-            }
-        };
+        return environmentApi.onStatusChanged(handleStatusChange);
     }, [loadEnvironments]);
 
     const contextValue: EnvironmentContextType = {
@@ -502,7 +544,9 @@ export const EnvironmentProvider: React.FC<{ children: React.ReactNode }> = ({ c
 export const useEnvironment = (): EnvironmentContextType => {
     const context = useContext(EnvironmentContext);
     if (context === undefined) {
-        throw new Error('useEnvironment must be used within an EnvironmentProvider');
+        throw new Error(
+            'useEnvironment must be used within an EnvironmentProvider',
+        );
     }
     return context;
 };

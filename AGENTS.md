@@ -37,7 +37,7 @@ MultiChrome 确立了统一、克制、原生级的 **Windows 11 Fluent 2 + 轻�
 
 2. **极简呼吸感与渐进式披露（Zero Text Wall · InfoTip First）**：
    - **单行清爽设置行**：设置项统一使用单行 `row`（`minHeight: 34px`，左标签 + 右控件，中间用 `1px` `colorNeutralStroke2` 分隔线），**严禁在每个开关/输入框下堆砌大段灰色解释副标题（`rowDesc`）**，更不得同时写长副标题又挂 `<InfoTip>` 重复解释。
-   - **解释收敛进 `<InfoTip>`**：原理说明、安全防线、路径与参数细节统一放进 [InfoTip.tsx](src/components/InfoTip.tsx)（`?` 悬浮提示），**严禁单独开辟大段「安全说明 / 科普 / Bullet 列表」卡片**（参考「设置 → 隐私 → 网络保护」）。
+   - **解释收敛进 `<InfoTip>`**：原理说明、安全防线、路径与参数细节统一放进 [InfoTip.tsx](src/components/common/InfoTip.tsx)（`?` 悬浮提示），**严禁单独开辟大段「安全说明 / 科普 / Bullet 列表」卡片**（参考「设置 → 隐私 → 网络保护」）。
    - **低频/高阶区块默认折叠**：高级配置、接入代码片段等非核心常驻内容采用「右侧摘要 + `subtle` 展开/收起按钮（`ChevronDownRegular` / `ChevronUpRegular`）」折叠展示（参考「设置 → 隐私 → 设备伪装」），确保常规设置页默认一屏内即可完成核心操作、无压迫感。
    - **自然人话文案**：标题与选项名精炼直观（如「防关联浏览器」「代理引擎」「本地服务」），避免在主标题和开关名称上堆砌括号技术术语（如 `(/api/v1)`、`(Streamable HTTP)`、`SHA-256 + timingSafeEqual`），技术细节按需放入 `<InfoTip>` 或代码片段中。
 
@@ -52,7 +52,7 @@ MultiChrome 确立了统一、克制、原生级的 **Windows 11 Fluent 2 + 轻�
 
 | 层级 | 命令 | 脚本位置 | 定位与职责 | 何时运行 |
 | :--- | :--- | :--- | :--- | :--- |
-| **L1 单元测试（主力）** | `npm test` | `tests/*.test.js` | 验证纯业务逻辑、边界条件、数据解析与安全规则（秒级完成）。**90% 的新功能逻辑应下沉为纯 JS 模块（`electron/*.js`）并在此覆盖** | 每次修改必跑 |
+| **L1 单元测试（主力）** | `npm test` | `tests/*.test.js` | 验证纯业务逻辑、边界条件、数据解析与安全规则（秒级完成）。**90% 的新功能逻辑应下沉为按职责分层的纯 JS 模块（`electron/<layer>/*.js`）并在此覆盖** | 每次修改必跑 |
 | **L2 核心底盘 + 本地对抗 E2E** | `npm run test:e2e` | [scripts/e2e-verify.mjs](scripts/e2e-verify.mjs) + [scripts/e2e-electron.cjs](scripts/e2e-electron.cjs) | 离线验证**安全红线 + 类 CreepJS/BotD 本地对抗算法**：双代理零直连、Fail-Closed 断网阻断、WebRTC 零泄露、跨 `iframe` 原型链反 Hook（`lies=0`）、Canvas/Audio/DOMRect 同会话确定性、跨维度自洽、C++ 指纹隔离与持久化、默认 Google 搜索 | 修改代理、内核、CDP、指纹参数、启动逻辑或发版前必跑 |
 | **L3 界面冒烟测试（UI Test）** | `npm run test:ui` | [scripts/e2e-ui-suite.mjs](scripts/e2e-ui-suite.mjs) | 隔离临时 `userData`（`MULTICHROME_USER_DATA`）拉起真实 Electron 窗口，验证核心页面渲染、关键交互弹窗、前后端状态同步与 0 未捕获 React/控制台异常 | 大改前端页面/交互、新增核心面板或发版前运行 |
 | **L4 外网真站指纹抽检** | `npm run audit:live -- --proxy="<代理名>"`（默认双内核分别实测）或 `--env="<环境名>"` | [scripts/audit-live-sites.mjs](scripts/audit-live-sites.mjs) + [scripts/audit-live-sites-electron.cjs](scripts/audit-live-sites-electron.cjs) | 基于指定内置代理创建隔离临时环境，默认**分别实测 C++ 隐私指纹内核（`fingerprint-chromium`）与系统 Chrome 内核（`system-chrome`）**（支持 `--engine=both\|fingerprint-chromium\|system-chrome`），或指定本地环境，走代理访问 **CreepJS、BrowserScan、BrowserLeaks WebRTC、PixelScan** 四大权威外部检测站，分内核汇报真站打分与风控表现（**不进离线 CI**） | 升级 Chromium 指纹内核 / sing-box 版本、改动 WebRTC/语言/时区/指纹策略、或发大版本前手动按需抽检 |

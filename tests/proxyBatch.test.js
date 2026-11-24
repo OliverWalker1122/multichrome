@@ -5,8 +5,8 @@ import {
     buildProxyEndpointKey,
     buildProxyUsageMap,
     parseBatchProxyText,
-} from '../electron/proxyBatch.js';
-import { ProxyManager } from '../electron/proxyManager.js';
+} from '../electron/domain/proxyBatch.js';
+import { ProxyManager } from '../electron/services/proxyService.js';
 
 const DUMMY_UUID = '11111111-1111-4111-8111-111111111111';
 const DUMMY_UUID_2 = '22222222-2222-4222-8222-222222222222';

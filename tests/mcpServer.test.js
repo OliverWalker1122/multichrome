@@ -2,18 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { PassThrough } from 'node:stream';
-import { AutomationServer } from '../electron/automationServer.js';
-import { createAutomationBackend } from '../electron/automationIntegration.js';
+import { AutomationServer } from '../electron/transport/automationServer.js';
+import { createAutomationBackend } from '../electron/services/automationService.js';
 import {
     createMcpHandler,
     DEFAULT_MCP_PROTOCOL_VERSION,
     MCP_TOOLS,
-} from '../electron/mcpServer.js';
+} from '../electron/transport/mcpServer.js';
 import {
     forwardJsonRpcOverHttp,
     resolveMcpEndpointUrl,
     runStdioBridge,
-} from '../electron/mcpStdioBridge.js';
+} from '../electron/transport/mcpStdioBridge.js';
 
 const PROFILE_1 = '11111111-1111-4111-8111-111111111111';
 const PROFILE_2 = '22222222-2222-4222-8222-222222222222';

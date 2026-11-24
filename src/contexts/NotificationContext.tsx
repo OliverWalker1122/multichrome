@@ -8,8 +8,12 @@ import {
 } from '@fluentui/react-components';
 import { DismissRegular } from '@fluentui/react-icons';
 import { tr } from '../i18n';
+import {
+    message,
+    type NotificationType,
+} from '../utils/notificationEvents';
 
-export type NotificationType = 'success' | 'error' | 'warning' | 'info';
+export { message, type NotificationType };
 
 interface Notification {
     id: string;
@@ -124,35 +128,4 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             )}
         </NotificationContext.Provider>
     );
-};
-
-export const message = {
-    success: (content: string, duration?: number) => {
-        window.dispatchEvent(
-            new CustomEvent('show-notification', {
-                detail: { type: 'success', message: content, duration },
-            }),
-        );
-    },
-    error: (content: string, duration?: number) => {
-        window.dispatchEvent(
-            new CustomEvent('show-notification', {
-                detail: { type: 'error', message: content, duration },
-            }),
-        );
-    },
-    warning: (content: string, duration?: number) => {
-        window.dispatchEvent(
-            new CustomEvent('show-notification', {
-                detail: { type: 'warning', message: content, duration },
-            }),
-        );
-    },
-    info: (content: string, duration?: number) => {
-        window.dispatchEvent(
-            new CustomEvent('show-notification', {
-                detail: { type: 'info', message: content, duration },
-            }),
-        );
-    },
 };

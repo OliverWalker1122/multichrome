@@ -1,37 +1,35 @@
 ---
-name: Bug 报告
-about: 报告一个问题以帮助我们改进
+name: Bug 报告 / Bug Report
+about: 反馈异常、泄露风险或兼容性问题 / Report a bug or unexpected behavior
 title: '[BUG] '
 labels: bug
 assignees: ''
 ---
 
-## 问题描述
-简要描述遇到的问题
+> **隐私提醒 / Privacy Notice**：请勿粘贴真实代理节点链接（`vless://`、`socks5://user:pass@...` 等）、真实代理 IP、账号凭据或包含个人用户名的完整路径。
 
-## 重现步骤
-1. 打开 '...'
-2. 点击 '...'
-3. 滚动到 '...'
-4. 看到错误
+## 问题描述 / Description
 
-## 预期行为
-描述你期望发生什么
+简要描述遇到的问题。
 
-## 实际行为
-描述实际发生了什么
+## 复现步骤 / Steps to Reproduce
 
-## 截图
-如果可能,添加截图以帮助解释问题
+1. 打开 `...`
+2. 配置 / 点击 `...`
+3. 观察到异常 `...`
 
-## 环境信息
-- 操作系统: [例如 Windows 11, macOS 14, Ubuntu 22.04]
-- MultiChrome 版本: [例如 1.0.0]
-- Chrome 版本: [例如 120.0.6099.129]
-- Node.js 版本 (如果是开发环境): [例如 18.17.0]
+## 预期行为 vs 实际行为 / Expected vs Actual
 
-## 日志文件
-请附上日志文件内容 (位于 `%APPDATA%/multichrome/logs`)
+- **预期行为**：
+- **实际行为**：
 
-## 其他信息
-添加任何其他有关问题的上下文信息
+## 运行环境 / Environment
+
+- **操作系统 (OS)**：[例如 Windows 11 24H2 / macOS 15 arm64 / Ubuntu 24.04]
+- **MultiChrome 版本**：[例如 v1.4.0]
+- **浏览器引擎**：[`fingerprint-chromium` 防关联内核 / `system-chrome` 标准 Chrome]
+- **代理类型（如涉及）**：[无代理 / 内置 `sing-box`（VLESS / VMess / Trojan / SS / Hy2 / TUIC / SOCKS5 / HTTP）/ 手动代理]
+
+## 脱敏日志或截图 / Sanitized Logs or Screenshots
+
+（可选，粘贴脱敏后的应用或代理日志片段）

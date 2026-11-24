@@ -9,7 +9,7 @@ import {
     cleanupLegacyFingerprintExtension,
     createProxyStartupGate,
     rewriteProxyAddressForGate,
-} from '../electron/proxyStartupGate.js';
+} from '../electron/drivers/proxyStartupGate.js';
 
 function startEchoTcpServer() {
     const receivedChunks = [];

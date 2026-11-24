@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { createApplicationLogBuffer } from '../electron/applicationLogs.js';
+import { createApplicationLogBuffer } from '../electron/app/applicationLogs.js';
 
 const require = createRequire(import.meta.url);
 // Use the actual electron-log dispatcher with memory-only transports. No app,

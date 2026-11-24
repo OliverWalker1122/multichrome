@@ -1,28 +1,19 @@
 ---
-name: 功能建议
-about: 为这个项目提出新功能的想法
+name: 功能建议 / Feature Request
+about: 提出改进建议或新特性想法 / Suggest an idea or enhancement
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
 ---
 
-## 功能描述
-清晰简洁地描述你想要的功能
+## 需求背景 / Problem or Use Case
 
-## 问题背景
-这个功能解决了什么问题?例如:我在使用时总是遇到 [...]
+这个需求希望解决什么痛点或使用场景？
 
-## 期望的解决方案
-描述你希望实现的功能
+## 期望方案 / Proposed Solution
 
-## 替代方案
-描述你考虑过的其他替代解决方案或功能
+清晰描述你希望新增或改进的行为。
 
-## UI/UX 设计
-如果涉及界面变化,可以提供设计草图或参考
+## 备选方案或补充说明 / Alternatives & Context
 
-## 使用场景
-描述这个功能的典型使用场景
-
-## 其他信息
-添加任何其他有关功能请求的上下文或截图
+（可选，补充参考交互或安全/兼容性考量）

@@ -8,12 +8,12 @@ import {
     buildManagedProxyArgs,
     buildManualProxyArgs,
     applyFailClosedWebRTCPreferences,
-} from '../electron/managedProxyArgs.js';
+} from '../electron/domain/managedProxyArgs.js';
 import {
     isProfileRunningLocally,
     readDevToolsActivePort,
-} from '../electron/profileLock.js';
-import { ProxyIntegration } from '../electron/proxyIntegration.js';
+} from '../electron/drivers/profileLock.js';
+import { ProxyIntegration } from '../electron/services/proxyCoordinator.js';
 
 test('manual and managed proxy args enforce fail-closed QUIC, WebRTC and DNS rules', () => {
     const managed = buildManagedProxyArgs('http://127.0.0.1:43210');

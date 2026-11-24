@@ -1,6 +1,18 @@
-import { useCallback } from 'react';
+import React, { createContext, useCallback, useContext } from 'react';
 import { AppLocale } from '../types';
-import { useSettings } from '../contexts/SettingsContext';
+
+export interface I18nContextValue {
+    locale: AppLocale;
+    setLocale: (locale: AppLocale) => Promise<void>;
+}
+
+const I18nContext = createContext<I18nContextValue | undefined>(undefined);
+
+export const I18nProvider: React.FC<{
+    value: I18nContextValue;
+    children: React.ReactNode;
+}> = ({ value, children }) =>
+    React.createElement(I18nContext.Provider, { value }, children);
 
 export const LOCALE_STORAGE_KEY = 'multichrome.locale';
 
@@ -775,16 +787,20 @@ export function translateBackendMessage(
 }
 
 export function useI18n() {
-    const { locale, actions } = useSettings();
+    const ctx = useContext(I18nContext);
+    const locale = ctx ? ctx.locale : getStoredLocale();
     const isEn = locale === 'en-US';
     const t = useCallback(
         (zh: string, en: string) => (isEn ? en : zh),
         [isEn],
     );
+    const fallbackSetLocale = useCallback(async (next: AppLocale) => {
+        saveStoredLocale(next);
+    }, []);
     return {
         locale,
         isEn,
-        setLocale: actions.setLocale,
+        setLocale: ctx ? ctx.setLocale : fallbackSetLocale,
         t,
     };
 }

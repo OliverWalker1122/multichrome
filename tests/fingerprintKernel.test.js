@@ -13,7 +13,7 @@ import {
     parseFingerprintConfigJson,
     REALISTIC_CPU_CORES,
     REALISTIC_WINDOW_SIZES,
-} from '../electron/fingerprintProfile.js';
+} from '../electron/domain/fingerprintProfile.js';
 import {
     assertOfficialGitHubUrl,
     getCuratedFingerprintReleases,
@@ -22,8 +22,8 @@ import {
     normalizeGitHubReleases,
     normalizeSingboxReleases,
     parseGitHubSha256Digest,
-} from '../electron/kernelManager.js';
-import { SingboxCore } from '../electron/singboxCore.js';
+} from '../electron/services/kernelService.js';
+import { SingboxCore } from '../electron/drivers/singboxCore.js';
 
 test('generateFingerprintConfig produces independent persistent profiles matching host OS', () => {
     const fp1 = generateFingerprintConfig();

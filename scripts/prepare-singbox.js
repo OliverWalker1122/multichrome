@@ -48,7 +48,12 @@ export async function prepareSingBox({
 } = {}) {
     const kernelManifest = JSON.parse(
         await fs.readFile(
-            path.join(projectDirectory, 'electron', 'kernelManifest.json'),
+            path.join(
+                projectDirectory,
+                'electron',
+                'domain',
+                'kernelManifest.json',
+            ),
             'utf8',
         ),
     );
@@ -57,7 +62,9 @@ export async function prepareSingBox({
         singboxEntries.find(([, info]) => Boolean(info?.recommended)) ||
         singboxEntries[0];
     if (!chosen) {
-        throw new Error('electron/kernelManifest.json 中未配置 sing-box 版本');
+        throw new Error(
+            'electron/domain/kernelManifest.json 中未配置 sing-box 版本',
+        );
     }
     const [version, info] = chosen;
     const manifest = {

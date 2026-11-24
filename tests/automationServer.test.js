@@ -4,26 +4,28 @@ import http from 'node:http';
 import net from 'node:net';
 import WebSocket, { WebSocketServer } from 'ws';
 import {
-    AutomationConfigManager,
     DEFAULT_AUTOMATION_PORT,
-    findAvailableAutomationPort,
     formatAutomationBindError,
-    probeLoopbackPort,
     sanitizeProfileForAutomation,
     verifyLoopbackRequestSecurity,
-} from '../electron/automationConfig.js';
+} from '../electron/domain/automationPolicy.js';
+import {
+    findAvailableAutomationPort,
+    probeLoopbackPort,
+} from '../electron/drivers/portAllocator.js';
+import { AutomationConfigManager } from '../electron/repositories/automationConfigRepository.js';
 import {
     IGNORED_CDP_OVERRIDE_METHODS,
     inspectClientCdpMessage,
     parseCdpHttpRoute,
     parseCdpWsRoute,
-} from '../electron/cdpGuard.js';
-import { AutomationServer } from '../electron/automationServer.js';
+} from '../electron/domain/cdpGuardPolicy.js';
+import { AutomationServer } from '../electron/transport/automationServer.js';
 import {
     AutomationIntegration,
     createAutomationBackend,
-    registerAutomationIpc,
-} from '../electron/automationIntegration.js';
+} from '../electron/services/automationService.js';
+import { registerAutomationIpc } from '../electron/ipc/automationIpc.js';
 
 const PROFILE_1 = '11111111-1111-4111-8111-111111111111';
 const PROFILE_2 = '22222222-2222-4222-8222-222222222222';
@@ -755,6 +757,19 @@ test('By-name HTTP start/stop (/api/v1/profiles/start), self-discoverable 503 hi
     });
     assert.equal(startByName.status, 200);
     assert.equal(startByName.json.data.profileId, PROFILE_1);
+
+    // Regression guard: WebSocket upgrade must remain functional after server.stop() + start() port switch
+    const postRestartWs = new WebSocket(startByName.json.data.wsEndpoint);
+    await new Promise((resolve, reject) => {
+        postRestartWs.once('open', resolve);
+        postRestartWs.once('error', reject);
+    });
+    const pingRes = await sendWsRpc(postRestartWs, {
+        id: 1,
+        method: 'Browser.getVersion',
+    });
+    assert.equal(pingRes.result.echoedMethod, 'Browser.getVersion');
+    postRestartWs.close();
 
     const stopByName = await httpRequest({
         port,

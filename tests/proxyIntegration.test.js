@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-    ProxyIntegration,
-    registerProxyIpc,
-} from '../electron/proxyIntegration.js';
+import { ProxyIntegration } from '../electron/services/proxyCoordinator.js';
+import { registerProxyIpc } from '../electron/ipc/proxyIpc.js';
 
 const PROXY_ID = '11111111-1111-4111-8111-111111111111';
 const PROFILE_ID = '22222222-2222-4222-8222-222222222222';

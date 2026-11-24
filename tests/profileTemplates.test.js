@@ -9,9 +9,11 @@ import {
     removeGroupStartupUrl,
     renameGroupStartupUrl,
     resolveEffectiveStartupUrl,
+} from '../electron/domain/profileTemplatePolicy.js';
+import {
     resolveExtensionTemplatePaths,
     syncBookmarksToProfile,
-} from '../electron/profileTemplates.js';
+} from '../electron/drivers/profileTemplateDriver.js';
 
 test('resolveEffectiveStartupUrl follows env > group > global precedence', () => {
     assert.equal(

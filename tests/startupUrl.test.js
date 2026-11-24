@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
     decideStartupUrlAction,
-    hasSavedChromeSession,
     isBlankTabUrl,
     isSameStartupPage,
     normalizeStartupUrl,
-} from '../electron/startupUrl.js';
+} from '../electron/domain/startupUrlPolicy.js';
+import { hasSavedChromeSession } from '../electron/drivers/profileTemplateDriver.js';
 
 test('normalizeStartupUrl and isSameStartupPage normalize trailing slashes and www host', () => {
     assert.equal(normalizeStartupUrl('https://IP125.com/'), 'https://ip125.com');

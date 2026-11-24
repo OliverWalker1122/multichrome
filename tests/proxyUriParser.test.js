@@ -8,10 +8,10 @@ import {
     isAdvancedProxyUri,
     parseProxyUriToOutbound,
     redactProxyUri,
-} from '../electron/proxyUriParser.js';
-import { buildSingboxConfig, redactConfig } from '../electron/singboxConfig.js';
-import { SingboxCore } from '../electron/singboxCore.js';
-import { ProxyManager } from '../electron/proxyManager.js';
+} from '../electron/domain/proxyUriParser.js';
+import { buildSingboxConfig, redactConfig } from '../electron/domain/singboxConfig.js';
+import { SingboxCore } from '../electron/drivers/singboxCore.js';
+import { ProxyManager } from '../electron/services/proxyService.js';
 
 const binaryPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

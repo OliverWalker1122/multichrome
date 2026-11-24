@@ -63,6 +63,7 @@ MultiChrome uses a 4-layer verification suite (see [docs/verification.md](docs/v
 - [Architecture & Design](docs/architecture.md) — Dual-engine model, fail-closed networking, supply-chain verification, and repository layout
 - [Testing & Verification](docs/verification.md) — 4-layer test suite, external checker observations, and release automation
 - [Development & Packaging](docs/development.md) — Building from source, running tests, and creating platform installers
+- [Contributing Guide](CONTRIBUTING.md) — Module layering, verification gates, and privacy checklist
 - [Security Policy](SECURITY.md) — Threat model and vulnerability disclosure
 - [Roadmap](ROADMAP.md) — Completed milestones and planned work
 

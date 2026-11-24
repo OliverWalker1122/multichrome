@@ -7,7 +7,7 @@ import {
     resolveChromiumCountryId,
     resolveEffectiveLanguage,
     resolveLocaleForCountry,
-} from '../electron/proxyGeo.js';
+} from '../electron/domain/proxyGeo.js';
 
 test('parseGeoProbeResponse parses ip-api, ipinfo, and ipwho.is responses including chunked HTTP', () => {
     const ipApiResp = Buffer.from(

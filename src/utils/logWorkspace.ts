@@ -1,6 +1,9 @@
 export type WorkspaceSection =
     'environments' | 'proxies' | 'trash' | 'settings';
 
+export type LogScope = '__selected__' | '__all__' | string;
+export type LogLevelFilter = 'all' | 'info' | 'error';
+
 export interface LogDockPreference {
     open: boolean;
     height: number;

@@ -405,20 +405,53 @@ export interface AppLog {
     message: string;
 }
 
+export type RunStatus = 'all' | 'running' | 'stopped';
+
+export type OptionalEnvColumn =
+    | 'timezone'
+    | 'language'
+    | 'notes'
+    | 'createdAt'
+    | 'id';
+
+export interface ProxyEditorState {
+    id?: string;
+    mode: 'line' | 'simple' | 'json';
+    name: string;
+    protocol: SimpleProxyInput['protocol'];
+    host: string;
+    port: string;
+    username: string;
+    password: string;
+    hasPassword: boolean;
+    clearCredentials: boolean;
+    line: string;
+    config: string;
+}
+
+export interface RunningProfileOption {
+    id: string;
+    name: string;
+}
+
 export interface AutomationStatus {
+    enabled: boolean;
     localApiEnabled: boolean;
     mcpEnabled: boolean;
     port: number;
     baseUrl: string;
+    cdpEndpoint?: string;
+    mcpEndpoint?: string;
     running: boolean;
     lastError?: string;
-    hasToken: boolean;
-    maskedToken: string;
-    encryptionAvailable: boolean;
+    activeProfileId?: string | null;
+    activeProfileName?: string | null;
+    runningProfiles?: RunningProfileOption[];
     stdioBridgePath: string;
 }
 
 export interface AutomationConfigPatch {
+    enabled?: boolean;
     localApiEnabled?: boolean;
     mcpEnabled?: boolean;
     port?: number;
@@ -476,7 +509,9 @@ export interface ElectronAPI {
         inspectHealth?: (id: string) => Promise<EnvironmentHealthReport>;
         openUrl?: (id: string, url: string) => Promise<boolean>;
         close: (id: string) => Promise<boolean>;
-        closeAll?: () => Promise<{ closedCount: number; failedCount: number }>;
+        closeAll?: () => Promise<
+            number | { closedCount: number; failedCount: number }
+        >;
         getRunningResourceStats?: () => Promise<RunningResourceStats>;
         delete: (id: string) => Promise<boolean>; // 软删除（移到回收站）
         update: (
@@ -547,8 +582,9 @@ export interface ElectronAPI {
             patch: AutomationConfigPatch,
         ) => Promise<AutomationStatus>;
         pickAvailablePort?: () => Promise<AutomationStatus>;
-        getToken: () => Promise<string>;
-        rotateToken: () => Promise<{ status: AutomationStatus; token: string }>;
+        setActiveProfile?: (
+            profileId: string | null,
+        ) => Promise<AutomationStatus>;
     };
     app?: {
         getInfo: () => Promise<AppInfo>;

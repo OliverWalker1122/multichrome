@@ -22,6 +22,11 @@ MultiChrome does **not** bundle third-party binaries (`sing-box` or `fingerprint
 - **Official Google Chrome** (`system-chrome`): Strongly recommended for security-sensitive workflows, enterprise/banking accounts, and primary accounts due to Google code signing and fastest zero-day security patching.
 - **C++ Anti-Fingerprint Kernel** (`fingerprint-chromium`): Intended for multi-account anti-correlation workflows. Prefer releases marked **Source Auditable** (whose upstream patch tags are already published on GitHub) or self-compiled builds, and monitor outbound hostnames via the built-in proxy log panel.
 
+## Local Automation & MCP Control-Plane Boundary
+
+- The local guarded CDP endpoint and minimal 4-tool MCP server are **disabled by default**.
+- When enabled by the user, the server binds strictly to loopback (`127.0.0.1`), validates `Host` against an explicit loopback allowlist, rejects all requests carrying a browser `Origin` header (`403`) to prevent cross-site requests and DNS rebinding, hides internal Chrome debug ports, blocks incognito context creation, and drops active CDP connections immediately if a bound proxy stops.
+
 ## Reporting a Vulnerability
 
 If you discover a security issue (such as an IP/DNS/WebRTC leak, credential exposure, or download verification bypass):

@@ -846,10 +846,10 @@ async function runE2E() {
     console.log('====================================================================');
 
     const distElectron = path.resolve(__dirname, '..', 'dist', 'electron');
-    const { SettingsManager } = await import(pathToFileURL(path.join(distElectron, 'settingsManager.js')).href);
-    const { KernelManager } = await import(pathToFileURL(path.join(distElectron, 'kernelManager.js')).href);
-    const { ProxyManager } = await import(pathToFileURL(path.join(distElectron, 'proxyManager.js')).href);
-    const { ChromeManager } = await import(pathToFileURL(path.join(distElectron, 'chromeManager.js')).href);
+    const { SettingsManager } = await import(pathToFileURL(path.join(distElectron, 'repositories', 'settingsRepository.js')).href);
+    const { KernelManager } = await import(pathToFileURL(path.join(distElectron, 'services', 'kernelService.js')).href);
+    const { ProxyManager } = await import(pathToFileURL(path.join(distElectron, 'services', 'proxyService.js')).href);
+    const { ChromeManager } = await import(pathToFileURL(path.join(distElectron, 'services', 'environmentService.js')).href);
 
     // Initialize real production managers pointing ONLY to isolated temp paths
     const settingsManager = new SettingsManager();
@@ -1221,7 +1221,7 @@ async function runE2E() {
             cdpA.close();
             await chromeManager.closeEnvironment(envA.id);
             const { isProfileRunningLocally } = await import(
-                pathToFileURL(path.join(distElectron, 'profileLock.js')).href
+                pathToFileURL(path.join(distElectron, 'drivers', 'profileLock.js')).href
             );
             const stopDeadline = Date.now() + 8000;
             while (Date.now() < stopDeadline) {

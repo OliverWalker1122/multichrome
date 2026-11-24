@@ -63,6 +63,7 @@ MultiChrome 提供四层验证体系（详见 [docs/verification.md](docs/verifi
 - [架构与核心机制](docs/architecture.md) — 双引擎设计、Fail-Closed 代理策略、供应链校验与目录结构
 - [测试体系与平台核验](docs/verification.md) — 四层测试说明、外部检测平台实测记录与自动发布流程
 - [开发与构建指南](docs/development.md) — 本地开发、测试命令与三端打包说明
+- [参与贡献指南](CONTRIBUTING.md) — 代码分层结构、开发门禁与隐私核查约定
 - [安全策略](SECURITY.md) — 安全模型与漏洞反馈方式
 - [功能路线图](ROADMAP.md) — 已完成项与后续规划
 

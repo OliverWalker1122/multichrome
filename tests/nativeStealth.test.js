@@ -5,12 +5,12 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
-import { decideStartupUrlAction } from '../electron/startupUrl.js';
+import { decideStartupUrlAction } from '../electron/domain/startupUrlPolicy.js';
 
 const require = createRequire(import.meta.url);
 
 function loadCDPManagerClass() {
-    const source = fs.readFileSync(path.resolve('electron/cdpManager.ts'), 'utf8');
+    const source = fs.readFileSync(path.resolve('electron/drivers/cdpManager.ts'), 'utf8');
     const transpiled = ts.transpileModule(source, {
         compilerOptions: {
             module: ts.ModuleKind.CommonJS,
@@ -22,7 +22,7 @@ function loadCDPManagerClass() {
     const noopLogger = { info() {}, warn() {}, error() {}, debug() {} };
     const customRequire = (specifier) => {
         if (specifier === 'electron-log') return { default: noopLogger, ...noopLogger };
-        if (specifier === './startupUrl.js') {
+        if (specifier === '../domain/startupUrlPolicy.js') {
             return { decideStartupUrlAction };
         }
         return require(specifier);

@@ -8,7 +8,7 @@ import {
     filterBrowserProcessLines,
     parseUnixPsOutput,
     parseWindowsCimProcessJson,
-} from '../electron/processMetrics.js';
+} from '../electron/domain/processMetrics.js';
 
 test('extractEnvIdShortFromCommandLine parses Windows and POSIX user-data-dir flags', () => {
     assert.equal(

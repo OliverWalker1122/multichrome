@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
     clearProfileCache,
     inspectProfileStorage,
-} from '../electron/profileStorage.js';
+} from '../electron/drivers/profileStorage.js';
 
 test('inspectProfileStorage and clearProfileCache remove only cache directories and keep Cookies/Preferences', async (t) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-storage-test-'));

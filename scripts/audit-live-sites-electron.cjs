@@ -480,16 +480,16 @@ app.whenReady().then(async () => {
         }
 
         const { SettingsManager } = await import(
-            pathToFileURL(path.join(distElectron, 'settingsManager.js')).href
+            pathToFileURL(path.join(distElectron, 'repositories', 'settingsRepository.js')).href
         );
         const { KernelManager } = await import(
-            pathToFileURL(path.join(distElectron, 'kernelManager.js')).href
+            pathToFileURL(path.join(distElectron, 'services', 'kernelService.js')).href
         );
         const { ProxyManager } = await import(
-            pathToFileURL(path.join(distElectron, 'proxyManager.js')).href
+            pathToFileURL(path.join(distElectron, 'services', 'proxyService.js')).href
         );
         const { ChromeManager } = await import(
-            pathToFileURL(path.join(distElectron, 'chromeManager.js')).href
+            pathToFileURL(path.join(distElectron, 'services', 'environmentService.js')).href
         );
 
         const settingsManager = new SettingsManager();

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { ProxyManager, resolveSafeStartError } from '../electron/proxyManager.js';
+import { ProxyManager, resolveSafeStartError } from '../electron/services/proxyService.js';
 
 const TEST_USERNAME = 'fixture-user';
 const TEST_PASSWORD = 'local-only/p@ss:%?#';

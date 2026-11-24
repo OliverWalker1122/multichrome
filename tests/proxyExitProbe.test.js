@@ -6,7 +6,7 @@ import {
     createProxyExitProbe,
     parseExitInfo,
     probeProxyExit,
-} from '../electron/proxyExitProbe.js';
+} from '../electron/drivers/proxyExitProbe.js';
 
 const EXIT = {
     success: true,

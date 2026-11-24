@@ -8,7 +8,7 @@ import {
     isSafeExternalUrl,
     parseGitHubProxyUrl,
     parseSafeExternalUrl,
-} from '../electron/githubProxyTransport.js';
+} from '../electron/drivers/githubProxyTransport.js';
 
 test('assertOfficialGitHubUrl enforces HTTPS official GitHub allowlist', () => {
     assert.equal(

@@ -6,11 +6,11 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
-import { SingboxCore, safeLog, stripAnsi } from '../electron/singboxCore.js';
+import { SingboxCore, safeLog, stripAnsi } from '../electron/drivers/singboxCore.js';
 import {
     buildSingboxConfig,
     simpleProxyToConfig,
-} from '../electron/singboxConfig.js';
+} from '../electron/domain/singboxConfig.js';
 
 const binaryPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

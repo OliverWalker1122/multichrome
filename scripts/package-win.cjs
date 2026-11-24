@@ -77,18 +77,22 @@ async function packageWindows({ outputDirectory, expectedVersion } = {}) {
     const files = asar
         .listPackage(archive)
         .map((file) => file.replaceAll('\\', '/'));
-    for (const name of [
-        'proxyManager.js',
-        'singboxCore.js',
-        'singboxConfig.js',
-        'managedProxyArgs.js',
-        'proxyExitProbe.js',
-        'applicationLogs.js',
-        'kernelManager.js',
-        'fingerprintProfile.js',
+    for (const relPath of [
+        'domain/fingerprintProfile.js',
+        'domain/managedProxyArgs.js',
+        'domain/singboxConfig.js',
+        'domain/kernelManifest.json',
+        'repositories/environmentRepository.js',
+        'repositories/proxyRepository.js',
+        'drivers/singboxCore.js',
+        'drivers/proxyExitProbe.js',
+        'services/environmentService.js',
+        'services/proxyService.js',
+        'services/kernelService.js',
+        'app/applicationLogs.js',
     ]) {
-        if (!files.some((file) => file.endsWith(`/electron/${name}`))) {
-            throw new Error('Missing bundled application module');
+        if (!files.some((file) => file.endsWith(`/electron/${relPath}`))) {
+            throw new Error(`Missing bundled application module: ${relPath}`);
         }
     }
     console.log('WINDOWS_PACKAGE_VERIFIED');
