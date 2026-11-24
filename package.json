@@ -2,7 +2,7 @@
     "name": "multichrome",
     "version": "1.4.0",
     "type": "module",
-    "description": "Chrome多环境管理工具",
+    "description": "Local-first multi-profile browser manager with isolated proxies and native anti-fingerprinting",
     "main": "dist/electron/main.js",
     "scripts": {
         "postinstall": "electron-builder install-app-deps",

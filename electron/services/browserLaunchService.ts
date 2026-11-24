@@ -37,7 +37,10 @@ import {
 } from '../domain/fingerprintProfile.js';
 import { buildMemorySaverChromiumArgs } from '../domain/processMetrics.js';
 import { resolveEffectiveStartupUrl } from '../domain/profileTemplatePolicy.js';
-import { resolveEffectiveLanguage } from '../domain/proxyGeo.js';
+import {
+    resolveEffectiveLanguage,
+    resolveTimezoneForCountry,
+} from '../domain/proxyGeo.js';
 import type {
     ChromeEnvironment,
     EnvironmentRepository,
@@ -76,6 +79,9 @@ interface ManagedProxySummary {
         status?: string;
         ip?: string;
         countryCode?: string;
+        timezone?: string;
+        latitude?: number;
+        longitude?: number;
     };
 }
 
@@ -317,6 +323,109 @@ export class BrowserLaunchService {
         return nextAddress;
     }
 
+    private cacheProxyExitInfo(
+        proxyAddress: string,
+        info: ProxyExitInfo,
+    ): void {
+        const parsed = parseProxyAddress(proxyAddress);
+        if (!parsed) return;
+        const cacheKey = `${parsed.protocol}//${parsed.host}:${parsed.port}`;
+        this.proxyGeoCache.set(cacheKey, {
+            info,
+            expiresAt: Date.now() + this.PROXY_IP_CACHE_TTL_MS,
+        });
+    }
+
+    private toProxyExitInfo(
+        raw?: {
+            ip?: string;
+            countryCode?: string;
+            timezone?: string;
+            latitude?: number;
+            longitude?: number;
+        } | null,
+    ): ProxyExitInfo | null {
+        if (!raw?.ip) return null;
+        const countryCode = raw.countryCode || undefined;
+        const timezone =
+            raw.timezone || resolveTimezoneForCountry(countryCode) || undefined;
+        const info: ProxyExitInfo = {
+            ip: raw.ip,
+            countryCode,
+            timezone,
+        };
+        if (
+            typeof raw.latitude === 'number' &&
+            typeof raw.longitude === 'number' &&
+            Number.isFinite(raw.latitude) &&
+            Number.isFinite(raw.longitude)
+        ) {
+            info.latitude = raw.latitude;
+            info.longitude = raw.longitude;
+        }
+        return info;
+    }
+
+    public async resolveManagedProxyExitInfoBeforeLaunch(
+        proxyId: string,
+        proxyAddress: string,
+        options: { needTimezone?: boolean; timeoutMs?: number } = {},
+    ): Promise<ProxyExitInfo | null> {
+        const parsed = parseProxyAddress(proxyAddress);
+        if (parsed) {
+            const cacheKey = `${parsed.protocol}//${parsed.host}:${parsed.port}`;
+            const cached = this.proxyGeoCache.get(cacheKey);
+            if (
+                cached &&
+                cached.expiresAt > Date.now() &&
+                (!options.needTimezone || cached.info.timezone)
+            ) {
+                log.info(
+                    `[代理预解析] 命中短时缓存: ip=${cached.info.ip}, tz=${cached.info.timezone || 'none'}`,
+                );
+                return cached.info;
+            }
+        }
+
+        const existing = (
+            this.deps.proxyService?.list?.() as ManagedProxySummary[] | undefined
+        )?.find((item) => item.id === proxyId)?.exitInfo;
+        if (existing?.status === 'ready' && existing.ip) {
+            const readyInfo = this.toProxyExitInfo(existing);
+            if (readyInfo && (!options.needTimezone || readyInfo.timezone)) {
+                this.cacheProxyExitInfo(proxyAddress, readyInfo);
+                return readyInfo;
+            }
+        }
+
+        if (typeof this.deps.proxyService?.refreshExitInfo === 'function') {
+            const waitMs = options.timeoutMs ?? 6500;
+            let timer: NodeJS.Timeout | undefined;
+            try {
+                const refreshed = (await Promise.race([
+                    this.deps.proxyService.refreshExitInfo(proxyId),
+                    new Promise<null>((resolve) => {
+                        timer = setTimeout(() => resolve(null), waitMs);
+                    }),
+                ])) as ManagedProxySummary['exitInfo'] | null;
+                if (refreshed?.status === 'ready' && refreshed.ip) {
+                    const info = this.toProxyExitInfo(refreshed);
+                    if (info) {
+                        this.cacheProxyExitInfo(proxyAddress, info);
+                        return info;
+                    }
+                }
+                return null;
+            } catch {
+                return null;
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        }
+
+        return this.resolveProxyExitInfoBeforeLaunch(proxyAddress, options);
+    }
+
     public async resolveProxyExitInfoBeforeLaunch(
         proxyAddress: string,
         options: { needTimezone?: boolean; bypassCache?: boolean } = {},
@@ -482,10 +591,16 @@ export class BrowserLaunchService {
 
             if (proxyAddress) {
                 try {
-                    startupExitInfo = await this.resolveProxyExitInfoBeforeLaunch(
-                        proxyAddress,
-                        { needTimezone: true },
-                    );
+                    startupExitInfo = env.proxyId
+                        ? await this.resolveManagedProxyExitInfoBeforeLaunch(
+                              env.proxyId,
+                              proxyAddress,
+                              { needTimezone: true },
+                          )
+                        : await this.resolveProxyExitInfoBeforeLaunch(
+                              proxyAddress,
+                              { needTimezone: true },
+                          );
                     startupProxyIP = startupExitInfo?.ip || undefined;
                     if (startupProxyIP) {
                         log.info(
@@ -798,7 +913,7 @@ export class BrowserLaunchService {
             );
 
             const envIdShort = id.substring(0, 8);
-            const isEnLocale = settings.locale === 'en-US';
+            const isEnLocale = settings.locale !== 'zh-CN';
             const handleBrowserDisconnected = () => {
                 if (this.runningProcesses.get(id) !== launchRecord) return;
                 log.info(
@@ -823,15 +938,25 @@ export class BrowserLaunchService {
                         (shouldAutoMatchTz && !effectiveTimezone))
                 ) {
                     try {
-                        const retryInfo =
-                            await this.resolveProxyExitInfoBeforeLaunch(
-                                proxyAddress,
-                                {
-                                    needTimezone:
-                                        shouldAutoMatchTz && !effectiveTimezone,
-                                    bypassCache: true,
-                                },
-                            );
+                        // 托管代理已在 ProxyService 内维持单飞 HTTPS 出口检测，不再重复打并发探测连接
+                        const retryInfo = env.proxyId
+                            ? await this.resolveManagedProxyExitInfoBeforeLaunch(
+                                  env.proxyId,
+                                  proxyAddress,
+                                  {
+                                      needTimezone:
+                                          shouldAutoMatchTz && !effectiveTimezone,
+                                      timeoutMs: 6000,
+                                  },
+                              )
+                            : await this.resolveProxyExitInfoBeforeLaunch(
+                                  proxyAddress,
+                                  {
+                                      needTimezone:
+                                          shouldAutoMatchTz && !effectiveTimezone,
+                                      bypassCache: true,
+                                  },
+                              );
                         if (this.runningProcesses.get(id) !== launchRecord)
                             return;
                         if (retryInfo?.ip) {
@@ -841,7 +966,10 @@ export class BrowserLaunchService {
                                 (fpDefaults.autoMatchTimezone
                                     ? retryInfo.timezone
                                     : undefined);
+                            // C++ 指纹内核时区由启动参数原生固化；严禁在页面运行中途开启
+                            // waitForDebuggerOnStart 注入 CDP 时区，否则会挂起 Gmail 等重度应用的 SW/iframe
                             if (
+                                !isFingerprintChromium &&
                                 shouldAutoMatchTz &&
                                 !effectiveTimezone &&
                                 retryInfo.timezone
@@ -852,6 +980,7 @@ export class BrowserLaunchService {
                                 );
                             }
                             if (
+                                !isFingerprintChromium &&
                                 shouldAutoMatchGeo &&
                                 !startupGeolocation &&
                                 typeof retryInfo.latitude === 'number' &&

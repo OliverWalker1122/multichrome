@@ -25,11 +25,11 @@ export function getStoredLocale(): AppLocale {
     }
     if (
         typeof document !== 'undefined' &&
-        document.documentElement?.lang === 'en-US'
+        document.documentElement?.lang === 'zh-CN'
     ) {
-        return 'en-US';
+        return 'zh-CN';
     }
-    return 'zh-CN';
+    return 'en-US';
 }
 
 export function saveStoredLocale(locale: AppLocale): void {

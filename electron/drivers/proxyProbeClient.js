@@ -282,6 +282,194 @@ function connectSecureSocket(host, port, timeoutMs = 3500, signal) {
 
 const DEFAULT_PROBE_CONNECT_TIMEOUT_MS = 3500;
 const DEFAULT_PROBE_RESPONSE_TIMEOUT_MS = 5000;
+const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
+
+function isHttpResponseComplete(buffer) {
+    const headerSep = buffer.indexOf('\r\n\r\n');
+    if (headerSep === -1) return false;
+    const headerText = buffer.subarray(0, headerSep).toString('latin1');
+    const bodyOffset = headerSep + 4;
+    const bodyLen = buffer.length - bodyOffset;
+
+    const clMatch = headerText.match(/(?:^|\r\n)content-length:\s*(\d+)/i);
+    if (clMatch) {
+        const expected = Number.parseInt(clMatch[1], 10);
+        if (Number.isFinite(expected) && expected >= 0) {
+            return bodyLen >= expected;
+        }
+    }
+
+    if (/(?:^|\r\n)transfer-encoding:\s*chunked/i.test(headerText)) {
+        const tailText = buffer
+            .subarray(Math.max(bodyOffset, buffer.length - 16))
+            .toString('latin1');
+        return /(?:^|\r\n)0\r\n\r\n$/.test(tailText);
+    }
+
+    return false;
+}
+
+function readHttpResponseFromStream(stream, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let totalBytes = 0;
+        let settled = false;
+
+        const cleanup = () => {
+            clearTimeout(timer);
+            stream.removeListener('data', handleData);
+            stream.removeListener('end', handleDone);
+            stream.removeListener('close', handleDone);
+            stream.removeListener('error', handleError);
+        };
+
+        const finish = (result, error) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (error) reject(error);
+            else resolve(result || Buffer.concat(chunks));
+        };
+
+        const timer = setTimeout(() => {
+            const combined = Buffer.concat(chunks);
+            if (combined.indexOf('\r\n\r\n') !== -1 && combined.length > 16) {
+                finish(combined);
+                return;
+            }
+            finish(undefined, new Error('proxy response timeout'));
+        }, timeoutMs);
+
+        const handleData = (chunk) => {
+            chunks.push(chunk);
+            totalBytes += chunk.length;
+            if (totalBytes > MAX_PROBE_RESPONSE_BYTES) {
+                finish(Buffer.concat(chunks));
+                return;
+            }
+            const combined =
+                chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
+            if (isHttpResponseComplete(combined)) {
+                finish(combined);
+            }
+        };
+        const handleDone = () => finish(Buffer.concat(chunks));
+        const handleError = (error) => finish(undefined, error);
+
+        stream.on('data', handleData);
+        stream.once('end', handleDone);
+        stream.once('close', handleDone);
+        stream.once('error', handleError);
+    });
+}
+
+function upgradeSocketToTls(socket, servername, timeoutMs, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+            socket.destroy();
+            reject(new Error('probe aborted'));
+            return;
+        }
+        const tlsSocket = tls.connect({
+            socket,
+            servername,
+            rejectUnauthorized: true,
+            ALPNProtocols: ['http/1.1'],
+        });
+        const onAbort = () => {
+            cleanup();
+            tlsSocket.destroy();
+            reject(new Error('probe aborted'));
+        };
+        const cleanup = () => {
+            clearTimeout(timer);
+            tlsSocket.removeListener('error', handleError);
+            tlsSocket.removeListener('secureConnect', handleConnect);
+            signal?.removeEventListener('abort', onAbort);
+        };
+        const timer = setTimeout(() => {
+            cleanup();
+            tlsSocket.destroy();
+            reject(new Error('tls handshake timeout'));
+        }, timeoutMs);
+        const handleError = (err) => {
+            cleanup();
+            reject(err);
+        };
+        const handleConnect = () => {
+            cleanup();
+            tlsSocket.setNoDelay(true);
+            resolve(tlsSocket);
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        tlsSocket.once('error', handleError);
+        tlsSocket.once('secureConnect', handleConnect);
+    });
+}
+
+async function establishHttpConnectTunnel(proxySocket, proxy, targetHost, targetPort, timeoutMs) {
+    const authHeader = buildProxyAuthorizationHeader(proxy);
+    const connectReq =
+        [
+            `CONNECT ${targetHost}:${targetPort} HTTP/1.1`,
+            `Host: ${targetHost}:${targetPort}`,
+            'Proxy-Connection: close',
+            authHeader.trimEnd(),
+        ]
+            .filter(Boolean)
+            .join('\r\n') + '\r\n\r\n';
+
+    return new Promise((resolve, reject) => {
+        let headerBuf = Buffer.alloc(0);
+        let settled = false;
+
+        const cleanup = () => {
+            clearTimeout(timer);
+            proxySocket.removeListener('data', onData);
+            proxySocket.removeListener('end', onEnd);
+            proxySocket.removeListener('close', onEnd);
+            proxySocket.removeListener('error', onError);
+        };
+        const finish = (err) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            if (err) reject(err);
+            else resolve();
+        };
+        const timer = setTimeout(
+            () => finish(new Error('proxy CONNECT timeout')),
+            timeoutMs,
+        );
+        const onData = (chunk) => {
+            headerBuf = Buffer.concat([headerBuf, chunk]);
+            if (headerBuf.length > 16 * 1024) {
+                finish(new Error('proxy CONNECT header overflow'));
+                return;
+            }
+            const sep = headerBuf.indexOf('\r\n\r\n');
+            if (sep === -1) return;
+            const statusLine = headerBuf.subarray(0, sep).toString('latin1').split('\r\n')[0] || '';
+            if (!/^HTTP\/1\.[01]\s+200\b/i.test(statusLine)) {
+                finish(new Error(`proxy CONNECT rejected: ${statusLine}`));
+                return;
+            }
+            const extraBytes = headerBuf.subarray(sep + 4);
+            if (extraBytes.length > 0) {
+                proxySocket.unshift(extraBytes);
+            }
+            finish();
+        };
+        const onEnd = () => finish(new Error('proxy CONNECT closed prematurely'));
+        const onError = (err) => finish(err);
+
+        proxySocket.on('data', onData);
+        proxySocket.once('end', onEnd);
+        proxySocket.once('close', onEnd);
+        proxySocket.once('error', onError);
+        proxySocket.write(connectReq);
+    });
+}
 
 export async function fetchHttpViaHttpProxy(
     proxy,
@@ -289,6 +477,7 @@ export async function fetchHttpViaHttpProxy(
     signal,
     timeoutMs = DEFAULT_PROBE_RESPONSE_TIMEOUT_MS,
 ) {
+    const startedAt = Date.now();
     const connectTimeoutMs = Math.min(
         DEFAULT_PROBE_CONNECT_TIMEOUT_MS,
         timeoutMs,
@@ -308,60 +497,67 @@ export async function fetchHttpViaHttpProxy(
                   signal,
               );
 
-    const onAbort = () => socket.destroy();
+    let tlsSocket = null;
+    const onAbort = () => {
+        tlsSocket?.destroy();
+        socket.destroy();
+    };
     signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
+        if (target.tls) {
+            const targetPort = Number(target.port) || 443;
+            const remainingForConnect = Math.max(250, timeoutMs - (Date.now() - startedAt));
+            await establishHttpConnectTunnel(
+                socket,
+                proxy,
+                target.host,
+                targetPort,
+                remainingForConnect,
+            );
+            const remainingForTls = Math.max(250, timeoutMs - (Date.now() - startedAt));
+            tlsSocket = await upgradeSocketToTls(
+                socket,
+                target.host,
+                remainingForTls,
+                signal,
+            );
+            const request =
+                [
+                    `GET ${target.path} HTTP/1.1`,
+                    `Host: ${target.host}`,
+                    'Accept: application/json',
+                    'Accept-Encoding: identity',
+                    'Connection: close',
+                    'User-Agent: MultiChrome/1.0',
+                ].join('\r\n') + '\r\n\r\n';
+            const remainingForRead = Math.max(250, timeoutMs - (Date.now() - startedAt));
+            const respPromise = readHttpResponseFromStream(tlsSocket, remainingForRead);
+            tlsSocket.write(request);
+            return await respPromise;
+        }
+
         const authHeader = buildProxyAuthorizationHeader(proxy);
         const request =
             [
                 `GET http://${target.host}${target.path} HTTP/1.1`,
                 `Host: ${target.host}`,
+                'Accept-Encoding: identity',
                 'Connection: close',
+                'Proxy-Connection: close',
                 'User-Agent: MultiChrome/1.0',
                 authHeader.trimEnd(),
             ]
                 .filter(Boolean)
                 .join('\r\n') + '\r\n\r\n';
 
-        return await new Promise((resolve, reject) => {
-            const chunks = [];
-            let settled = false;
-
-            const cleanup = () => {
-                clearTimeout(timer);
-                socket.removeListener('data', handleData);
-                socket.removeListener('end', handleDone);
-                socket.removeListener('close', handleDone);
-                socket.removeListener('error', handleError);
-            };
-
-            const finish = (result, error) => {
-                if (settled) return;
-                settled = true;
-                cleanup();
-                if (error) reject(error);
-                else resolve(result || Buffer.concat(chunks));
-            };
-
-            const timer = setTimeout(
-                () => finish(undefined, new Error('proxy response timeout')),
-                timeoutMs,
-            );
-            const handleData = (chunk) => {
-                chunks.push(chunk);
-            };
-            const handleDone = () => finish(Buffer.concat(chunks));
-            const handleError = (error) => finish(undefined, error);
-
-            socket.on('data', handleData);
-            socket.once('end', handleDone);
-            socket.once('close', handleDone);
-            socket.once('error', handleError);
-            socket.write(request);
-        });
+        const remainingForRead = Math.max(100, timeoutMs - (Date.now() - startedAt));
+        const respPromise = readHttpResponseFromStream(socket, remainingForRead);
+        socket.write(request);
+        return await respPromise;
     } finally {
         signal?.removeEventListener('abort', onAbort);
+        tlsSocket?.destroy();
         socket.destroy();
     }
 }
@@ -430,11 +626,13 @@ export async function fetchHttpViaSocksProxy(
             }
         }
 
+        const targetPort = target.tls ? Number(target.port) || 443 : Number(target.port) || 80;
+        const portBytes = Buffer.from([(targetPort >> 8) & 0xff, targetPort & 0xff]);
         const hostBuffer = Buffer.from(target.host, 'utf-8');
         const connectReq = Buffer.concat([
             Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuffer.length]),
             hostBuffer,
-            Buffer.from([0x00, 0x50]),
+            portBytes,
         ]);
         socket.write(connectReq);
 
@@ -459,14 +657,36 @@ export async function fetchHttpViaSocksProxy(
         const request = [
             `GET ${target.path} HTTP/1.1`,
             `Host: ${target.host}`,
+            'Accept-Encoding: identity',
             'Connection: close',
             'User-Agent: MultiChrome/1.0',
             '',
             '',
         ].join('\r\n');
-        socket.write(request);
 
-        return await reader.readAll(timeoutMs);
+        if (target.tls) {
+            if (reader.buffer.length > 0) {
+                socket.unshift(reader.buffer);
+                reader.buffer = Buffer.alloc(0);
+            }
+            const tlsSocket = await upgradeSocketToTls(
+                socket,
+                target.host,
+                timeoutMs,
+                signal,
+            );
+            try {
+                const respPromise = readHttpResponseFromStream(tlsSocket, timeoutMs);
+                tlsSocket.write(request);
+                return await respPromise;
+            } finally {
+                tlsSocket.destroy();
+            }
+        }
+
+        const respPromise = readHttpResponseFromStream(socket, timeoutMs);
+        socket.write(request);
+        return await respPromise;
     } finally {
         signal?.removeEventListener('abort', onAbort);
         socket.destroy();

@@ -70,9 +70,9 @@ const settingsRepository = new SettingsRepository();
 
 function isEnglishLocale(): boolean {
     try {
-        return settingsRepository.getSettings().locale === 'en-US';
+        return settingsRepository.getSettings().locale !== 'zh-CN';
     } catch {
-        return false;
+        return true;
     }
 }
 
@@ -84,7 +84,7 @@ const proxyRepository = new ProxyRepository({
 
 const automationConfigRepository = new AutomationConfigRepository({
     store: new Store({ name: 'automation-settings' }),
-    getLocale: () => settingsRepository.getSettings().locale || 'zh-CN',
+    getLocale: () => settingsRepository.getSettings().locale || 'en-US',
 });
 
 // ---------------------------------------------------------------------------
@@ -116,7 +116,7 @@ const proxyService = new ProxyService({
         process.platform === 'win32' ? 'sing-box.exe' : 'sing-box',
     ),
     configDirectory: app.getPath('userData'),
-    getLocale: () => settingsRepository.getSettings().locale || 'zh-CN',
+    getLocale: () => settingsRepository.getSettings().locale || 'en-US',
 });
 
 const environmentService = new EnvironmentService(

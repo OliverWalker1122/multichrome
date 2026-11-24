@@ -557,21 +557,45 @@ async function main() {
         cdp = new SimpleCDP(target.webSocketDebuggerUrl);
         await cdp.connect();
 
-        // Wait until React app mounts and electronAPI is ready
-        const mounted = await waitUntil(
+        // Wait until React app mounts and electronAPI is ready (fresh install defaults to English en-US)
+        const mountedDefaultEn = await waitUntil(
             () =>
                 cdp.eval(`Boolean(
                     window.electronAPI &&
                     document.body &&
-                    document.body.innerText.includes('新建环境')
+                    document.documentElement.lang === 'en-US' &&
+                    document.body.innerText.includes('New Environment')
                 )`),
             12000,
         );
+        const initialLocale = await cdp.eval(
+            `window.electronAPI.settings.getSettings().then(s => s.locale)`,
+        );
+        // Switch to optional Simplified Chinese via TitleBar toggle and verify live persistence
+        await cdp.eval(`
+            document.querySelector('header[aria-label="Application title bar"] button[aria-label*="Chinese"]')?.click()
+        `);
+        const switchedToZh = await waitUntil(
+            () =>
+                cdp.eval(`Boolean(
+                    document.documentElement.lang === 'zh-CN' &&
+                    document.body.innerText.includes('新建环境')
+                )`),
+            6000,
+        );
+        const savedZhLocale = await cdp.eval(
+            `window.electronAPI.settings.getSettings().then(s => s.locale)`,
+        );
         record(
             'E2E-00',
-            '主窗口启动渲染 & Preload API 就绪',
-            Boolean(mounted),
-            mounted ? `url=${target.url}` : 'Renderer did not mount expected UI',
+            '主窗口启动渲染（默认英文 en-US）& 一键切换可选简体中文（zh-CN）',
+            Boolean(
+                mountedDefaultEn &&
+                    initialLocale === 'en-US' &&
+                    switchedToZh &&
+                    savedZhLocale === 'zh-CN',
+            ),
+            `defaultLocale=${initialLocale}, switchedLocale=${savedZhLocale}, url=${target.url}`,
         );
 
         // Helper functions injected into page for reliable React UI interactions
@@ -684,16 +708,24 @@ async function main() {
 
         await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
         const menuVisibilityOk = await cdp.eval(`(() => {
-            const menu = document.querySelector('tr[aria-selected="false"]:not(:hover) .mc-environment-row-menu');
-            if (!menu) return false;
+            const row = document.querySelector('tr[aria-selected="false"]:not(:hover)');
+            const menu = row?.querySelector('.mc-environment-row-menu');
+            const launchBtn = Array.from(row?.querySelectorAll('button') || []).find(
+                (b) => (b.innerText || '').includes('启动')
+            );
+            if (!menu || !launchBtn) return false;
+            const launchStyle = getComputedStyle(launchBtn);
+            const launchProminent =
+                launchStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+                parseFloat(launchStyle.borderTopWidth || '0') >= 1;
             const expected = matchMedia('(hover: hover) and (pointer: fine)').matches ? '0' : '1';
             const resting = getComputedStyle(menu).opacity;
             menu.focus();
             const focused = getComputedStyle(menu).opacity;
             menu.blur();
-            return resting === expected && focused === '1';
+            return launchProminent && resting === expected && focused === '1';
         })()`);
-        record('E2E-02c', '行菜单按输入设备显示，键盘聚焦可见', menuVisibilityOk);
+        record('E2E-02c', '启动按钮醒目可见 + 行菜单按输入设备显示且键盘聚焦可见', menuVisibilityOk);
 
         const isDockOpen = () => cdp.eval(`Boolean(document.getElementById('proxy-log-dock'))`);
         const toggleDock = () => cdp.eval(`window.__e2e.clickExact('代理日志', 'footer button')`);

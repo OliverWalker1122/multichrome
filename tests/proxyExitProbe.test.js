@@ -57,7 +57,7 @@ test('lookup travels through a loopback CONNECT tunnel with fixed HTTPS identity
             const requestText = chunk.toString('utf8');
             assert.match(
                 requestText,
-                /^GET \/\?fields=success,ip,country,country_code,region,city&lang=zh-CN HTTP\/1.1/,
+                /^GET \/\?fields=success,ip,country,country_code,region,city,timezone,latitude,longitude&lang=en HTTP\/1.1/,
             );
             assert.match(requestText, /Host: ipwho.is\r\n/i);
             assert(!/authorization:/i.test(requestText));
@@ -170,27 +170,50 @@ test('only a bare numeric loopback HTTP proxy is accepted and geolocation text i
     assert.equal(parsed.city, '');
 });
 
-test('supports en-US locale and falls back to ipinfo.io over same loopback HTTPS tunnel on upstream 429/503', async (t) => {
+test('supports zh-CN/en-US locales, extracts timezone/coords, and falls back to ipinfo.io on upstream 429 or rate-limit payload', async (t) => {
     const requestedHosts = [];
     const requestedPaths = [];
+    let attempt = 0;
     const proxy = await proxyFixture(t, (request, socket) => {
         requestedHosts.push(request.url);
         socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
         socket.once('data', (chunk) => {
             const firstLine = chunk.toString('utf8').split('\r\n')[0];
             requestedPaths.push(firstLine);
+            attempt += 1;
             if (request.url === 'ipwho.is:443') {
+                if (attempt === 1) {
+                    socket.end(
+                        'HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+                    );
+                    return;
+                }
+                const rateLimitBody = JSON.stringify({
+                    success: false,
+                    message: "You've hit the monthly rate limit",
+                });
                 socket.end(
-                    'HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n',
+                    `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(rateLimitBody)}\r\nConnection: close\r\n\r\n${rateLimitBody}`,
                 );
                 return;
             }
-            const body = JSON.stringify({
-                ip: '198.51.100.42',
-                country: 'JP',
-                region: 'Tokyo',
-                city: 'Minato',
-            });
+            const body = JSON.stringify(
+                attempt <= 2
+                    ? {
+                          ip: '198.51.100.42',
+                          country: 'JP',
+                          region: 'Tokyo',
+                          city: 'Minato',
+                      }
+                    : {
+                          ip: '198.51.100.77',
+                          country: 'BO',
+                          region: 'La Paz',
+                          city: 'La Paz',
+                          timezone: 'America/La_Paz',
+                          loc: '-16.5000,-68.1500',
+                      },
+            );
             socket.end(
                 `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
             );
@@ -214,5 +237,18 @@ test('supports en-US locale and falls back to ipinfo.io over same loopback HTTPS
         countryCode: 'JP',
         region: 'Tokyo',
         city: 'Minato',
+    });
+
+    const boliviaResult = await probe(proxy, { locale: 'zh-CN' });
+    assert.match(requestedPaths[2], /lang=zh-CN HTTP\/1\.1$/);
+    assert.deepEqual(boliviaResult, {
+        ip: '198.51.100.77',
+        country: 'BO',
+        countryCode: 'BO',
+        region: 'La Paz',
+        city: 'La Paz',
+        timezone: 'America/La_Paz',
+        latitude: -16.5,
+        longitude: -68.15,
     });
 });

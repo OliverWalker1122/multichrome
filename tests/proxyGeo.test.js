@@ -7,6 +7,7 @@ import {
     resolveChromiumCountryId,
     resolveEffectiveLanguage,
     resolveLocaleForCountry,
+    resolveTimezoneForCountry,
 } from '../electron/domain/proxyGeo.js';
 
 test('parseGeoProbeResponse parses ip-api, ipinfo, and ipwho.is responses including chunked HTTP', () => {
@@ -184,5 +185,20 @@ test('parseGeoProbeResponse extracts valid latitude and longitude when present',
         countryCode: 'US',
         latitude: 34.0522,
         longitude: -118.2437,
+    });
+
+    // Country-level timezone fallback when upstream payload omits timezone
+    assert.equal(resolveTimezoneForCountry('BO'), 'America/La_Paz');
+    const countryOnlyResp = Buffer.from(
+        'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n' +
+            JSON.stringify({
+                ip: '198.51.100.88',
+                country: 'BO',
+            }),
+    );
+    assert.deepEqual(parseGeoProbeResponse(countryOnlyResp), {
+        ip: '198.51.100.88',
+        timezone: 'America/La_Paz',
+        countryCode: 'BO',
     });
 });

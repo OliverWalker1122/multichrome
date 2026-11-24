@@ -189,3 +189,47 @@ test('probeProxyExitInfo 在所有 geo 节点失败后回退 IP-only 节点，�
     });
     assert.deepEqual(recovered, { ip: '203.0.113.88' });
 });
+
+test('probeProxyExitInfo completes immediately via Content-Length even when keep-alive HTTP proxy leaves socket open', async (t) => {
+    const sockets = new Set();
+    const server = http.createServer((_request, response) => {
+        const body = JSON.stringify({
+            ip: '198.51.100.99',
+            country: 'BO',
+            timezone: 'America/La_Paz',
+        });
+        response.socket?.write(
+            `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nProxy-Connection: keep-alive\r\n\r\n${body}`,
+        );
+        // Intentionally do NOT call response.end() — simulates upstream residential HTTP proxy holding keep-alive socket open.
+    });
+    server.on('connection', (socket) => {
+        sockets.add(socket);
+        socket.on('close', () => sockets.delete(socket));
+    });
+    t.after(async () => {
+        for (const socket of sockets) socket.destroy();
+        await new Promise((resolve) => server.close(resolve));
+    });
+    await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+    });
+    const port = server.address().port;
+
+    const startedAt = Date.now();
+    const result = await probeProxyExitInfo(`http://127.0.0.1:${port}`, {
+        needTimezone: true,
+        geoTargets: [{ host: 'keepalive-geo.invalid', path: '/json' }],
+        ipTargets: [],
+        timeoutMs: 4000,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(result?.ip, '198.51.100.99');
+    assert.equal(result?.timezone, 'America/La_Paz');
+    assert.ok(
+        elapsedMs < 1000,
+        `expected immediate Content-Length completion (<1000ms), took ${elapsedMs}ms`,
+    );
+});

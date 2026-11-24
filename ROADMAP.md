@@ -1,43 +1,42 @@
-# MultiChrome 功能路线图（ROADMAP）
+# MultiChrome Roadmap
 
-MultiChrome 定位为 **开源、本地优先、Fail-Closed 代理防泄露、原生 C++ 隐匿** 的通用多环境指纹浏览器。
+English · [简体中文](ROADMAP_ZH.md)
 
----
-
-## 🚀 当前迭代（开发中，逐项验收勾选）
-
-- [x] **1. 启动页智能去重**：启动环境时若浏览器已恢复旧会话且包含相同启动页（如 `ip125.com`），不再重复打开新的相同标签页，避免每次重启越堆越多。
-- [x] **2. 退出主程序时的运行态保护**：存在运行中浏览器环境时关闭主窗口，弹出确认（关闭全部环境并退出 / 仅关闭主窗口或最小化 / 取消），避免误关导致代理断开或数据异常。
-- [x] **3. 分组管理补全**：支持分组重命名、环境列表按运行状态筛选（全部 / 运行中 / 未运行），以及环境行右键快捷菜单。
-- [x] **4. 环境克隆**：一键克隆环境配置（分组、代理、引擎、时区、语言、备注等），自动分配全新的独立 32-bit 持久化指纹种子与独立数据目录。
-- [x] **5. Profile 体积统计 & 一键清缓存**：展示环境 profile 磁盘占用，提供“在文件夹中打开”按钮，以及一键清理 `Cache` / `Code Cache` / `GPUCache` 等缓存（保留 Cookie 与登录态）。
-- [x] **6. 代理批量管理 & 查重提醒**：支持多行批量导入代理、一键批量测活（出口 IP/地区/延迟），在代理列表展示已绑定环境数，并在多个环境复用同一代理时给出清晰提醒。
-- [x] **7. 语言自动跟随代理地区（可选）**：新增全局与环境级选项，开启后自动根据代理出口 IP 所属国家匹配对应 `Accept-Language` 与 `navigator.language`。
-- [x] **8. 启动前「防呆一致性护栏」+ Geolocation 四维对齐**：补齐 GPS 经纬度覆盖（IP + 时区 + 语言 + Geolocation 四维一致）；启动前校验代理状态与地区/时区/语言一致性，发现明显冲突时拦截预警并支持一键对齐。
-- [x] **9. 一键防泄露 / 指纹健康自检**：提供快速体检能力，直观核对当前环境的代理出口 IP、地区、时区、语言、WebRTC 防泄露策略与 C++ 指纹状态，并支持一键打开常用在线检测页。
-- [x] **10. 多开内存 / 资源治理**：展示运行中环境的实时内存占用、提供省内存启动策略选项与「一键关闭全部运行环境」快捷操作。
-- [x] **11. 扩展程序 / 书签模板统一管理**：支持自定义常用书签模板分发与环境/分组级启动页，支持本地扩展统一管理（并对 C++ 纯原生零扩展隐匿模式的影响给出透明提示）。
+MultiChrome is an **open-source, local-first, fail-closed proxy-isolated, native C++ stealth** multi-profile browser manager.
 
 ---
 
-## 🧭 后续规划（Backlog）
+## Completed Milestones
 
-### 自动化与 AI Agent 生态
-- [x] **标准 CDP 透传守卫（127.0.0.1 防呆保护）**：默认关闭，开启后仅监听 `127.0.0.1`（强制 `Host` 白名单并拒绝浏览器 `Origin` 请求防 DNS Rebinding），100% 原生兼容官方 `@playwright/mcp`、`chrome-devtools-mcp` 与 Playwright/Puppeteer；静默忽略外部 `Emulation` 指纹/时区/窗口尺寸覆盖指令、拦截误创建空白无痕 `BrowserContext`，并在绑定代理断开时同步断开 CDP 会话。
-- [x] **极简环境调度 MCP Server**：支持 Streamable HTTP（`/mcp`）与 `stdio` 桥接（`scripts/mcp-stdio.mjs`），聚焦提供 `list_profiles`、`start_profile`、`stop_profile`、`switch_active_profile` 四个环境编排工具及本地 HTTP 启停接口，配合官方页面 MCP 实现多环境防关联自动化。
+- [x] **1. Smart Startup URL Deduplication**: Skips opening duplicate startup tabs when Chrome restores an existing session containing the same URL.
+- [x] **2. Active-Profile Quit Protection**: Prompts when closing the main window while profiles are running (close all & quit / minimize to tray / cancel) to prevent abrupt proxy drops.
+- [x] **3. Group Management & Filtering**: Group color badges, rename/delete dialogs, run-status pills (All / Running / Stopped), and row context menus.
+- [x] **4. Profile Cloning**: One-click clone of group, proxy, engine, timezone, language, and notes with a fresh isolated directory and new 32-bit deterministic fingerprint seed.
+- [x] **5. Profile Disk Usage & Safe Cache Cleanup**: Displays profile storage size, opens the profile folder, and clears `Cache` / `Code Cache` / `GPUCache` while preserving cookies and login sessions.
+- [x] **6. Batch Proxy Import & Shared-Proxy Warnings**: Multi-line batch import across HTTP/SOCKS5 and share URIs (`vless`, `vmess`, `trojan`, `ss`, `hy2`, `tuic`), staged batch health checks, and clear warnings when multiple profiles share one proxy.
+- [x] **7. Optional Auto-Matched Region Language**: Automatically aligns `Accept-Language` and `navigator.language` with the proxy exit country when enabled.
+- [x] **8. Pre-Launch Consistency Guard & 4D Geo Alignment**: Aligns IP + Timezone + Language + Geolocation and warns before launch with one-click alignment if conflicts are detected.
+- [x] **9. One-Click Leak & Fingerprint Health Check**: Inspects exit IP, region, timezone, language, WebRTC/DNS leak locks, and C++ kernel status with quick links to external checkers.
+- [x] **10. Multi-Profile Memory Governance**: Live per-profile and total RAM monitoring, optional Memory Saver launch flags, and one-click Close All Running.
+- [x] **11. Bookmark & Unpacked Extension Templates**: Distributes common bookmark templates and group/profile startup URLs, and manages local unpacked extensions with transparent stealth notices.
+- [x] **12. Standard Guarded CDP & Minimal 4-Tool MCP**: Opt-in `127.0.0.1` CDP pass-through guard (`Host` allowlist + `Origin` block, override shield, incognito block, proxy-drop disconnect) + Streamable HTTP `/mcp` & `stdio` bridge (`list_profiles`, `start_profile`, `stop_profile`, `switch_active_profile`).
+- [x] **13. Curated Kernel Allowlist & Verified Upgrade Reminders**: Mandatory SHA-256 verification against `electron/domain/kernelManifest.json` with non-intrusive upgrade badges.
+- [x] **14. Multi-Tag Organization**: Colored profile tags with AND/OR multi-tag filtering.
 
-### 批量效率与窗口控制
-- [ ] **环境多选批量操作 & 批量创建**：多选勾选批量启动、关闭、移分组、换代理、移入回收站；支持前缀编号批量新建环境并按序分配代理。
-- [ ] **多窗口一键网格平铺 & 主从同步器（Synchronizer）**：按屏幕分辨率自动平铺多开窗口；进阶支持主窗口点击/滚动/输入同步到选定从窗口（带随机微延迟）。
+---
 
-### 代理进阶与跨机迁移
-- [ ] **代理一键换 IP（Rotation Webhook URL）**：为 4G/5G 移动代理与动态住宅代理提供可选换 IP 链接，一键触发刷新并自动重新探测出口 IP 与地区。
-- [ ] **本地端到端加密（E2EE）跨机迁移包**：将 `环境元数据 + 确定性指纹 Seed + Profile 目录` 打包为 AES-256 密码加密归档，支持离线迁移或配合 WebDAV / Syncthing 自托管同步（零厂商云存储）。
-- [ ] **远程同步防双开冲突锁**：数据目录放于同步盘时通过锁文件避免多设备同时打开同一环境导致 Cookie 损坏。
+## Planned Backlog
 
-### 行为拟真与运维提醒
-- [ ] **Cookie 导入 / 导出**：通过 CDP 导入导出标准 JSON / Netscape 格式 Cookie。
-- [ ] **Cookie Robot（新环境预热）**：按自定义常见站点列表自动浏览预热，为全新 Profile 建立自然 Cookie 与历史轨迹。
-- [ ] **拟人化粘贴（Paste as Human）**：通过 CDP 模拟带随机间隔的逐字输入，规避严格表单对瞬间粘贴的风控。
-- [x] **受控内核版本清单 & 已验证推荐升级提醒**：将 `fingerprint-chromium` 与 `sing-box` 允许版本抽离至 `electron/kernelManifest.json` 受控白名单（强制 SHA-256 校验，禁止随意追新不兼容版本），并在本地内核低于已验证推荐版本时给出轻量红点提醒与一键升级。
-- [x] **标签（Tags）多维分类**：完善已有 `tags` 字段的前端彩色标签编辑与多标签组合筛选。
+### Batch Operations & Window Orchestration
+- [ ] **Multi-Select Batch Actions & Bulk Profile Creation**: Select multiple profiles to batch launch, stop, move groups, swap proxies, or move to Trash; create numbered profiles in bulk with sequential proxy assignment.
+- [ ] **Auto Window Grid Tiling & Input Synchronizer**: Tile running profile windows automatically across displays; optionally synchronize clicks, scrolling, and typing with randomized micro-jitter.
+
+### Proxy Rotation & Portable Sync
+- [ ] **One-Click Proxy IP Rotation (Webhook URL)**: Trigger rotation URLs for 4G/5G mobile and rotating residential proxies and automatically re-probe exit IP and region.
+- [ ] **Local End-to-End Encrypted (E2EE) Migration Bundles**: Export `profile metadata + deterministic seed + User Data` as password-encrypted AES-256 archives for offline transfer or self-hosted WebDAV / Syncthing folders (zero vendor cloud).
+- [ ] **Cross-Device Sync Lockfile Guard**: Prevent concurrent launches across synced folders from corrupting SQLite cookies.
+
+### Natural Session Tooling
+- [ ] **Cookie Import / Export**: Import and export standard JSON / Netscape cookies over CDP.
+- [ ] **Cookie Warm-Up Runner**: Browse a user-defined list of everyday sites to build natural cookie history on fresh profiles.
+- [ ] **Humanized Paste**: Type clipboard text over CDP with natural keystroke intervals for strict forms.

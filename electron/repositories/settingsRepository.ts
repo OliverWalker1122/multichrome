@@ -113,7 +113,7 @@ export class SettingsManager {
                 locale: {
                     type: 'string',
                     enum: ['zh-CN', 'en-US'],
-                    default: 'zh-CN',
+                    default: 'en-US',
                 },
                 memorySaverMode: {
                     type: 'boolean',
@@ -159,7 +159,7 @@ export class SettingsManager {
                 startupUrl: this.store.get('startupUrl'),
                 theme: this.store.get('theme') || 'system',
                 locale:
-                    this.store.get('locale') === 'en-US' ? 'en-US' : 'zh-CN',
+                    this.store.get('locale') === 'zh-CN' ? 'zh-CN' : 'en-US',
                 memorySaverMode: Boolean(this.store.get('memorySaverMode')),
                 bookmarkTemplates: normalizeBookmarkTemplates(
                     this.store.get('bookmarkTemplates'),

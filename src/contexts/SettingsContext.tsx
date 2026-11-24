@@ -50,7 +50,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
     const { handleError } = useErrorHandler();
 
     const themeMode: ThemeMode = settings.theme || 'system';
-    const locale: AppLocale = settings.locale === 'en-US' ? 'en-US' : 'zh-CN';
+    const locale: AppLocale = settings.locale === 'zh-CN' ? 'zh-CN' : 'en-US';
     const isDark =
         themeMode === 'dark' || (themeMode === 'system' && systemDark);
 

@@ -125,8 +125,8 @@ const GeneralSettingsSection: React.FC<GeneralSettingsSectionProps> = ({
                                 void setAppLocale(data.value as AppLocale)
                             }
                         >
-                            <option value="zh-CN">简体中文</option>
                             <option value="en-US">English</option>
+                            <option value="zh-CN">简体中文</option>
                         </Select>
                     </Field>
                 </div>

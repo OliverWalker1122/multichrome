@@ -5,18 +5,24 @@
 
 export const GEO_PROBE_TARGETS = [
     {
-        host: 'ip-api.com',
-        path: '/json/?fields=status,query,countryCode,timezone,lat,lon',
+        host: 'ipwho.is',
+        path: '/?fields=success,ip,country,country_code,region,city,timezone,latitude,longitude',
+        port: 443,
+        tls: true,
         kind: 'geo',
     },
     {
         host: 'ipinfo.io',
         path: '/json',
+        port: 443,
+        tls: true,
         kind: 'geo',
     },
     {
-        host: 'ipwho.is',
-        path: '/',
+        host: 'ip-api.com',
+        path: '/json/?fields=status,query,countryCode,timezone,lat,lon',
+        port: 80,
+        tls: false,
         kind: 'geo',
     },
 ];
@@ -131,6 +137,114 @@ export const COUNTRY_TO_LOCALE = {
     JO: 'ar-JO',
     IL: 'he-IL',
 };
+
+export const COUNTRY_TO_DEFAULT_TIMEZONE = {
+    US: 'America/New_York',
+    CA: 'America/Toronto',
+    MX: 'America/Mexico_City',
+    BR: 'America/Sao_Paulo',
+    AR: 'America/Argentina/Buenos_Aires',
+    CL: 'America/Santiago',
+    CO: 'America/Bogota',
+    BO: 'America/La_Paz',
+    PE: 'America/Lima',
+    EC: 'America/Guayaquil',
+    UY: 'America/Montevideo',
+    PY: 'America/Asuncion',
+    VE: 'America/Caracas',
+    CR: 'America/Costa_Rica',
+    PA: 'America/Panama',
+    GT: 'America/Guatemala',
+    DO: 'America/Santo_Domingo',
+    PR: 'America/Puerto_Rico',
+    HN: 'America/Tegucigalpa',
+    NI: 'America/Managua',
+    SV: 'America/El_Salvador',
+    CU: 'America/Havana',
+    GB: 'Europe/London',
+    UK: 'Europe/London',
+    IE: 'Europe/Dublin',
+    DE: 'Europe/Berlin',
+    AT: 'Europe/Vienna',
+    CH: 'Europe/Zurich',
+    FR: 'Europe/Paris',
+    BE: 'Europe/Brussels',
+    LU: 'Europe/Luxembourg',
+    NL: 'Europe/Amsterdam',
+    ES: 'Europe/Madrid',
+    PT: 'Europe/Lisbon',
+    IT: 'Europe/Rome',
+    PL: 'Europe/Warsaw',
+    CZ: 'Europe/Prague',
+    SE: 'Europe/Stockholm',
+    NO: 'Europe/Oslo',
+    DK: 'Europe/Copenhagen',
+    FI: 'Europe/Helsinki',
+    IS: 'Atlantic/Reykjavik',
+    GR: 'Europe/Athens',
+    CY: 'Asia/Nicosia',
+    RO: 'Europe/Bucharest',
+    MD: 'Europe/Chisinau',
+    HU: 'Europe/Budapest',
+    SK: 'Europe/Bratislava',
+    BG: 'Europe/Sofia',
+    HR: 'Europe/Zagreb',
+    RS: 'Europe/Belgrade',
+    SI: 'Europe/Ljubljana',
+    LT: 'Europe/Vilnius',
+    LV: 'Europe/Riga',
+    EE: 'Europe/Tallinn',
+    UA: 'Europe/Kyiv',
+    BY: 'Europe/Minsk',
+    RU: 'Europe/Moscow',
+    TR: 'Europe/Istanbul',
+    MT: 'Europe/Malta',
+    JP: 'Asia/Tokyo',
+    KR: 'Asia/Seoul',
+    TW: 'Asia/Taipei',
+    HK: 'Asia/Hong_Kong',
+    MO: 'Asia/Macau',
+    CN: 'Asia/Shanghai',
+    SG: 'Asia/Singapore',
+    MY: 'Asia/Kuala_Lumpur',
+    TH: 'Asia/Bangkok',
+    VN: 'Asia/Ho_Chi_Minh',
+    ID: 'Asia/Jakarta',
+    PH: 'Asia/Manila',
+    IN: 'Asia/Kolkata',
+    PK: 'Asia/Karachi',
+    BD: 'Asia/Dhaka',
+    LK: 'Asia/Colombo',
+    NP: 'Asia/Kathmandu',
+    KH: 'Asia/Phnom_Penh',
+    MM: 'Asia/Yangon',
+    LA: 'Asia/Vientiane',
+    MN: 'Asia/Ulaanbaatar',
+    KZ: 'Asia/Almaty',
+    UZ: 'Asia/Tashkent',
+    AU: 'Australia/Sydney',
+    NZ: 'Pacific/Auckland',
+    AE: 'Asia/Dubai',
+    SA: 'Asia/Riyadh',
+    QA: 'Asia/Qatar',
+    KW: 'Asia/Kuwait',
+    OM: 'Asia/Muscat',
+    JO: 'Asia/Amman',
+    IL: 'Asia/Jerusalem',
+    EG: 'Africa/Cairo',
+    MA: 'Africa/Casablanca',
+    ZA: 'Africa/Johannesburg',
+    NG: 'Africa/Lagos',
+    KE: 'Africa/Nairobi',
+    GH: 'Africa/Accra',
+};
+
+export function resolveTimezoneForCountry(countryCode) {
+    if (typeof countryCode !== 'string') return undefined;
+    const code = countryCode.trim().toUpperCase();
+    const candidate = COUNTRY_TO_DEFAULT_TIMEZONE[code];
+    return candidate && isValidIanaTimeZone(candidate) ? candidate : undefined;
+}
 
 export function resolveLocaleForCountry(
     countryCode,
@@ -318,8 +432,6 @@ export function parseGeoProbeResponse(buffer) {
             : data.timezone && typeof data.timezone === 'object' && typeof data.timezone.id === 'string'
               ? data.timezone.id
               : undefined;
-    const timezone = rawTz && isValidIanaTimeZone(rawTz) ? rawTz : undefined;
-
     const countryCode =
         typeof data.countryCode === 'string'
             ? data.countryCode
@@ -328,6 +440,10 @@ export function parseGeoProbeResponse(buffer) {
               : typeof data.country === 'string' && data.country.length === 2
                 ? data.country
                 : undefined;
+    const timezone =
+        rawTz && isValidIanaTimeZone(rawTz)
+            ? rawTz
+            : resolveTimezoneForCountry(countryCode);
 
     const result = { ip, timezone, countryCode };
 

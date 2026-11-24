@@ -27,6 +27,7 @@ import {
 import { normalizeEnvironmentTags } from '../domain/environmentTags.js';
 import { evaluateLaunchConsistency } from '../domain/launchGuard.js';
 import { evaluateEnvironmentHealth } from '../domain/healthCheck.js';
+import { resolveTimezoneForCountry } from '../domain/proxyGeo.js';
 import {
     removeGroupStartupUrl,
     renameGroupStartupUrl,
@@ -56,6 +57,9 @@ interface ManagedProxyRecord {
         status?: string;
         ip?: string;
         countryCode?: string;
+        timezone?: string;
+        latitude?: number;
+        longitude?: number;
     };
 }
 
@@ -269,7 +273,11 @@ export class EnvironmentService {
                     source.fingerprintConfig?.spoofing || fpDefaults.spoofing,
             }) as FingerprintConfig;
 
-            const name = customName?.trim() || `${source.name} - 副本`;
+            const isEn =
+                this.settingsManager.getSettings().locale !== 'zh-CN';
+            const name =
+                customName?.trim() ||
+                (isEn ? `${source.name} - Copy` : `${source.name} - 副本`);
             const cloned: ChromeEnvironment = {
                 id,
                 name,
@@ -347,6 +355,11 @@ export class EnvironmentService {
             exitInfo = {
                 ip: managedProxy.exitInfo.ip,
                 countryCode: managedProxy.exitInfo.countryCode,
+                timezone:
+                    managedProxy.exitInfo.timezone ||
+                    resolveTimezoneForCountry(managedProxy.exitInfo.countryCode),
+                latitude: managedProxy.exitInfo.latitude,
+                longitude: managedProxy.exitInfo.longitude,
             };
         }
 
@@ -368,10 +381,16 @@ export class EnvironmentService {
                 ) {
                     try {
                         const probed = await Promise.race([
-                            this.launchService.resolveProxyExitInfoBeforeLaunch(
-                                proxyAddress,
-                                { needTimezone: true },
-                            ),
+                            env.proxyId
+                                ? this.launchService.resolveManagedProxyExitInfoBeforeLaunch(
+                                      env.proxyId,
+                                      proxyAddress,
+                                      { needTimezone: true, timeoutMs: 1800 },
+                                  )
+                                : this.launchService.resolveProxyExitInfoBeforeLaunch(
+                                      proxyAddress,
+                                      { needTimezone: true },
+                                  ),
                             new Promise<null>((resolve) =>
                                 setTimeout(() => resolve(null), 1800),
                             ),
@@ -394,7 +413,7 @@ export class EnvironmentService {
             proxy: managedProxy,
             exitInfo,
             hasFingerprintKernel,
-            locale: settings.locale || 'zh-CN',
+            locale: settings.locale || 'en-US',
         });
     }
 
@@ -464,16 +483,27 @@ export class EnvironmentService {
             exitInfo = {
                 ip: managedProxy.exitInfo.ip,
                 countryCode: managedProxy.exitInfo.countryCode,
+                timezone:
+                    managedProxy.exitInfo.timezone ||
+                    resolveTimezoneForCountry(managedProxy.exitInfo.countryCode),
+                latitude: managedProxy.exitInfo.latitude,
+                longitude: managedProxy.exitInfo.longitude,
             };
         }
 
-        if (proxyAddress) {
+        if (proxyAddress && (!exitInfo?.ip || !exitInfo?.timezone)) {
             try {
                 const probed = await Promise.race([
-                    this.launchService.resolveProxyExitInfoBeforeLaunch(
-                        proxyAddress,
-                        { needTimezone: true, bypassCache: true },
-                    ),
+                    env.proxyId
+                        ? this.launchService.resolveManagedProxyExitInfoBeforeLaunch(
+                              env.proxyId,
+                              proxyAddress,
+                              { needTimezone: true, timeoutMs: 8000 },
+                          )
+                        : this.launchService.resolveProxyExitInfoBeforeLaunch(
+                              proxyAddress,
+                              { needTimezone: true, bypassCache: true },
+                          ),
                     new Promise<null>((resolve) =>
                         setTimeout(() => resolve(null), 8000),
                     ),
@@ -509,7 +539,7 @@ export class EnvironmentService {
             fpDefaults,
             hasFingerprintKernel,
             prefsSnapshot,
-            locale: settings.locale || 'zh-CN',
+            locale: settings.locale || 'en-US',
         });
     }
 

@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
+import { isValidIanaTimeZone } from '../domain/proxyGeo.js';
 
 const PRIMARY_HOST = 'ipwho.is';
 const FALLBACK_HOST = 'ipinfo.io';
@@ -9,9 +10,9 @@ const FALLBACK_PATH = '/json';
 const MAX_RESPONSE_BYTES = 32 * 1024;
 const RETRYABLE_UPSTREAM_STATUS = new Set([429, 500, 502, 503, 504]);
 
-function buildPrimaryPath(locale = 'zh-CN') {
-    const lang = locale === 'en-US' ? 'en' : 'zh-CN';
-    return `/?fields=success,ip,country,country_code,region,city&lang=${lang}`;
+function buildPrimaryPath(locale = 'en-US') {
+    const lang = locale === 'zh-CN' ? 'zh-CN' : 'en';
+    return `/?fields=success,ip,country,country_code,region,city,timezone,latitude,longitude&lang=${lang}`;
 }
 
 function probeError(aborted = false) {
@@ -34,6 +35,47 @@ function locationText(value) {
         .slice(0, 120);
 }
 
+function attachOptionalGeoFields(result, value) {
+    const rawTz =
+        typeof value.timezone === 'string'
+            ? value.timezone.trim()
+            : value.timezone &&
+                typeof value.timezone === 'object' &&
+                typeof value.timezone.id === 'string'
+              ? value.timezone.id.trim()
+              : '';
+    if (rawTz && isValidIanaTimeZone(rawTz)) {
+        result.timezone = rawTz;
+    }
+
+    let lat;
+    let lon;
+    if (typeof value.latitude === 'number' && typeof value.longitude === 'number') {
+        lat = value.latitude;
+        lon = value.longitude;
+    } else if (typeof value.loc === 'string' && value.loc.includes(',')) {
+        const [rawLat, rawLon] = value.loc.split(',').map((s) => Number(s.trim()));
+        if (Number.isFinite(rawLat) && Number.isFinite(rawLon)) {
+            lat = rawLat;
+            lon = rawLon;
+        }
+    }
+    if (
+        typeof lat === 'number' &&
+        typeof lon === 'number' &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lon) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lon >= -180 &&
+        lon <= 180
+    ) {
+        result.latitude = lat;
+        result.longitude = lon;
+    }
+    return result;
+}
+
 export function parseExitInfo(value) {
     if (
         !value ||
@@ -41,17 +83,29 @@ export function parseExitInfo(value) {
         typeof value.ip !== 'string' ||
         !net.isIP(value.ip)
     ) {
-        throw probeError();
+        const err = probeError();
+        if (
+            value &&
+            value.success === false &&
+            typeof value.message === 'string' &&
+            /limit|quota|rate/i.test(value.message)
+        ) {
+            err.retryable = true;
+        }
+        throw err;
     }
-    return {
-        ip: value.ip,
-        country: locationText(value.country),
-        countryCode: /^[A-Z]{2}$/.test(value.country_code || '')
-            ? value.country_code
-            : '',
-        region: locationText(value.region),
-        city: locationText(value.city),
-    };
+    return attachOptionalGeoFields(
+        {
+            ip: value.ip,
+            country: locationText(value.country),
+            countryCode: /^[A-Z]{2}$/.test(value.country_code || '')
+                ? value.country_code
+                : '',
+            region: locationText(value.region),
+            city: locationText(value.city),
+        },
+        value,
+    );
 }
 
 export function parseFallbackIpInfo(value) {
@@ -66,13 +120,16 @@ export function parseFallbackIpInfo(value) {
     const rawCountry =
         typeof value.country === 'string' ? value.country.trim().toUpperCase() : '';
     const countryCode = /^[A-Z]{2}$/.test(rawCountry) ? rawCountry : '';
-    return {
-        ip: value.ip,
-        country: countryCode,
-        countryCode,
-        region: locationText(value.region),
-        city: locationText(value.city),
-    };
+    return attachOptionalGeoFields(
+        {
+            ip: value.ip,
+            country: countryCode,
+            countryCode,
+            region: locationText(value.region),
+            city: locationText(value.city),
+        },
+        value,
+    );
 }
 
 function validateLoopbackProxyAddress(localAddress) {
@@ -224,8 +281,8 @@ function probeSingleTarget(
                                     ),
                                 ),
                             );
-                        } catch {
-                            fail(false);
+                        } catch (parseErr) {
+                            fail(Boolean(parseErr?.retryable));
                         }
                     });
                 },
@@ -248,7 +305,7 @@ function probeSingleTarget(
 export function createProxyExitProbe({ connectTls = tls.connect } = {}) {
     return async function probeProxyExit(
         localAddress,
-        { signal, timeoutMs = 12000, locale = 'zh-CN' } = {},
+        { signal, timeoutMs = 12000, locale = 'en-US' } = {},
     ) {
         const proxyPort = validateLoopbackProxyAddress(localAddress);
         if (signal?.aborted) {

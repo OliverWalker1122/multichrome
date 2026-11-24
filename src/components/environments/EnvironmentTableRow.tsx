@@ -348,9 +348,21 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
             >
                 <div className={styles.actionCell}>
                     <Button
-                        className={styles.runButton}
+                        className={mergeClasses(
+                            styles.runButton,
+                            env.isRunning
+                                ? styles.runButtonStop
+                                : styles.runButtonLaunch,
+                        )}
                         size="small"
                         appearance="subtle"
+                        icon={
+                            busy ? undefined : env.isRunning ? (
+                                <StopRegular style={{ fontSize: '13px' }} />
+                            ) : (
+                                <PlayRegular style={{ fontSize: '13px' }} />
+                            )
+                        }
                         disabled={busy}
                         onClick={onRunToggle}
                     >

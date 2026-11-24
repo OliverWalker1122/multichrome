@@ -1,78 +1,80 @@
-# 开发与构建指南（Development）
+# Development & Packaging Guide
 
-## 环境要求
+English · [简体中文](development_zh.md)
+
+## Prerequisites
 
 - Node.js 20+
 - npm 9+
 - Git
 
-## 本地开发
+## Local Development
 
 ```bash
 git clone https://github.com/OliverWalker1122/multichrome.git
 cd multichrome
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 启动 Vite 前端热更新 + Electron 开发模式
+# Start Vite HMR renderer + Electron main process in development mode
 npm run dev
 ```
 
-## 常用校验命令
+## Verification Commands
 
 ```bash
-# TypeScript 类型检查
+# TypeScript type-checking
 npm run check
 
-# ESLint 代码规范检查
+# ESLint checks
 npm run lint
 
-# L1 单元测试与集成测试
+# L1 unit, integration & architecture layering tests
 npm test
 
-# 完整生产构建（Vite 渲染进程 + Electron 主进程）
+# Production build (Vite renderer + Electron main process)
 npm run build
 ```
 
-如需在本地完整运行 `tests/singboxCore.test.js` 中的真实代理核心集成测试，可先临时拉取经 SHA-256 校验的测试用 `sing-box` 二进制（该目录已被 `.gitignore` 忽略，不会进入仓库或安装包）：
+To run the real `sing-box` integration tests in `tests/singboxCore.test.js` locally, download a SHA-256-verified test `sing-box` binary first (gitignored and excluded from release installers):
 
 ```bash
 npm run prepare:singbox
 npm test
 ```
 
-## 端到端与真站抽检
+## End-to-End & Live External Audits
 
 ```bash
-# L2 离线端到端回归（双引擎 Fail-Closed + 反检测对抗）
+# L2 offline E2E regression (dual-engine fail-closed routing + anti-detection checks)
 npm run test:e2e
 
-# 可选：指定外部本地代理执行 L2 线上模式（数据隔离在临时目录，结束后自动清理）
+# Optional: run L2 against live local proxies (uses an isolated temp directory cleaned up on exit)
 npm run test:e2e -- --live --proxy-a=http://127.0.0.1:10808 --proxy-b=http://127.0.0.1:10809
 
-# L3 界面主流程冒烟测试（独立临时 userData；附加 -- --screenshots 可输出浅深主页对比截图）
+# L3 UI smoke suite (isolated temp userData; append -- --screenshots to capture light/dark home screenshots)
 npm run test:ui
 
-# L4 外网真站双内核指纹抽检（手动按需执行，不进 CI；--proxy 默认分别实测 C++ 隐私内核与系统 Chrome 内核）
+# L4 live external dual-engine fingerprint audit (manual on demand, excluded from CI)
 npm run audit:live -- --proxy="MyProxy"
 npm run audit:live -- --env="Profile-1"
 ```
 
-## 本地打包安装包
+## Building Platform Installers
 
-在执行打包前请先运行 `npm run build`：
+Run `npm run build` before packaging:
 
 ```bash
 npm run build
 
-# 按目标平台打包（产物输出至 release/ 目录）
-npm run package:win    # Windows x64 NSIS 安装包
+# Package for target OS (artifacts output to release/)
+npm run package:win    # Windows x64 NSIS installer
 npm run package:mac    # macOS .dmg / .zip
 npm run package:linux  # Linux .AppImage / .deb
 ```
 
-## 贡献约定
+## Contributor Notes
 
-- 所有新增或修改的用户可见文案需同时支持简体中文与英文（渲染层使用 `useI18n()`，主进程读取 `settings.locale`）。
-- 提交与推送前请核查变更，避免包含真实代理节点、凭据、本地路径用户名或用户数据文件（详见 [AGENTS.md](../AGENTS.md)）。
+- The application defaults to English (`en-US`) and supports Simplified Chinese (`zh-CN`). All user-facing strings must provide both languages (`useI18n()` in the renderer and `settings.locale` in the main process).
+- Before committing or pushing, verify that diffs contain no real proxy URIs/IPs, credentials, local OS usernames, or browser profile data (see [CONTRIBUTING.md](../CONTRIBUTING.md)).

@@ -227,10 +227,10 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             aria-label={t('环境列表', 'Environments table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 354
+                                    ? 368
                                     : ws.nameWidth +
                                       ws.proxyWidth +
-                                      292 +
+                                      312 +
                                       (showGroupCol ? 88 : 0) +
                                       activeOptionalCols.length * 140,
                             }}
@@ -342,7 +342,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: '112px' }}
+                                        style={{ width: '132px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>

@@ -478,12 +478,11 @@ export class CDPManager {
                         this.resumeTarget(ws, sessionId);
                     }
                 } else if (
-                    (targetType === 'worker' ||
-                        targetType === 'shared_worker' ||
-                        targetType === 'service_worker') &&
+                    (targetType === 'worker' || targetType === 'shared_worker') &&
                     (this.envTimezones.has(envId) || this.envLocales.has(envId))
                 ) {
-                    // 同步覆盖 Web Worker / Service Worker 的 V8 引擎时区与语言区域
+                    // 同步覆盖 Dedicated / Shared Web Worker 的 V8 引擎时区与语言区域
+                    //（ServiceWorker 宿主不支持 Emulation 域，避免拦截暂停导致 Gmail 等重度 SW 应用卡加载屏）
                     this.trackInjectionTask(
                         envId,
                         this.injectTimezoneToWorker(envId, sessionId, ws, waitingForDebugger),
@@ -512,30 +511,36 @@ export class CDPManager {
         ws: WebSocket,
         waitingForDebugger: boolean,
     ): Promise<void> {
-        const timezone = this.envTimezones.get(envId);
-        const locale = this.envLocales.get(envId);
-        if (timezone) {
-            await this.sendCommand(
-                envId,
-                ws,
-                'Emulation.setTimezoneOverride',
-                { timezoneId: timezone },
-                sessionId,
-                400,
-            );
-        }
-        if (locale) {
-            await this.sendCommand(
-                envId,
-                ws,
-                'Emulation.setLocaleOverride',
-                { locale },
-                sessionId,
-                400,
-            );
-        }
-        if (waitingForDebugger) {
-            this.resumeTarget(ws, sessionId);
+        try {
+            const timezone = this.envTimezones.get(envId);
+            const locale = this.envLocales.get(envId);
+            let lastPromise: Promise<Record<string, unknown> | null> =
+                Promise.resolve(null);
+            if (timezone) {
+                lastPromise = this.sendCommand(
+                    envId,
+                    ws,
+                    'Emulation.setTimezoneOverride',
+                    { timezoneId: timezone },
+                    sessionId,
+                    400,
+                );
+            }
+            if (locale) {
+                lastPromise = this.sendCommand(
+                    envId,
+                    ws,
+                    'Emulation.setLocaleOverride',
+                    { locale },
+                    sessionId,
+                    400,
+                );
+            }
+            await lastPromise;
+        } finally {
+            if (waitingForDebugger) {
+                this.resumeTarget(ws, sessionId);
+            }
         }
     }
 
@@ -579,22 +584,35 @@ export class CDPManager {
             });
         }
 
-        let lastPromise: Promise<Record<string, unknown> | null> = Promise.resolve(null);
-        for (const cmd of cmds) {
-            lastPromise = this.sendCommand(envId, ws, cmd.method, cmd.params, sessionId, 400);
-        }
+        try {
+            let lastPromise: Promise<Record<string, unknown> | null> =
+                Promise.resolve(null);
+            for (const cmd of cmds) {
+                lastPromise = this.sendCommand(
+                    envId,
+                    ws,
+                    cmd.method,
+                    cmd.params,
+                    sessionId,
+                    400,
+                );
+            }
 
-        // 利用同 session FIFO 特性：等最后一条原生 Emulation 命令 ACK 后再标记就绪/放行
-        await lastPromise;
-        if (waitingForDebugger) {
-            this.resumeTarget(ws, sessionId);
+            // 利用同 session FIFO 特性：等最后一条原生 Emulation 命令 ACK 后再标记就绪/放行
+            await lastPromise;
+        } finally {
+            if (waitingForDebugger) {
+                this.resumeTarget(ws, sessionId);
+            }
         }
 
         const sessions = this.envSessions.get(envId);
         const session = sessions?.get(sessionId);
         if (session) session.injected = true;
 
-        log.info(`[CDP] 已施加 ${cmds.length} 条原生 Emulation 命令到 session ${sessionId.substring(0, 8)}`);
+        log.info(
+            `[CDP] 已施加 ${cmds.length} 条原生 Emulation 命令到 session ${sessionId.substring(0, 8)}`,
+        );
     }
 
     /**
@@ -672,8 +690,7 @@ export class CDPManager {
                     void this.injectToSession(envId, sessionId, connection.ws, false);
                 } else if (
                     session.type === 'worker' ||
-                    session.type === 'shared_worker' ||
-                    session.type === 'service_worker'
+                    session.type === 'shared_worker'
                 ) {
                     void this.injectTimezoneToWorker(envId, sessionId, connection.ws, false);
                 }

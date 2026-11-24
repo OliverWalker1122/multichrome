@@ -1,8 +1,8 @@
-## Summary / 变更说明
+## Summary
 
-<!-- Briefly describe what problem this PR solves and the approach taken. / 简要说明本 PR 解决的问题与实现思路。 -->
+<!-- Briefly describe what problem this PR solves and the approach taken. -->
 
-## Affected Layers / 涉及分层
+## Affected Layers
 
 - [ ] `electron/domain` — Pure domain rules, fingerprint math, URI/sing-box config, or security policies (L0)
 - [ ] `electron/repositories` / `electron/drivers` — SQLite / `safeStorage` persistence or OS/process/CDP/network drivers (L1)
@@ -12,13 +12,13 @@
 - [ ] `src/components` / `src/theme` / `src/i18n` — Renderer views, Fluent 2 theme, or bilingual i18n (L0/L3)
 - [ ] `docs/` / `scripts/` / `tests/` — Documentation, build scripts, or test suites
 
-## Verification Checklist / 验证清单
+## Verification Checklist
 
 - [ ] `npm run check` passes (0 TypeScript errors)
 - [ ] `npm run lint` passes (0 ESLint errors)
-- [ ] `npm test` passes (L1 unit & integration tests)
+- [ ] `npm test` passes (L1 unit, integration & layering tests)
 - [ ] `npm run build` succeeds
 - [ ] `npm run test:e2e` passes (required for proxy / kernel / CDP / launch changes)
 - [ ] `npm run test:ui` passes (required for UI / dialog / IPC state changes)
-- [ ] Bilingual (`zh-CN` & `en-US`) strings provided for all user-facing text
+- [ ] Bilingual (`en-US` default & `zh-CN`) strings provided for all user-facing text
 - [ ] Privacy check passed: zero real proxy URIs/IPs, credentials, `.env` values, or personal local paths in diff

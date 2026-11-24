@@ -296,8 +296,8 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                             aria-label={t('代理列表', 'Proxies table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 600
-                                    : ctrl.nameWidth + 634,
+                                    ? 612
+                                    : ctrl.nameWidth + 646,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -349,7 +349,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                     </th>
                                     <th
                                         className={styles.th}
-                                        style={{ width: '120px' }}
+                                        style={{ width: '132px' }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>

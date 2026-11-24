@@ -246,7 +246,19 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                         <Button
                             size="small"
                             appearance="subtle"
-                            className={styles.runButton}
+                            className={mergeClasses(
+                                styles.runButton,
+                                running
+                                    ? styles.runButtonStop
+                                    : styles.runButtonStart,
+                            )}
+                            icon={
+                                busy === proxy.id ? undefined : running ? (
+                                    <StopRegular style={{ fontSize: '13px' }} />
+                                ) : (
+                                    <PlayRegular style={{ fontSize: '13px' }} />
+                                )
+                            }
                             disabled={!!busy || (running && inUse)}
                             onClick={onToggleService}
                         >

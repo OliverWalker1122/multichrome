@@ -1,19 +1,19 @@
 ---
-name: 功能建议 / Feature Request
-about: 提出改进建议或新特性想法 / Suggest an idea or enhancement
+name: Feature Request
+about: Suggest an idea or enhancement for MultiChrome
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
 ---
 
-## 需求背景 / Problem or Use Case
+## Problem or Use Case
 
-这个需求希望解决什么痛点或使用场景？
+What workflow pain point or use case would this solve?
 
-## 期望方案 / Proposed Solution
+## Proposed Solution
 
-清晰描述你希望新增或改进的行为。
+Describe the behavior or UI change you would like to see.
 
-## 备选方案或补充说明 / Alternatives & Context
+## Alternatives & Context
 
-（可选，补充参考交互或安全/兼容性考量）
+(Optional — mention security, anti-leak, or cross-platform considerations)

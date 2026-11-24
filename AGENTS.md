@@ -72,7 +72,7 @@ MultiChrome 确立了统一、克制、原生级的 **Windows 11 Fluent 2 + 轻�
 2. **涉及底层安全 / 代理 / 内核 / 指纹 / 启动逻辑**：额外运行 `npm run test:e2e`（L2）。
 3. **涉及前端核心交互 / 弹窗 / 状态流转**：额外运行 `npm run test:ui`（L3）。
 4. **每次打新 Tag / 发版前（强制全套门禁）**：
-   - **文档同步核查**：逐一核对并按需更新 [README.md](README.md)、[README_EN.md](README_EN.md) 及相关 `docs/` 文档，确保新增功能、架构说明、测试命令、版本号与当前代码保持一致。
+   - **文档同步核查**：逐一核对并按需更新英文主文档 [README.md](README.md)、中文文档 [README_ZH.md](README_ZH.md) 及相关 `docs/`（默认英文 `docs/*.md` 与可选中文 `docs/*_zh.md`）文档，确保新增功能、架构说明、测试命令、版本号与当前代码保持一致。
    - **基于最终待发版代码全量复测**：在最后一次代码/版本号/文档修改完成后，**必须完整执行全套测试**（`npm run check`、`npm run lint`、`npm test`、`npm run build`、`npm run test:e2e`、`npm run test:ui`；如涉及内核/代理/指纹改动或完整发版验收，同步运行双内核 L4 `npm run audit:live -- --proxy="<代理名>"` 分别验证 C++ 隐私内核与系统 Chrome 内核），全部通过后才允许打 Tag。
    - **推送与发布核验**：推送前严格执行第 1 节隐私泄露检查；推送 Tag 后持续检查 GitHub Actions（CI + 三端打包）与 GitHub Release 产物是否全部成功。
 5. **诚实汇报验证范围**：汇报完成情况时如实区分已运行的验证层级（L1 / L2 / L3 / L4），未实际运行的层级不得宣称已完成实测。

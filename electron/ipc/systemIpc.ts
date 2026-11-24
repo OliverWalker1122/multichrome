@@ -59,7 +59,7 @@ export function registerSystemIpc({
     const getKernelStatusPayload = () =>
         kernelManager.getStatus(
             chromeManager.getSystemChromePath(),
-            settingsManager.getSettings().locale || 'zh-CN',
+            settingsManager.getSettings().locale || 'en-US',
         );
 
     const resolveDownloadProxy = async (
