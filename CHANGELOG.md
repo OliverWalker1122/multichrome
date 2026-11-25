@@ -22,7 +22,7 @@ All notable changes to MultiChrome are documented in this file.
   - Original pure solid two-color flat icon (`#1877F2` + `#FFFFFF`) across Windows `.ico`, macOS `.icns`, Linux `.png`, tray, title bar, and GitHub social preview, with an explicit non-affiliation notice for Google LLC trademarks.
   - Real synthetic dark/light/Chinese screenshots (`docs/images/`), static landing page (`site/index.html` + GitHub Pages deployment), and CI main-process TypeScript type checking (`electron/tsconfig.json`).
 - **Release Supply-Chain & Runner Hardening**:
-  - Switched macOS release builds to `macos-14` to avoid hosted `macos-15` queue starvation and added SLSA build provenance attestations (`actions/attest-build-provenance@v2`).
+  - Added SLSA build provenance attestations (`actions/attest-build-provenance@v2`) and Node 24-native GitHub Actions workflows across Windows, macOS (`macos-latest`), and Linux release pipelines.
 
 ### Fixed
 - Guarded corrupt historical proxy payload decoding in `ProxyService.save` when updating legacy records, and added database/filesystem collision checks when reserving profile directories.

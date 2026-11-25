@@ -141,17 +141,69 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                     <span className={styles.namePrimary} title={proxy.name}>
                         {proxy.name}
                     </span>
-                    <span className={styles.nameSub}>
+                    <span
+                        className={styles.nameSub}
+                        style={
+                            narrowWindow && assigned.length > 1
+                                ? {
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      maxWidth: '100%',
+                                  }
+                                : undefined
+                        }
+                    >
                         <span
                             style={{
-                                color: getProtocolStyle(proxy.protocol).color,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
                             }}
                         >
-                            {protocolLabel}
+                            <span
+                                style={{
+                                    color: getProtocolStyle(proxy.protocol)
+                                        .color,
+                                }}
+                            >
+                                {protocolLabel}
+                            </span>
+                            {proxy.host && proxy.port
+                                ? ` · ${proxy.host}:${proxy.port}`
+                                : ''}
                         </span>
-                        {proxy.host && proxy.port
-                            ? ` · ${proxy.host}:${proxy.port}`
-                            : ''}
+                        {narrowWindow && assigned.length > 1 && (
+                            <Tooltip
+                                content={
+                                    isEn
+                                        ? `Warning: ${assigned.length} environments share this proxy: ${assigned.map((e) => e.name).join(', ')} (${inUseCount} active)`
+                                        : `注意：以下 ${assigned.length} 个环境共用同一代理，可能存在关联风险：${assigned.map((e) => e.name).join('、')}（使用中 ${inUseCount} 个）`
+                                }
+                                relationship="description"
+                            >
+                                <span
+                                    style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '2px',
+                                        fontSize: '10px',
+                                        fontWeight: 600,
+                                        padding: '0 4px',
+                                        borderRadius: '4px',
+                                        flexShrink: 0,
+                                        backgroundColor:
+                                            tokens.colorPaletteYellowBackground1,
+                                        color: tokens.colorPaletteYellowForeground2,
+                                    }}
+                                >
+                                    <WarningRegular
+                                        style={{ fontSize: '10px' }}
+                                    />
+                                    {t('复用', 'Shared')}
+                                </span>
+                            </Tooltip>
+                        )}
                     </span>
                 </div>
             </td>

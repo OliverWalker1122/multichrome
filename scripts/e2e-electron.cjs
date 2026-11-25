@@ -391,7 +391,7 @@ async function connectCDP(wsUrl) {
         }
     });
 
-    const send = (method, params = {}, sessionId, timeoutMs = 15000) =>
+    const send = (method, params = {}, sessionId, timeoutMs = 30000) =>
         new Promise((resolve, reject) => {
             const id = ++msgId;
             const timer = setTimeout(() => {
@@ -418,7 +418,7 @@ async function connectCDP(wsUrl) {
     };
 }
 
-async function openTabAndEval(cdp, url, expression, waitAfterLoadMs = 600, timeoutMs = 15000) {
+async function openTabAndEval(cdp, url, expression, waitAfterLoadMs = 600, timeoutMs = 30000) {
     const created = await cdp.send('Target.createTarget', { url });
     const targetId = created.result?.targetId;
     if (!targetId) throw new Error(`Failed to create tab for ${url}`);

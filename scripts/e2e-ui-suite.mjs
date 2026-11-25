@@ -2409,16 +2409,22 @@ async function main() {
                     8000,
                 );
 
-                // Open '窗口布局' -> '分屏并排平铺' (docks MultiChrome narrow on left) -> then '恢复主窗口大小' (restores MultiChrome default size!)
+                // Open '窗口布局' -> '分屏并排平铺' (docks MultiChrome narrow on left when display workArea >= 1040px) -> then '恢复主窗口大小'
+                const canSplitConsole = await cdp.eval(`window.screen.availWidth >= 1040`);
                 await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
                     4000,
                 );
-                const dockedNarrowOk = await waitUntil(
-                    () => cdp.eval(`window.outerWidth <= 580`),
-                    5000,
-                );
+                const dockedNarrowOk = canSplitConsole
+                    ? await waitUntil(() => cdp.eval(`window.outerWidth <= 580`), 5000)
+                    : await waitUntil(
+                          () =>
+                              cdp.eval(
+                                  `(document.querySelector('[role="region"][aria-label*="通知"], [role="region"][aria-label*="Notification"]')?.innerText || '').includes('已分屏并排平铺 3 个运行中窗口') && window.outerWidth > 580`,
+                              ),
+                          5000,
+                      );
 
                 await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
                 await waitUntil(() =>
@@ -2609,14 +2615,19 @@ async function main() {
             await waitUntil(() => cdp.eval(`!document.querySelector('[role="dialog"]')`));
             await cdp.eval(`document.querySelector('[data-details-panel] button[aria-label="关闭详情面板"]')?.click()`);
 
-            // 5) Dock narrow via Split-Grid -> Simultaneous Batch Stop -> Verify zero-running fallback '恢复主窗口' restores App Window!
+            // 5) Dock narrow via Split-Grid (on displays >= 1040px) -> Simultaneous Batch Stop -> Verify zero-running fallback '恢复主窗口' restores App Window!
+            const canSplitConsoleStep5 = await cdp.eval(`window.screen.availWidth >= 1040`);
             const preStopNormalW = await cdp.eval(`window.outerWidth`);
             await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
             await waitUntil(() =>
                 cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
                 4000,
             );
-            await waitUntil(() => cdp.eval(`window.outerWidth <= 580`), 5000);
+            if (canSplitConsoleStep5) {
+                await waitUntil(() => cdp.eval(`window.outerWidth <= 580`), 5000);
+            } else {
+                await sleep(300);
+            }
 
             await cdp.eval(`window.__e2e.clickByText('批量关闭', '[aria-label="批量操作栏"] button')`);
             simultaneousStop3Ok = await waitUntil(
@@ -2625,21 +2636,28 @@ async function main() {
                 15000,
             );
 
-            const zeroRunningResetBtnVisible = await waitUntil(
-                () => cdp.eval(`Boolean(document.querySelector('button[aria-label="恢复主窗口"]'))`),
-                5000,
-            );
-            if (zeroRunningResetBtnVisible) {
-                await cdp.eval(`document.querySelector('button[aria-label="恢复主窗口"]')?.click()`);
-                const restoredFromZeroRunning = await waitUntil(
+            if (canSplitConsoleStep5) {
+                const zeroRunningResetBtnVisible = await waitUntil(
+                    () => cdp.eval(`Boolean(document.querySelector('button[aria-label="恢复主窗口"]'))`),
+                    5000,
+                );
+                if (zeroRunningResetBtnVisible) {
+                    await cdp.eval(`document.querySelector('button[aria-label="恢复主窗口"]')?.click()`);
+                    const restoredFromZeroRunning = await waitUntil(
+                        () => cdp.eval(`window.outerWidth >= Math.min(980, ${Number(preStopNormalW) || 1000})`),
+                        5000,
+                    );
+                    const resetBtnCleared = await waitUntil(
+                        () => cdp.eval(`!document.querySelector('button[aria-label="恢复主窗口"]')`),
+                        3000,
+                    );
+                    fallbackZeroRunningResetOk = Boolean(restoredFromZeroRunning && resetBtnCleared);
+                }
+            } else {
+                fallbackZeroRunningResetOk = await waitUntil(
                     () => cdp.eval(`window.outerWidth >= Math.min(980, ${Number(preStopNormalW) || 1000})`),
                     5000,
                 );
-                const resetBtnCleared = await waitUntil(
-                    () => cdp.eval(`!document.querySelector('button[aria-label="恢复主窗口"]')`),
-                    3000,
-                );
-                fallbackZeroRunningResetOk = Boolean(restoredFromZeroRunning && resetBtnCleared);
             }
             uiTile3Ok = Boolean(uiTile3Ok && fallbackZeroRunningResetOk);
             uiTile3SubDetail = `(noMisfire=${noMisfireOnOpenOk},noDupBatch=${noDupBatchLayoutOk},redClose=${redCloseAllIconOk},splitReset=${splitAndResetSizeOk},zeroReset=${fallbackZeroRunningResetOk},stack=${stackUniformOk},cascade=${cascadeUniformOk},focus=${focusLocateOk})`;

@@ -197,10 +197,60 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                         </div>
                     )}
                     {(narrowWindow || env.notes) && (
-                        <span className={styles.nameSub}>
-                            {narrowWindow
-                                ? `${env.groupName} · ${proxyDisplay}`
-                                : env.notes}
+                        <span
+                            className={styles.nameSub}
+                            style={
+                                narrowWindow &&
+                                env.proxyId &&
+                                sharedProxyEnvs.length > 1
+                                    ? {
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '4px',
+                                          maxWidth: '100%',
+                                      }
+                                    : undefined
+                            }
+                        >
+                            <span
+                                style={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                }}
+                            >
+                                {narrowWindow
+                                    ? `${env.groupName} · ${proxyDisplay}`
+                                    : env.notes}
+                            </span>
+                            {narrowWindow &&
+                                env.proxyId &&
+                                sharedProxyEnvs.length > 1 && (
+                                    <Tooltip
+                                        content={
+                                            isEn
+                                                ? `Proxy reuse warning: ${sharedProxyEnvs.length} environments share this proxy (${sharedProxyEnvs.map((e) => e.name).join(', ')})`
+                                                : `代理查重提醒：共 ${sharedProxyEnvs.length} 个环境共用此代理（${sharedProxyEnvs.map((e) => e.name).join('、')}）`
+                                        }
+                                        relationship="description"
+                                    >
+                                        <span
+                                            style={{
+                                                fontSize: '10px',
+                                                fontWeight: 600,
+                                                padding: '0 4px',
+                                                borderRadius: '4px',
+                                                flexShrink: 0,
+                                                backgroundColor:
+                                                    tokens.colorPaletteYellowBackground1,
+                                                color: tokens.colorPaletteYellowForeground2,
+                                            }}
+                                        >
+                                            {isEn ? 'Shared×' : '共用×'}
+                                            {sharedProxyEnvs.length}
+                                        </span>
+                                    </Tooltip>
+                                )}
                         </span>
                     )}
                 </div>
