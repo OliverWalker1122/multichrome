@@ -424,33 +424,52 @@ async function openTabAndEval(cdp, url, expression, waitAfterLoadMs = 600, timeo
     if (!targetId) throw new Error(`Failed to create tab for ${url}`);
     const attached = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
     const sessionId = attached.result?.sessionId;
+    const expectNonBlank = !/^about:blank/i.test(String(url || '').trim());
 
     try {
         const deadline = Date.now() + timeoutMs;
         let ready = false;
         while (Date.now() < deadline) {
-            const state = await cdp.send(
-                'Runtime.evaluate',
-                { expression: 'document.readyState', returnByValue: true },
-                sessionId,
-                3000,
-            );
-            const val = state.result?.result?.value;
-            if (val === 'complete' || val === 'interactive') {
-                ready = true;
-                break;
+            try {
+                const state = await cdp.send(
+                    'Runtime.evaluate',
+                    {
+                        expression: '({ href: location.href, readyState: document.readyState })',
+                        returnByValue: true,
+                    },
+                    sessionId,
+                    3000,
+                );
+                const val = state.result?.result?.value;
+                const href = String(val?.href || '');
+                const readyState = String(val?.readyState || '');
+                const navigated = !expectNonBlank || (href && !href.startsWith('about:blank'));
+                if (navigated && readyState === 'complete') {
+                    ready = true;
+                    break;
+                }
+            } catch {
+                // Navigation can transiently destroy the initial execution context; keep polling.
             }
             await sleep(120);
         }
         if (ready && waitAfterLoadMs > 0) {
             await sleep(waitAfterLoadMs);
         }
-        const evalResp = await cdp.send(
-            'Runtime.evaluate',
-            { expression, awaitPromise: true, returnByValue: true },
-            sessionId,
-            timeoutMs,
-        );
+        let evalResp;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            evalResp = await cdp.send(
+                'Runtime.evaluate',
+                { expression, awaitPromise: true, returnByValue: true },
+                sessionId,
+                timeoutMs,
+            );
+            const errText = evalResp.result?.exceptionDetails?.text || evalResp.error?.message || '';
+            if (!/Execution context was destroyed|Cannot find context/i.test(errText)) {
+                break;
+            }
+            await sleep(300);
+        }
         if (evalResp.result?.exceptionDetails) {
             return { error: evalResp.result.exceptionDetails.text || 'Runtime exception' };
         }
