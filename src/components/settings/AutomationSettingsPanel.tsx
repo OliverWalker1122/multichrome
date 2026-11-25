@@ -1,6 +1,5 @@
 import {
     buildAutomationSnippet,
-    type PageControlAddon,
     type SnippetTab,
 } from '../../utils/automationSnippets';
 import { moveTabFocus } from '../../utils/tabKeyboard';
@@ -210,25 +209,6 @@ const useStyles = makeStyles({
         gap: '10px',
         flexWrap: 'wrap',
     },
-    addonRow: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '10px',
-        flexWrap: 'wrap',
-    },
-    addonLabel: {
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        fontSize: '12px',
-        fontWeight: 500,
-        color: tokens.colorNeutralForeground2,
-    },
-    addonPill: {
-        height: '24px',
-        padding: '0 9px',
-    },
     pillTabsBar: {
         display: 'inline-flex',
         alignItems: 'center',
@@ -315,8 +295,7 @@ const AutomationSettingsPanel: React.FC = () => {
     const [actionError, setActionError] = useState('');
     const [portInput, setPortInput] = useState(String(DEFAULT_PORT));
     const [snippetsOpen, setSnippetsOpen] = useState(false);
-    const [snippetTab, setSnippetTab] = useState<SnippetTab>('mcpHttp');
-    const [pageAddon, setPageAddon] = useState<PageControlAddon>('none');
+    const [snippetTab, setSnippetTab] = useState<SnippetTab>('cdpCode');
     const [manualTemplate, setManualTemplate] = useState(false);
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
     const [tokenValue, setTokenValue] = useState<string>('');
@@ -640,9 +619,6 @@ const AutomationSettingsPanel: React.FC = () => {
         }
     };
 
-    const activeSnippetKey =
-        snippetTab === 'cdpCode' ? 'cdpCode' : `${snippetTab}:${pageAddon}`;
-
     const handleCopySnippet = async (template = false) => {
         let copying = false;
         try {
@@ -652,17 +628,12 @@ const AutomationSettingsPanel: React.FC = () => {
             const liveSnippet = buildAutomationSnippet({
                 port: status.port || DEFAULT_PORT,
                 tokenSegment: liveTok,
-                bridgePath:
-                    status.stdioBridgePath ||
-                    FALLBACK_STATUS.stdioBridgePath ||
-                    '',
                 tab: snippetTab,
-                pageAddon,
             });
             copying = true;
             await navigator.clipboard.writeText(liveSnippet);
             setManualTemplate(false);
-            setCopiedKey(template ? `template:${activeSnippetKey}` : activeSnippetKey);
+            setCopiedKey(template ? `template:${snippetTab}` : snippetTab);
             if (copyTimerRef.current !== null) {
                 window.clearTimeout(copyTimerRef.current);
             }
@@ -703,20 +674,9 @@ const AutomationSettingsPanel: React.FC = () => {
             buildAutomationSnippet({
                 port: status.port || DEFAULT_PORT,
                 tokenSegment: visibleTokenSegment,
-                bridgePath:
-                    status.stdioBridgePath ||
-                    FALLBACK_STATUS.stdioBridgePath ||
-                    '',
                 tab: snippetTab,
-                pageAddon,
             }),
-        [
-            pageAddon,
-            snippetTab,
-            status.port,
-            status.stdioBridgePath,
-            visibleTokenSegment,
-        ],
+        [snippetTab, status.port, visibleTokenSegment],
     );
 
     const isEnabled = Boolean(
@@ -751,41 +711,19 @@ const AutomationSettingsPanel: React.FC = () => {
         testId: string;
     }> = [
         {
-            id: 'mcpHttp',
-            label: 'MCP (HTTP)',
-            testId: 'automation-snippet-tab-mcp-http',
-        },
-        {
-            id: 'mcpStdio',
-            label: 'MCP (stdio)',
-            testId: 'automation-snippet-tab-mcp-stdio',
-        },
-        {
             id: 'cdpCode',
             label: t('CDP 脚本', 'CDP Script'),
             testId: 'automation-snippet-tab-cdp-code',
         },
-    ];
-
-    const pageAddonOptions: Array<{
-        id: PageControlAddon;
-        label: string;
-        testId: string;
-    }> = [
         {
-            id: 'none',
-            label: t('仅环境管理', 'Profiles only'),
-            testId: 'automation-page-addon-none',
-        },
-        {
-            id: 'devtools',
+            id: 'devtoolsMcp',
             label: 'DevTools MCP',
-            testId: 'automation-page-addon-devtools',
+            testId: 'automation-snippet-tab-devtools-mcp',
         },
         {
-            id: 'playwright',
+            id: 'playwrightMcp',
             label: 'Playwright MCP',
-            testId: 'automation-page-addon-playwright',
+            testId: 'automation-snippet-tab-playwright-mcp',
         },
     ];
 
@@ -1148,11 +1086,20 @@ const AutomationSettingsPanel: React.FC = () => {
                         <h2 className={styles.cardTitle}>
                             {t('快速接入', 'Quick Connect')}
                         </h2>
+                        <InfoTip
+                            content={t(
+                                'DevTools MCP 与 Playwright MCP 均采用 HTTP 方式内置环境管理并合并页面控制，生成通用的 mcpServers JSON 配置；CDP 脚本直接通过接口启动并连接浏览器。',
+                                'DevTools MCP and Playwright MCP both include HTTP profile management plus page control as client-agnostic mcpServers JSON; CDP Script starts and attaches directly via code.',
+                            )}
+                        />
                     </div>
                     <div className={styles.headerMeta}>
                         {!snippetsOpen && (
                             <span className={styles.mutedMeta}>
-                                MCP · DevTools MCP · Playwright
+                                {t(
+                                    'CDP 脚本 · DevTools MCP · Playwright MCP',
+                                    'CDP Script · DevTools MCP · Playwright MCP',
+                                )}
                             </span>
                         )}
                         <Button
@@ -1220,7 +1167,7 @@ const AutomationSettingsPanel: React.FC = () => {
                                     data-testid="automation-copy-template"
                                     onClick={() => void handleCopySnippet(true)}
                                 >
-                                    {copiedKey === `template:${activeSnippetKey}`
+                                    {copiedKey === `template:${snippetTab}`
                                         ? t('已复制', 'Copied')
                                         : t('复制模板', 'Copy template')}
                                 </Button>
@@ -1230,7 +1177,7 @@ const AutomationSettingsPanel: React.FC = () => {
                                     appearance="subtle"
                                     data-testid="automation-copy-snippet"
                                     icon={
-                                        copiedKey === activeSnippetKey ? (
+                                        copiedKey === snippetTab ? (
                                             <CheckmarkRegular />
                                         ) : (
                                             <CopyRegular />
@@ -1238,7 +1185,7 @@ const AutomationSettingsPanel: React.FC = () => {
                                     }
                                     onClick={() => void handleCopySnippet()}
                                 >
-                                    {copiedKey === activeSnippetKey
+                                    {copiedKey === snippetTab
                                         ? t('已复制', 'Copied')
                                         : authRequired
                                           ? t('复制含密钥配置', 'Copy with token')
@@ -1246,57 +1193,6 @@ const AutomationSettingsPanel: React.FC = () => {
                                 </Button>
                             </div>
                         </div>
-
-                        {snippetTab !== 'cdpCode' && (
-                            <div
-                                className={styles.addonRow}
-                                data-testid="automation-page-addon-row"
-                            >
-                                <span className={styles.addonLabel}>
-                                    {t('页面控制', 'Page Control')}
-                                    <InfoTip
-                                        content={t(
-                                            'MultiChrome 内置 MCP 仅负责环境启停与切换；如需操作网页内容，可在此合并标准页面控制 MCP 配置，适用于任意支持 mcpServers JSON 的客户端。',
-                                            'Built-in MCP handles profile lifecycle and switching only. Add a standard CDP MCP server here to interact with page content in any MCP client that supports mcpServers JSON.',
-                                        )}
-                                    />
-                                </span>
-                                <div
-                                    className={styles.pillTabsBar}
-                                    role="radiogroup"
-                                    onKeyDown={moveTabFocus}
-                                    aria-label={t(
-                                        '页面控制附加项',
-                                        'Page control add-on',
-                                    )}
-                                >
-                                    {pageAddonOptions.map((option) => {
-                                        const active = pageAddon === option.id;
-                                        return (
-                                            <button
-                                                key={option.id}
-                                                type="button"
-                                                role="radio"
-                                                aria-checked={active}
-                                                tabIndex={active ? 0 : -1}
-                                                data-testid={option.testId}
-                                                className={mergeClasses(
-                                                    styles.pillTab,
-                                                    styles.addonPill,
-                                                    active &&
-                                                        styles.pillTabActive,
-                                                )}
-                                                onClick={() =>
-                                                    setPageAddon(option.id)
-                                                }
-                                            >
-                                                {option.label}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        )}
 
                         <pre
                             className={styles.codeSurface}

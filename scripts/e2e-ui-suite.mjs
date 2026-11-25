@@ -1329,31 +1329,30 @@ async function main() {
             5000,
         );
 
-        // Expand Quick Connect snippets and verify client-agnostic MCP (HTTP / stdio) + optional page-control MCP + CDP script + screenshot-safe token masking
+        // Expand Quick Connect snippets and verify 3 side-by-side tabs (CDP Script / DevTools MCP / Playwright MCP) with HTTP profile management + screenshot-safe token masking
         await cdp.eval(`document.querySelector('[data-testid="automation-snippets-toggle"]')?.click()`);
-        const defaultHttpSnippetOk = Boolean(
+        const cdpScriptTabOk = Boolean(
             await waitUntil(
                 () =>
                     cdp.eval(`(() => {
                         const code = document.querySelector('[data-testid="automation-snippet-code"]')?.textContent || '';
                         const tokDisp = (document.querySelector('[data-testid="automation-token-display"]')?.textContent || '').trim();
-                        const parsed = JSON.parse(code);
+                        const tabs = document.querySelectorAll('[data-testid="automation-snippets-card"] [role="tab"]');
+                        const addonRow = document.querySelector('[data-testid="automation-page-addon-row"]');
                         return (
+                            tabs.length === 3 &&
+                            addonRow === null &&
                             tokDisp === '••••••••••••' &&
-                            code.includes('••••••••••••/mcp') &&
                             !code.includes('mc_live_') &&
-                            !code.includes('claude mcp add') &&
-                            !code.includes('@playwright/mcp') &&
-                            !code.includes('chrome-devtools-mcp') &&
-                            Boolean(parsed.mcpServers?.multichrome?.url) &&
-                            Object.keys(parsed.mcpServers).length === 1
+                            code.includes('chromium.connectOverCDP') &&
+                            code.includes("const token = '••••••••••••';")
                         );
                     })()`),
                 3000,
             ),
         );
-        await cdp.eval(`document.querySelector('[data-testid="automation-page-addon-devtools"]')?.click()`);
-        const devtoolsAddonOk = Boolean(
+        await cdp.eval(`document.querySelector('[data-testid="automation-snippet-tab-devtools-mcp"]')?.click()`);
+        const devtoolsTabOk = Boolean(
             await waitUntil(
                 () =>
                     cdp.eval(`(() => {
@@ -1363,7 +1362,7 @@ async function main() {
                         return (
                             !code.includes('mc_live_') &&
                             !code.includes('claude mcp add') &&
-                            Boolean(parsed.mcpServers?.multichrome?.url) &&
+                            String(parsed.mcpServers?.multichrome?.url || '').includes('••••••••••••/mcp') &&
                             dtArgs.includes('chrome-devtools-mcp@1.14.0') &&
                             dtArgs.some((a) => String(a).includes('--wsEndpoint=ws://127.0.0.1:') && String(a).includes('••••••••••••/devtools/browser'))
                         );
@@ -1371,9 +1370,8 @@ async function main() {
                 3000,
             ),
         );
-        await cdp.eval(`document.querySelector('[data-testid="automation-page-addon-playwright"]')?.click()`);
-        await cdp.eval(`document.querySelector('[data-testid="automation-snippet-tab-mcp-stdio"]')?.click()`);
-        const stdioPlaywrightOk = Boolean(
+        await cdp.eval(`document.querySelector('[data-testid="automation-snippet-tab-playwright-mcp"]')?.click()`);
+        const playwrightTabOk = Boolean(
             await waitUntil(
                 () =>
                     cdp.eval(`(() => {
@@ -1383,8 +1381,7 @@ async function main() {
                         return (
                             !code.includes('mc_live_') &&
                             !code.includes('claude mcp add') &&
-                            parsed.mcpServers?.multichrome?.command === 'node' &&
-                            parsed.mcpServers?.multichrome?.env?.MULTICHROME_API_TOKEN === '••••••••••••' &&
+                            String(parsed.mcpServers?.multichrome?.url || '').includes('••••••••••••/mcp') &&
                             pwArgs.includes('@playwright/mcp@0.0.86') &&
                             pwArgs.some((a) => String(a).includes('••••••••••••/devtools/browser'))
                         );
@@ -1392,32 +1389,8 @@ async function main() {
                 3000,
             ),
         );
-        await cdp.eval(`document.querySelector('[data-testid="automation-snippet-tab-cdp-code"]')?.click()`);
-        const cdpScriptTabOk = Boolean(
-            await waitUntil(
-                () =>
-                    cdp.eval(`(() => {
-                        const code = document.querySelector('[data-testid="automation-snippet-code"]')?.textContent || '';
-                        const addonRow = document.querySelector('[data-testid="automation-page-addon-row"]');
-                        return (
-                            addonRow === null &&
-                            !code.includes('mc_live_') &&
-                            code.includes('chromium.connectOverCDP') &&
-                            code.includes("const token = '••••••••••••';")
-                        );
-                    })()`),
-                3000,
-            ),
-        );
-        await cdp.eval(`(() => {
-            document.querySelector('[data-testid="automation-snippet-tab-mcp-http"]')?.click();
-            document.querySelector('[data-testid="automation-page-addon-none"]')?.click();
-        })()`);
         const standardSnippetsOk =
-            defaultHttpSnippetOk &&
-            devtoolsAddonOk &&
-            stdioPlaywrightOk &&
-            cdpScriptTabOk;
+            cdpScriptTabOk && devtoolsTabOk && playwrightTabOk;
 
         let restStatusOk = false;
         let mcpInitOk = false;

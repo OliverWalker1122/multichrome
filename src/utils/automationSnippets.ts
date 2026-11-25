@@ -1,6 +1,4 @@
-export type SnippetTab = 'mcpHttp' | 'mcpStdio' | 'cdpCode';
-
-export type PageControlAddon = 'none' | 'devtools' | 'playwright';
+export type SnippetTab = 'cdpCode' | 'devtoolsMcp' | 'playwrightMcp';
 
 export const CHROME_DEVTOOLS_MCP_PACKAGE = 'chrome-devtools-mcp@1.14.0';
 export const PLAYWRIGHT_MCP_PACKAGE = '@playwright/mcp@0.0.86';
@@ -8,17 +6,13 @@ export const PLAYWRIGHT_MCP_PACKAGE = '@playwright/mcp@0.0.86';
 export interface BuildAutomationSnippetInput {
     port: number;
     tokenSegment: string;
-    bridgePath: string;
     tab: SnippetTab;
-    pageAddon?: PageControlAddon;
 }
 
 export function buildAutomationSnippet({
     port,
     tokenSegment,
-    bridgePath,
     tab,
-    pageAddon = 'none',
 }: BuildAutomationSnippetInput): string {
     const baseUrl = `http://127.0.0.1:${port}`;
     const hasToken = Boolean(tokenSegment);
@@ -60,27 +54,13 @@ export function buildAutomationSnippet({
               ].join('\n');
     }
 
-    const multichromeServer: Record<string, unknown> =
-        tab === 'mcpStdio'
-            ? {
-                  command: 'node',
-                  args: [bridgePath],
-                  env: {
-                      MULTICHROME_API_URL: baseUrl,
-                      ...(hasToken
-                          ? { MULTICHROME_API_TOKEN: tokenSegment }
-                          : {}),
-                  },
-              }
-            : {
-                  url: mcpUrl,
-              };
-
     const mcpServers: Record<string, Record<string, unknown>> = {
-        multichrome: multichromeServer,
+        multichrome: {
+            url: mcpUrl,
+        },
     };
 
-    if (pageAddon === 'devtools') {
+    if (tab === 'devtoolsMcp') {
         mcpServers['chrome-devtools'] = {
             command: 'npx',
             args: [
@@ -91,7 +71,7 @@ export function buildAutomationSnippet({
                     : `--browserUrl=${baseUrl}`,
             ],
         };
-    } else if (pageAddon === 'playwright') {
+    } else {
         mcpServers.playwright = {
             command: 'npx',
             args: ['-y', PLAYWRIGHT_MCP_PACKAGE, '--cdp-endpoint', cdpWsUrl],
