@@ -1171,8 +1171,48 @@ async function main() {
         );
 
         // ---------------------------------------------------------------
-        // E2E-09: Real Browser Launch — Bookmark Sync, Env Startup URL Dedup, Live Memory Stats, Close All
+        // E2E-09: Real Browser Launch — Bookmark Sync, Env Startup URL Dedup, Live Memory Stats, Zero Layout Shift, Close All
         // ---------------------------------------------------------------
+        const captureEnvLayout = () =>
+            cdp.eval(`(() => {
+                const search = document.querySelector('input[aria-label="搜索环境"]');
+                const filter = document.querySelector('[aria-label="按运行状态筛选"]');
+                const table = document.querySelector('table[aria-label="环境列表"]');
+                if (!search || !filter || !table) return null;
+                const searchRect = search.getBoundingClientRect();
+                const filterRect = filter.getBoundingClientRect();
+                const wrapRect = table.parentElement.getBoundingClientRect();
+                const ths = Array.from(table.querySelectorAll('thead th')).map((th) => {
+                    const r = th.getBoundingClientRect();
+                    return { left: r.left, width: r.width };
+                });
+                const rows = Array.from(table.querySelectorAll('tbody tr:not([aria-hidden="true"])'));
+                const alphaRow = rows.find((r) => (r.innerText || '').includes('测试环境Alpha') && !(r.innerText || '').includes('副本'));
+                const rowHeight = alphaRow ? alphaRow.getBoundingClientRect().height : 0;
+                return {
+                    searchLeft: searchRect.left,
+                    searchTop: searchRect.top,
+                    filterTop: filterRect.top,
+                    tableTop: wrapRect.top,
+                    colCount: ths.length,
+                    ths,
+                    rowHeight,
+                };
+            })()`);
+        const layoutsMatch = (a, b) => {
+            if (!a || !b || a.colCount !== b.colCount || a.colCount === 0) return false;
+            const near = (x, y) => Math.abs(x - y) <= 1;
+            return (
+                near(a.searchLeft, b.searchLeft) &&
+                near(a.searchTop, b.searchTop) &&
+                near(a.filterTop, b.filterTop) &&
+                near(a.tableTop, b.tableTop) &&
+                near(a.rowHeight, b.rowHeight) &&
+                a.ths.every((th, idx) => near(th.left, b.ths[idx].left) && near(th.width, b.ths[idx].width))
+            );
+        };
+        const layoutBeforeLaunch = await captureEnvLayout();
+
         await cdp.eval(
             `window.electronAPI.chromeEnvironments.update(${JSON.stringify(envA.id)}, { startupUrl: ${JSON.stringify(localStartupUrl)} })`,
         );
@@ -1189,7 +1229,7 @@ async function main() {
             bookmarkSynced = bmText.includes('E2E检测书签') && bmText.includes('常用工具');
         }
 
-        // 2) Verify live memory stats API & UI subtitle + "关闭全部 (1)" button
+        // 2) Verify live memory stats API & UI inline memory + "关闭全部 (1)" button + zero layout shift while running
         const memStats = await waitUntil(async () => {
             const s = await cdp.eval(`window.electronAPI.chromeEnvironments.getRunningResourceStats()`);
             return s && s.totalMemoryBytes > 0 ? s : null;
@@ -1201,11 +1241,12 @@ async function main() {
                 ),
             6000,
         );
+        const layoutWhileRunning = await captureEnvLayout();
 
         // 3) Verify startup URL opened on first launch
         const hitsAfterFirstLaunch = localServer.getHits();
 
-        // 4) Close envA via UI "关闭全部 (1)" button + confirm dialog
+        // 4) Close envA via UI "关闭全部 (1)" button + confirm dialog + verify zero layout shift after close
         await cdp.eval(`window.__e2e.clickByText('关闭全部 (1)')`);
         await sleep(250);
         await cdp.eval(`window.__e2e.clickByText('确认关闭全部', '[role="dialog"] button')`);
@@ -1213,6 +1254,11 @@ async function main() {
             const list = await cdp.eval(`window.electronAPI.chromeEnvironments.getAll()`);
             return Array.isArray(list) && list.every((e) => !e.isRunning);
         }, 10000, 300);
+        await sleep(150);
+        const layoutAfterClose = await captureEnvLayout();
+        const zeroLayoutShiftOk =
+            layoutsMatch(layoutBeforeLaunch, layoutWhileRunning) &&
+            layoutsMatch(layoutBeforeLaunch, layoutAfterClose);
 
         // 5) Relaunch envA (now has saved Chrome Sessions) -> verify startup URL is NOT duplicated
         // Ensure a Sessions marker exists if Chrome closed quickly
@@ -1238,9 +1284,9 @@ async function main() {
 
         record(
             'E2E-09',
-            '真实 Chrome 启动：书签模板分发 + 实时内存监控 + 一键关闭全部 + 启动页智能去重',
-            Boolean(bookmarkSynced && memStats && closeAllBtnVisible && closedAllOk && dedupOk),
-            `bookmark=${bookmarkSynced}, memMB=${memStats ? Math.round(memStats.totalMemoryBytes / 1024 / 1024) : 0}MB, closeAllUI=${Boolean(closeAllBtnVisible && closedAllOk)}, hits1=${hitsAfterFirstLaunch}, delta2=${secondLaunchDelta}`,
+            '真实 Chrome 启动：书签模板分发 + 实时内存监控 + 启停零跳变 + 一键关闭全部 + 启动页智能去重',
+            Boolean(bookmarkSynced && memStats && closeAllBtnVisible && closedAllOk && zeroLayoutShiftOk && dedupOk),
+            `bookmark=${bookmarkSynced}, memMB=${memStats ? Math.round(memStats.totalMemoryBytes / 1024 / 1024) : 0}MB, zeroShift=${zeroLayoutShiftOk}, closeAllUI=${Boolean(closeAllBtnVisible && closedAllOk)}, hits1=${hitsAfterFirstLaunch}, delta2=${secondLaunchDelta}`,
         );
 
         // ---------------------------------------------------------------

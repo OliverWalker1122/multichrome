@@ -129,20 +129,28 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     });
 
     const optionalColWidths: Record<OptionalEnvColumn, number> = {
-        timezone: 152,
+        timezone: 144,
         language: 84,
         notes: 150,
         createdAt: 116,
         id: 104,
     };
+    const STATUS_COL_WIDTH = 84;
+    const LAST_USED_COL_WIDTH = 92;
+    const ACTION_COL_WIDTH = 148;
 
     const listWidth =
         workspaceWidth -
         (detailsOpen && ws.selectedEnv && !overlayDetails
             ? ENV_DETAILS_WIDTH
             : 0);
-    const actionWidth = ws.filtered.some(env => env.isRunning) ? 156 : 120;
-    const baseColumnsWidth = 44 + ws.nameWidth + 88 + ws.proxyWidth + 100 + actionWidth +
+    const baseColumnsWidth =
+        44 +
+        ws.nameWidth +
+        STATUS_COL_WIDTH +
+        ws.proxyWidth +
+        LAST_USED_COL_WIDTH +
+        ACTION_COL_WIDTH +
         (currentGroup === '用户分组' ? ws.groupWidth : 0);
     const narrowWindow = listWidth < Math.max(810, baseColumnsWidth + 24);
     const activeOptionalCols = narrowWindow ? [] : ws.optionalColumns;
@@ -443,12 +451,12 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     ? 424
                                     : 44 +
                                       ws.nameWidth +
-                                      88 +
+                                      STATUS_COL_WIDTH +
                                       (showGroupCol ? ws.groupWidth : 0) +
                                       (showProxyCol ? ws.proxyWidth : 0) +
                                       optionalColsWidth +
-                                      (showLastUsedCol ? 100 : 0) +
-                                      actionWidth,
+                                      (showLastUsedCol ? LAST_USED_COL_WIDTH : 0) +
+                                      ACTION_COL_WIDTH,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -499,7 +507,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     </th>
                                     <th
                                         className={styles.th}
-                                        style={{ width: '88px' }}
+                                        style={{ width: STATUS_COL_WIDTH }}
                                     >
                                         {t('状态', 'Status')}
                                     </th>
@@ -531,7 +539,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     ) && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: '152px' }}
+                                            style={{
+                                                width: optionalColWidths.timezone,
+                                            }}
                                         >
                                             {t('时区', 'Timezone')}
                                         </th>
@@ -575,7 +585,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     {showLastUsedCol && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: '100px' }}
+                                            style={{
+                                                width: LAST_USED_COL_WIDTH,
+                                            }}
                                         >
                                             {t('最近使用', 'Last Used')}
                                         </th>
@@ -585,7 +597,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: actionWidth }}
+                                        style={{ width: ACTION_COL_WIDTH }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>

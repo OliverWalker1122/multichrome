@@ -131,12 +131,6 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     <h1 className={styles.title} title={headingTitle}>
                         {headingTitle}
                     </h1>
-                    {totalMemoryText && (
-                        <span className={styles.subtitle}>
-                            {t('运行环境总内存', 'Total profile memory')}{' '}
-                            {totalMemoryText}
-                        </span>
-                    )}
                 </div>
                 <Input
                     className={styles.searchInput}
@@ -162,6 +156,39 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     onChange={(_, data) => onSearchChange(data.value)}
                 />
                 <div className={styles.headerActions}>
+                    <Button
+                        appearance="primary"
+                        icon={<AddRegular />}
+                        onClick={onCreateClick}
+                    >
+                        {t('新建环境', 'New Environment')}
+                    </Button>
+                </div>
+            </div>
+
+            <div className={styles.toolbar}>
+                <RunStatusFilter
+                    value={statusFilter}
+                    onChange={onStatusFilterChange}
+                    total={totalCount}
+                    runningCount={runningCount}
+                    runningLabel={t('运行中', 'Running')}
+                    stoppedLabel={t('未运行', 'Stopped')}
+                />
+                {totalMemoryText && (
+                    <Tooltip
+                        content={t(
+                            '运行中浏览器环境总内存占用',
+                            'Total memory used by running browser profiles',
+                        )}
+                        relationship="label"
+                    >
+                        <span className={styles.toolbarMemory}>
+                            {t('总内存', 'Memory')} {totalMemoryText}
+                        </span>
+                    </Tooltip>
+                )}
+                <div className={styles.toolbarActions}>
                     {allRunningCount === 0 && consoleDocked && onTileWindows && (
                         <Button
                             appearance="subtle"
@@ -271,26 +298,16 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                                 : `关闭全部 (${allRunningCount})`}
                         </Button>
                     )}
-                    <Button
-                        appearance="primary"
-                        icon={<AddRegular />}
-                        onClick={onCreateClick}
-                    >
-                        {t('新建环境', 'New Environment')}
-                    </Button>
-                </div>
-            </div>
-
-            <div className={styles.toolbar}>
-                <RunStatusFilter
-                    value={statusFilter}
-                    onChange={onStatusFilterChange}
-                    total={totalCount}
-                    runningCount={runningCount}
-                    runningLabel={t('运行中', 'Running')}
-                    stoppedLabel={t('未运行', 'Stopped')}
-                />
-                <div className={styles.toolbarActions}>
+                    {((allRunningCount === 0 &&
+                        consoleDocked &&
+                        onTileWindows) ||
+                        (allRunningCount > 0 &&
+                            (onTileWindows || !hideCloseAll))) && (
+                        <span
+                            aria-hidden="true"
+                            className={styles.toolbarDivider}
+                        />
+                    )}
                     {currentGroup !== '用户分组' &&
                         (onRequestRenameGroup || onRequestDeleteGroup) && (
                             <Menu positioning="below-end">

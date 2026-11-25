@@ -448,14 +448,21 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                         : t('启动环境', 'Launch')}
                 </Button>
                 {environment.isRunning && onFocusWindow && (
-                    <Button
-                        size="small"
-                        appearance="subtle"
-                        icon={<TargetRegular />}
-                        onClick={() => onFocusWindow(environment.id)}
+                    <Tooltip
+                        content={t(
+                            '定位并置顶此浏览器窗口',
+                            'Locate and bring browser window to front',
+                        )}
+                        relationship="label"
                     >
-                        {t('定位窗口', 'Locate')}
-                    </Button>
+                        <Button
+                            size="small"
+                            appearance="subtle"
+                            icon={<TargetRegular />}
+                            aria-label={t('定位窗口', 'Locate window')}
+                            onClick={() => onFocusWindow(environment.id)}
+                        />
+                    </Tooltip>
                 )}
                 {onInspectHealth && (
                     <Tooltip

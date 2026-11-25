@@ -262,6 +262,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                         flexDirection: 'column',
                         gap: '2px',
                         alignItems: 'flex-start',
+                        lineHeight: '14px',
                     }}
                 >
                     {env.isRunning ? (
@@ -289,6 +290,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                         <span
                             style={{
                                 fontSize: '11px',
+                                lineHeight: '14px',
                                 color: tokens.colorNeutralForeground3,
                                 fontVariantNumeric: 'tabular-nums',
                             }}
@@ -437,7 +439,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                 </td>
             )}
             <td
-                className={styles.td}
+                className={mergeClasses(styles.td, styles.actionsTd)}
                 onClick={(event) => event.stopPropagation()}
             >
                 <div className={styles.actionCell}>

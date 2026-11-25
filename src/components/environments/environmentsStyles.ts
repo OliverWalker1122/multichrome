@@ -44,10 +44,23 @@ export const useEnvironmentsStyles = makeStyles({
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-    subtitle: {
+    toolbarMemory: {
         fontSize: '12px',
         color: tokens.colorNeutralForeground3,
         fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        minWidth: 0,
+        flex: '0 1 auto',
+    },
+    toolbarDivider: {
+        width: '1px',
+        height: '16px',
+        marginLeft: '4px',
+        marginRight: '4px',
+        backgroundColor: tokens.colorNeutralStroke2,
+        flexShrink: 0,
     },
     headerActions: {
         display: 'flex',
@@ -262,7 +275,12 @@ export const useEnvironmentsStyles = makeStyles({
         },
     },
     actionsHeader: {
-        paddingLeft: '12px',
+        paddingLeft: '8px',
+        paddingRight: '12px',
+    },
+    actionsTd: {
+        paddingLeft: '8px',
+        paddingRight: '12px',
     },
     emptyState: {
         flex: 1,
