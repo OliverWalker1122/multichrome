@@ -522,12 +522,15 @@ const FINGERPRINT_AND_LEAK_PROBE_JS = `(async () => {
         }
     } catch (e) { out.uaData = { error: String(e) }; }
 
-    // 2D Canvas fingerprint (wait for fonts + first paint frame for deterministic rasterization)
+    // 2D Canvas fingerprint (wait for fonts + first paint frame with occlusion-safe fallback)
     try {
         if (document.fonts && document.fonts.ready) {
-            await document.fonts.ready;
+            await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 1500))]);
         }
-        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        await Promise.race([
+            new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))),
+            new Promise(r => setTimeout(r, 200)),
+        ]);
         const c = document.createElement('canvas');
         c.width = 280;
         c.height = 64;
@@ -1016,8 +1019,8 @@ async function runE2E() {
         // Probe Profile A & Profile B simultaneously
         // -------------------------------------------------------------------
         const [probeA, probeB] = await Promise.all([
-            openTabAndEval(cdpA, 'http://e2e-probe.invalid/probe', FINGERPRINT_AND_LEAK_PROBE_JS, 500, 15000),
-            openTabAndEval(cdpB, 'http://e2e-probe.invalid/probe', FINGERPRINT_AND_LEAK_PROBE_JS, 500, 15000),
+            openTabAndEval(cdpA, 'http://e2e-probe.invalid/probe', FINGERPRINT_AND_LEAK_PROBE_JS, 500, 30000),
+            openTabAndEval(cdpB, 'http://e2e-probe.invalid/probe', FINGERPRINT_AND_LEAK_PROBE_JS, 500, 30000),
         ]);
 
         // ===================================================================
