@@ -472,9 +472,18 @@ export function openOfficialGitHubStream(
                 return;
             }
             if (status < 200 || status >= 300) {
+                const rateLimited =
+                    (status === 403 || status === 429) &&
+                    String(res.headers['x-ratelimit-remaining'] ?? '') === '0';
                 res.resume();
                 cleanupAgent();
-                reject(new Error(`HTTP ${status}: 无法访问 ${parsed.hostname}`));
+                reject(
+                    new Error(
+                        rateLimited
+                            ? `HTTP ${status} (速率受限): 无法访问 ${parsed.hostname}`
+                            : `HTTP ${status}: 无法访问 ${parsed.hostname}`,
+                    ),
+                );
                 return;
             }
             res.once('close', cleanupAgent);
@@ -559,6 +568,107 @@ export async function fetchOfficialGitHubJson(
             }
         });
         res.on('error', reject);
+    });
+}
+
+/**
+ * Resolve a single HTTPS redirect target on an allowlisted official GitHub host
+ * without following the redirect body (used for `/releases/latest` -> `/releases/tag/vX.Y.Z`
+ * fallback when `api.github.com` anonymous rate limits are exhausted).
+ *
+ * @param {string} urlStr
+ * @param {{
+ *   proxyAddress?: string;
+ *   timeoutMs?: number;
+ *   userAgent?: string;
+ *   signal?: AbortSignal;
+ * }} [options]
+ */
+export function resolveOfficialGitHubRedirect(urlStr, options = {}) {
+    let parsed;
+    try {
+        parsed = assertOfficialGitHubUrl(urlStr);
+    } catch (err) {
+        return Promise.reject(err);
+    }
+
+    let agent = null;
+    try {
+        agent = createGitHubProxyAgent(options.proxyAddress, {
+            connectTimeoutMs: Math.min(options.timeoutMs || 15000, 15000),
+        });
+    } catch (err) {
+        return Promise.reject(err);
+    }
+
+    return new Promise((resolve, reject) => {
+        const reqOptions = {
+            hostname: parsed.hostname,
+            port: parsed.port || 443,
+            path: `${parsed.pathname}${parsed.search}`,
+            method: 'GET',
+            headers: {
+                'User-Agent': options.userAgent || 'MultiChrome/1.6',
+                Accept: 'text/html, */*',
+            },
+            timeout: options.timeoutMs || 12000,
+            ...(agent ? { agent } : {}),
+        };
+
+        const cleanupAgent = () => {
+            if (agent) {
+                try {
+                    agent.destroy();
+                } catch {
+                    // ignore
+                }
+            }
+        };
+
+        const req = https.request(reqOptions, (res) => {
+            const status = res.statusCode || 0;
+            const location = res.headers.location;
+            res.resume();
+            cleanupAgent();
+            if ([301, 302, 303, 307, 308].includes(status) && location) {
+                try {
+                    const nextUrl = new URL(location, urlStr).toString();
+                    assertOfficialGitHubUrl(nextUrl);
+                    resolve(nextUrl);
+                } catch (err) {
+                    reject(err);
+                }
+                return;
+            }
+            reject(new Error(`HTTP ${status}: 无法获取 ${parsed.hostname} 跳转地址`));
+        });
+
+        req.on('timeout', () => {
+            cleanupAgent();
+            req.destroy(new Error('GitHub 网络请求超时'));
+        });
+        req.on('error', (err) => {
+            cleanupAgent();
+            reject(err);
+        });
+
+        if (options.signal) {
+            if (options.signal.aborted) {
+                cleanupAgent();
+                req.destroy(new Error('操作已取消'));
+                return;
+            }
+            options.signal.addEventListener(
+                'abort',
+                () => {
+                    cleanupAgent();
+                    req.destroy(new Error('操作已取消'));
+                },
+                { once: true },
+            );
+        }
+
+        req.end();
     });
 }
 

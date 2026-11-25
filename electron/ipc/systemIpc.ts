@@ -21,6 +21,8 @@ import { compareDotVersions } from '../domain/kernelPolicy.js';
 import { validateBackupPassword } from '../domain/encryptedBackup.js';
 import { buildSanitizedSupportBundle } from '../domain/supportBundle.js';
 import {
+    buildReleasePayloadFromTagAndSums,
+    parseLatestReleaseTagFromLocation,
     parseSha256Sums,
     selectPlatformReleaseAsset,
 } from '../domain/updateAssetPolicy.js';
@@ -28,6 +30,7 @@ import {
     fetchOfficialGitHubJson,
     fetchOfficialGitHubText,
     openOfficialGitHubStream,
+    resolveOfficialGitHubRedirect,
 } from '../drivers/githubProxyTransport.js';
 import {
     sanitizeAppSettingsPayload,
@@ -383,6 +386,50 @@ export function registerSystemIpc({
         return true;
     });
 
+    const fetchLatestReleasePayload = async (
+        currentVersion: string,
+        proxyAddress: string | undefined,
+        timeoutMs: number,
+    ): Promise<Record<string, unknown>> => {
+        const userAgent = `MultiChrome/${currentVersion}`;
+        try {
+            return (await fetchOfficialGitHubJson(APP_RELEASES_API_URL, {
+                proxyAddress,
+                timeoutMs,
+                userAgent,
+            })) as Record<string, unknown>;
+        } catch (apiErr) {
+            // Fall back to github.com/releases/latest redirect + SHA256SUMS.txt
+            // when anonymous api.github.com requests hit IP rate limits (HTTP 403/429).
+            try {
+                const redirectedUrl = await resolveOfficialGitHubRedirect(
+                    `${APP_REPO_URL}/releases/latest`,
+                    { proxyAddress, timeoutMs, userAgent },
+                );
+                const { tagName } = parseLatestReleaseTagFromLocation(
+                    redirectedUrl,
+                    APP_REPO_URL,
+                );
+                let sumsText = '';
+                try {
+                    sumsText = await fetchOfficialGitHubText(
+                        `${APP_REPO_URL}/releases/download/${encodeURIComponent(tagName)}/SHA256SUMS.txt`,
+                        { proxyAddress, timeoutMs, userAgent },
+                    );
+                } catch {
+                    // Older releases without SHA256SUMS.txt can still report version & release page.
+                }
+                return buildReleasePayloadFromTagAndSums({
+                    repoUrl: APP_REPO_URL,
+                    tagName,
+                    sumsText,
+                }) as Record<string, unknown>;
+            } catch {
+                throw apiErr;
+            }
+        }
+    };
+
     ipcMain.handle('app:check-update', async () => {
         const currentVersion = app.getVersion();
         const globalProxy = settingsManager.getSettings().globalProxy;
@@ -393,11 +440,11 @@ export function registerSystemIpc({
 
         let payload: Record<string, unknown>;
         try {
-            payload = (await fetchOfficialGitHubJson(APP_RELEASES_API_URL, {
+            payload = await fetchLatestReleasePayload(
+                currentVersion,
                 proxyAddress,
-                timeoutMs: 10000,
-                userAgent: `MultiChrome/${currentVersion}`,
-            })) as Record<string, unknown>;
+                10000,
+            );
         } catch (err) {
             const msg = err instanceof Error ? err.message : '';
             if (msg.includes('超时')) {
@@ -456,11 +503,11 @@ export function registerSystemIpc({
                 ? globalProxy.address.trim()
                 : undefined;
 
-        const payload = (await fetchOfficialGitHubJson(APP_RELEASES_API_URL, {
+        const payload = await fetchLatestReleasePayload(
+            currentVersion,
             proxyAddress,
-            timeoutMs: 12000,
-            userAgent: `MultiChrome/${currentVersion}`,
-        })) as Record<string, unknown>;
+            12000,
+        );
 
         const { installer, checksumAsset } = selectPlatformReleaseAsset(
             Array.isArray(payload.assets) ? payload.assets : [],

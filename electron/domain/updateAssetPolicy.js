@@ -74,22 +74,124 @@ export function selectPlatformReleaseAsset(
     };
 }
 
-export function parseSha256Sums(sumsText, targetFileName) {
-    if (typeof sumsText !== 'string' || !targetFileName) {
-        throw new Error('校验和文件或目标文件名无效');
-    }
-    const normalizedTarget = targetFileName.trim();
-    const lines = sumsText.split(/\r?\n/);
-    for (const rawLine of lines) {
+export function normalizeGitHubAssetName(fileName) {
+    return String(fileName || '')
+        .trim()
+        .replace(/^\.\//, '')
+        .replace(/\s+/g, '.');
+}
+
+export function parseSha256SumsEntries(sumsText) {
+    if (typeof sumsText !== 'string') return [];
+    const entries = [];
+    for (const rawLine of sumsText.split(/\r?\n/)) {
         const match = rawLine
             .trim()
             .match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
         if (!match) continue;
         const digest = match[1].toLowerCase();
         const fileName = match[2].trim().replace(/^\.\//, '');
-        if (fileName === normalizedTarget) {
-            return digest;
-        }
+        if (!fileName) continue;
+        entries.push({ digest, fileName });
     }
+    return entries;
+}
+
+export function parseSha256Sums(sumsText, targetFileName) {
+    if (typeof sumsText !== 'string' || !targetFileName) {
+        throw new Error('校验和文件或目标文件名无效');
+    }
+    const normalizedTarget = targetFileName.trim().replace(/^\.\//, '');
+    const githubNormalizedTarget = normalizeGitHubAssetName(normalizedTarget);
+    const entries = parseSha256SumsEntries(sumsText);
+
+    const exact = entries.find((entry) => entry.fileName === normalizedTarget);
+    if (exact) return exact.digest;
+
+    const normalizedMatch = entries.find(
+        (entry) =>
+            normalizeGitHubAssetName(entry.fileName) === githubNormalizedTarget,
+    );
+    if (normalizedMatch) return normalizedMatch.digest;
+
     throw new Error(`在 SHA256SUMS.txt 中未找到 ${normalizedTarget} 的校验摘要`);
+}
+
+export function parseLatestReleaseTagFromLocation(locationUrl, expectedRepoUrl) {
+    if (typeof locationUrl !== 'string' || typeof expectedRepoUrl !== 'string') {
+        throw new Error('未获取到有效版本跳转地址');
+    }
+    let location;
+    let repo;
+    try {
+        location = new URL(locationUrl);
+        repo = new URL(expectedRepoUrl);
+    } catch {
+        throw new Error('版本跳转地址格式无效');
+    }
+    if (
+        location.protocol !== 'https:' ||
+        location.hostname.toLowerCase() !== repo.hostname.toLowerCase()
+    ) {
+        throw new Error('已拦截非官方发布页跳转');
+    }
+    const repoPrefix = repo.pathname.replace(/\/+$/, '');
+    const expectedPrefix = `${repoPrefix}/releases/tag/`.toLowerCase();
+    if (!location.pathname.toLowerCase().startsWith(expectedPrefix)) {
+        throw new Error('未获取到有效版本标签');
+    }
+    const rawSegment = location.pathname
+        .slice(expectedPrefix.length)
+        .split('/')[0];
+    let tagName = '';
+    try {
+        tagName = decodeURIComponent(rawSegment).trim();
+    } catch {
+        throw new Error('版本标签解码失败');
+    }
+    if (!tagName || /[/?#\\\s]/.test(tagName)) {
+        throw new Error('版本标签格式无效');
+    }
+    return {
+        tagName,
+        releaseUrl: `${repo.origin}${repoPrefix}/releases/tag/${encodeURIComponent(tagName)}`,
+    };
+}
+
+export function buildReleasePayloadFromTagAndSums({
+    repoUrl,
+    tagName,
+    sumsText = '',
+}) {
+    const cleanRepo = String(repoUrl || '').replace(/\/+$/, '');
+    const cleanTag = String(tagName || '').trim();
+    const encodedTag = encodeURIComponent(cleanTag);
+    const baseDownload = `${cleanRepo}/releases/download/${encodedTag}`;
+    const entries = parseSha256SumsEntries(sumsText);
+    const seen = new Set();
+    const assets = [];
+
+    for (const entry of entries) {
+        const assetName = normalizeGitHubAssetName(entry.fileName);
+        if (!assetName || seen.has(assetName)) continue;
+        seen.add(assetName);
+        assets.push({
+            name: assetName,
+            browser_download_url: `${baseDownload}/${encodeURIComponent(assetName)}`,
+            size: 0,
+        });
+    }
+    if (entries.length > 0 && !seen.has('SHA256SUMS.txt')) {
+        assets.push({
+            name: 'SHA256SUMS.txt',
+            browser_download_url: `${baseDownload}/SHA256SUMS.txt`,
+            size: 0,
+        });
+    }
+
+    return {
+        tag_name: cleanTag,
+        html_url: `${cleanRepo}/releases/tag/${encodedTag}`,
+        assets,
+    };
 }
