@@ -98,7 +98,7 @@ jobs:
   build-macos:
     name: Build macOS (arm64)
     needs: verify
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
 
