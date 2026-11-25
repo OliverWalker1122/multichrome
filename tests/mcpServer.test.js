@@ -280,3 +280,82 @@ test('Streamable HTTP /mcp + tokenless stdio bridge round-trip cleanly on 127.0.
     });
     assert.equal(originCheck, 403);
 });
+
+test('mcpStdioBridge handles URL validation, malformed JSON, 202 accepted, SSE payloads, and HTTP error synthesis', async () => {
+    assert.throws(() => resolveMcpEndpointUrl('not-a-url'), /Invalid MULTICHROME_API_URL/);
+    assert.throws(() => resolveMcpEndpointUrl('ftp://127.0.0.1:18922'), /http or https/);
+    assert.throws(() => resolveMcpEndpointUrl('http://example.com:18922'), /loopback/);
+    assert.equal(
+        resolveMcpEndpointUrl('http://127.0.0.1:18922/t/mc_live_abc123/'),
+        'http://127.0.0.1:18922/t/mc_live_abc123/mcp',
+    );
+
+    const parseErr = await forwardJsonRpcOverHttp('{bad-json', {
+        apiUrl: 'http://127.0.0.1:18922',
+    });
+    assert.equal(parseErr.status, 400);
+    assert.equal(parseErr.response.error.code, -32700);
+
+    const invalidReq = await forwardJsonRpcOverHttp(null, {
+        apiUrl: 'http://127.0.0.1:18922',
+    });
+    assert.equal(invalidReq.status, 400);
+    assert.equal(invalidReq.response.error.code, -32600);
+
+    const badUrlErr = await forwardJsonRpcOverHttp(
+        { jsonrpc: '2.0', id: 7, method: 'ping' },
+        { apiUrl: 'http://remote.invalid:18922' },
+    );
+    assert.equal(badUrlErr.status, 0);
+    assert.equal(badUrlErr.response.id, 7);
+
+    const accepted202 = await forwardJsonRpcOverHttp(
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        {
+            apiUrl: 'http://127.0.0.1:18922',
+            fetchImpl: async () => ({ status: 202, headers: new Headers(), text: async () => '' }),
+        },
+    );
+    assert.equal(accepted202.status, 202);
+    assert.equal(accepted202.accepted, true);
+
+    const sseRes = await forwardJsonRpcOverHttp(
+        { jsonrpc: '2.0', id: 8, method: 'tools/list' },
+        {
+            apiUrl: 'http://127.0.0.1:18922',
+            token: 'mc_live_test_token_12345678901234567890',
+            fetchImpl: async (_url, init) => {
+                assert.equal(
+                    init.headers.Authorization,
+                    'Bearer mc_live_test_token_12345678901234567890',
+                );
+                return {
+                    status: 200,
+                    headers: new Headers({ 'content-type': 'text/event-stream' }),
+                    text: async () =>
+                        'event: message\ndata: {"jsonrpc":"2.0","id":8,"result":{"ok":true}}\n\n',
+                };
+            },
+        },
+    );
+    assert.equal(sseRes.status, 200);
+    assert.equal(sseRes.response.result.ok, true);
+
+    const unauthErr = await forwardJsonRpcOverHttp(
+        { jsonrpc: '2.0', id: 9, method: 'tools/list' },
+        {
+            apiUrl: 'http://127.0.0.1:18922',
+            fetchImpl: async () => ({
+                status: 401,
+                headers: new Headers({ 'content-type': 'application/json' }),
+                text: async () =>
+                    JSON.stringify({
+                        ok: false,
+                        error: { code: 'UNAUTHORIZED', message: 'Missing token' },
+                    }),
+            }),
+        },
+    );
+    assert.equal(unauthErr.status, 401);
+    assert.equal(unauthErr.response.error.data.status, 401);
+});

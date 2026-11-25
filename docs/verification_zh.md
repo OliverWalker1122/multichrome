@@ -8,9 +8,9 @@ MultiChrome 采用四层测试结构，分别覆盖纯业务逻辑、离线安�
 
 | 层级 | 命令 | 定位与覆盖范围 |
 | :--- | :--- | :--- |
-| **L1 单元测试** | `npm test` | 验证纯业务逻辑、边界条件、安全规则、纵向架构单向依赖与真实 `sing-box` 核心隔离，涵盖 Fail-Closed 参数、WebRTC 锁定、GeoIP 时区/语言、健康自检、启动护栏、分组操作、批量代理导入、内存统计与 SHA-256 校验。每次推送与 PR 由 [CI 流水线](../.github/workflows/ci.yml) 在 Ubuntu 与 Windows 双平台自动运行。 |
-| **L2 核心安全与本地对抗 E2E** | `npm run test:e2e` | **完全离线运行，无需真实代理**。使用本地模拟代理与泄密陷阱，覆盖 `fingerprint-chromium` 与官方 Chrome 双引擎：验证代理独占路由、断网 Fail-Closed 零直连泄露、WebRTC 零泄露、跨 `iframe` 原型链反 Hook（`lies=0`）、Canvas / Audio / DOMRect 同会话与跨重启确定性、以及默认 Google 搜索持久化。 |
-| **L3 界面冒烟测试** | `npm run test:ui` | 通过 `MULTICHROME_USER_DATA` 使用隔离临时目录拉起真实 Electron 窗口，验证默认英文启动、即时切换中文、核心页面渲染、关键交互弹窗、标准 CDP 守卫/MCP 以及 0 未捕获 React / 控制台异常。 |
+| **L1 单元测试与 V8 代码覆盖率** | `npm test` / `npm run test:coverage` | **175 项自动化测试**，验证纯业务逻辑、边界条件、安全规则、纵向架构单向依赖与真实 `sing-box` 核心隔离（原生 Node 20 V8 实测生产后端模块 **78.2% 行覆盖率 / 85.3% 函数覆盖率**）。每次推送与 PR 由 [CI 流水线](../.github/workflows/ci.yml) 在 Ubuntu 与 Windows 自动运行并同步更新 `tests.svg` 与 `coverage.svg` 徽章。 |
+| **L2 核心安全与本地对抗 E2E** | `npm run test:e2e` | **29/29 完全离线运行，无需真实代理**。使用本地模拟代理与泄密陷阱，覆盖 `fingerprint-chromium` 与官方 Chrome 双引擎：验证代理独占路由、断网 Fail-Closed 零直连泄露、WebRTC 零泄露、跨 `iframe` 原型链反 Hook（`lies=0`）、Canvas / Audio / DOMRect 同会话与跨重启确定性、以及默认 Google 搜索持久化。 |
+| **L3 全 UI 组件自动化测试** | `npm run test:ui` | **26/26 真机 Electron 端到端套件**，通过 `MULTICHROME_USER_DATA` 隔离目录拉起应用，**100% 覆盖全部主页面、6 个设置页签、全部抽屉与确认弹窗、前后台日志、回收站恢复与删除、代理全周期与配置脱敏、加密备份弹窗、MCP/CDP 访问密钥与 Windows 前台窗口定位**，全程 0 未捕获 React / 控制台异常。 |
 | **L4 外网检测站抽检** | `npm run audit:live -- --proxy="<代理名>"` 或 `--env="<环境名>"` | 手动按需执行（不进入离线 CI）。使用 `--proxy` 时默认创建隔离临时环境，**分别实测 C++ 隐私指纹内核（`fingerprint-chromium`）与系统 Chrome 内核（`system-chrome`）**（可通过 `--engine=both\|fingerprint-chromium\|system-chrome` 指定），经由真实代理访问主流第三方检测站点复核真实表现。 |
 
 ## 2. 第三方检测平台双内核核验记录

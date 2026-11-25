@@ -42,6 +42,7 @@ const InfoTip: React.FC<InfoTipProps> = ({ content }) => {
             <button
                 type="button"
                 className={styles.trigger}
+                data-infotip="true"
                 aria-label={content}
                 onClick={(event) => event.preventDefault()}
             >

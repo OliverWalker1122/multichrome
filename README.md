@@ -9,6 +9,7 @@ A local-first, cross-platform desktop manager for isolated browser profiles.
 [![CI](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
 [![Release](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml)
 [![Tests](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/tests.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
+[![Coverage](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/coverage.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
 [![GitHub release](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/release.svg)](https://github.com/OliverWalker1122/multichrome/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](https://github.com/OliverWalker1122/multichrome)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -65,12 +66,14 @@ npm run dev
 
 ## Local Testing & Verification
 
-MultiChrome uses a 4-layer verification suite (see [docs/verification.md](docs/verification.md)):
+MultiChrome uses a 4-layer verification suite with native Node V8 code coverage (`npm run test:coverage`) and full-surface UI automation (see [docs/verification.md](docs/verification.md)):
 
-- **L1 Unit & Integration Tests**: `npm test` (pure business logic, proxy URI parsing, CDP guard/MCP, architecture layering fitness, and real `sing-box` isolation tests).
-- **L2 Core Security & Anti-Detection E2E**: `npm run test:e2e` (offline dual-engine fail-closed routing, WebRTC zero-leak, anti-hook `lies=0`, and startup hold-gate checks).
-- **L3 UI Smoke Tests**: After `npm run build`, run `npm run test:ui` to launch Electron with an isolated temporary user data directory and verify default English startup, live Chinese switching, main pages, key dialogs, the CDP guard/MCP panel, and light/dark window materials under standard, reduced-transparency, and forced-colors settings. Append `-- --screenshots` to also save `.tmp/ui-screenshots/home-light.png` and `home-dark.png` for visual comparison.
-- **L4 Live External Dual-Engine Audit (manual on demand)**: `npm run audit:live -- --proxy="<ProxyName>"` (or `--auto-proxies=2` for 4-window multi-proxy testing) launches isolated ephemeral profiles concurrently through the loopback MCP + Guarded CDP server, tiles all windows side-by-side on screen, and audits both the **C++ Privacy Kernel (`fingerprint-chromium`)** and **System Chrome (`system-chrome`)** against CreepJS, BrowserScan, BrowserLeaks WebRTC, and PixelScan (also supports `--env="<Profile1>,<Profile2>"`, `--engine=fingerprint-chromium|system-chrome`, and `--serial`).
+| Layer | Command | Coverage & Verification Scope |
+| :--- | :--- | :--- |
+| **L1 Unit & Integration + V8 Coverage** | `npm test` / `npm run test:coverage` | **175 tests** across pure domain policies, proxy URI parsers, CDP guard/MCP/token auth, architecture layering DAG, and real `sing-box` isolation (**78.2% lines / 85.3% functions** on production backend modules via native V8 coverage; updated automatically to the `Coverage` badge in CI). |
+| **L2 Core Security & Anti-Detection E2E** | `npm run test:e2e` | **29/29 offline checks** across both `fingerprint-chromium` and Google Chrome: dual-proxy zero direct leak, fail-closed disconnect blocking, WebRTC zero-leak, anti-hook (`lies=0`), and startup hold-gate. |
+| **L3 Full UI Automation Suite** | `npm run test:ui` | **26/26 real Electron E2E suites** (isolated `MULTICHROME_USER_DATA`) exercising **100% of main pages, 6 settings tabs, drawers, dialogs, log panels, trash lifecycle, batch controls, and Windows foreground window locating** with 0 uncaught exceptions. Append `-- --screenshots` to also save `.tmp/ui-screenshots/home-light.png` and `home-dark.png`. |
+| **L4 Live External Dual-Engine Audit** | `npm run audit:live -- --proxy="<ProxyName>"` | Manual on-demand audit (or `--auto-proxies=2` for 4-window parallel testing) via loopback MCP + Guarded CDP, auditing both **C++ Privacy Kernel (`fingerprint-chromium`)** and **System Chrome (`system-chrome`)** against CreepJS, BrowserScan, BrowserLeaks WebRTC, and PixelScan. |
 
 ## Documentation
 

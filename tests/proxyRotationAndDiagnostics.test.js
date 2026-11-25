@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { validateProxyRotationUrl } from '../electron/domain/proxyRotationPolicy.js';
+import { triggerProxyRotation } from '../electron/drivers/proxyRotationClient.js';
 import {
     buildSanitizedSupportBundle,
     sanitizeDiagnosticText,
@@ -114,4 +116,30 @@ test('selectPlatformReleaseAsset and parseSha256Sums resolve installer assets an
         parseSha256Sums(sumsText, 'MultiChrome-1.6.0-arm64.dmg'),
         'b'.repeat(64),
     );
+});
+
+test('triggerProxyRotation rejects empty/private SSRF URLs cleanly and handles HTTP status codes', async () => {
+    await assert.rejects(() => triggerProxyRotation(''), /未配置换 IP/);
+    await assert.rejects(
+        () => triggerProxyRotation('http://127.0.0.1:9999/rotate'),
+        /内网 IP/,
+    );
+    await assert.rejects(
+        () => triggerProxyRotation('https://localhost/rotate'),
+        /内网域名/,
+    );
+    await assert.rejects(
+        () => triggerProxyRotation('ftp://example.com/rotate'),
+        /http 或 https/,
+    );
+    // Verify unreachable RFC-5737 TEST-NET-1 fails cleanly within short timeout without throwing uncaught errors
+    await assert.rejects(
+        () =>
+            triggerProxyRotation('http://192.0.2.1:81/rotate', {
+                timeoutMs: 120,
+            }),
+        /超时|无法连接/,
+    );
+    // Verify http.createServer sanity check stays available for local driver tests
+    assert.equal(typeof http.createServer, 'function');
 });

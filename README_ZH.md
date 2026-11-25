@@ -9,6 +9,7 @@
 [![CI](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
 [![Release](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml/badge.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/release.yml)
 [![Tests](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/tests.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
+[![Coverage](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/coverage.svg)](https://github.com/OliverWalker1122/multichrome/actions/workflows/ci.yml)
 [![GitHub release](https://raw.githubusercontent.com/OliverWalker1122/multichrome/badges/release.svg)](https://github.com/OliverWalker1122/multichrome/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](https://github.com/OliverWalker1122/multichrome)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -63,14 +64,16 @@ npm install
 npm run dev
 ```
 
-## 本地测试与验证
+## 本地测试与覆盖率
 
-MultiChrome 提供四层验证体系（详见 [docs/verification_zh.md](docs/verification_zh.md)）：
+MultiChrome 提供四层验证体系，内置原生 Node V8 代码覆盖率统计（`npm run test:coverage`）与全 UI 页面/组件端到端自动化回归（详见 [docs/verification_zh.md](docs/verification_zh.md)）：
 
-- **L1 单元测试**：`npm test`（纯业务逻辑、代理协议解析、CDP 守卫/MCP、架构分层单向依赖校验与真实 `sing-box` 隔离集成测试）。
-- **L2 核心底盘与本地对抗 E2E**：`npm run test:e2e`（离线双引擎 Fail-Closed 零直连、WebRTC 零泄露、反 Hook `lies=0` 与启动闸门验证）。
-- **L3 界面冒烟测试**：运行 `npm run build` 后执行 `npm run test:ui`，在隔离临时目录启动真实 Electron 窗口，验证默认英文启动、即时切换中文、核心页面、关键交互、标准 CDP 守卫面板，以及浅深主题在标准、降低透明度和强制颜色模式下的界面材质。附加 `-- --screenshots` 可保存浅色和深色主页到 `.tmp/ui-screenshots/home-light.png` 与 `home-dark.png` 便于对照。
-- **L4 外网真站双内核抽检（按需手动）**：`npm run audit:live -- --proxy="<内置代理名>"`（或 `--auto-proxies=2` 进行 4 窗口双代理并发抽检）默认通过本地 MCP + 受保护 CDP 并发拉起隔离临时环境并自动宫格平铺到桌面，同时实测 **C++ 隐私指纹内核（`fingerprint-chromium`）** 与 **系统 Chrome 内核（`system-chrome`）** 在 CreepJS、BrowserScan、BrowserLeaks WebRTC 与 PixelScan 上的表现（也支持 `--env="<环境1>,<环境2>"`、`--engine=fingerprint-chromium|system-chrome` 与 `--serial`）。
+| 层级 | 命令 | 覆盖率与验证范围 |
+| :--- | :--- | :--- |
+| **L1 单元测试与 V8 代码覆盖率** | `npm test` / `npm run test:coverage` | **175 项自动化用例**，覆盖纯领域策略、代理协议解析、加密鉴权 CDP 守卫/MCP、纵向分层单向依赖校验与真实 `sing-box` 核心隔离（生产后端模块原生 V8 实测 **78.2% 行覆盖率 / 85.3% 函数覆盖率**，由 CI 自动更新顶部 `Coverage` 徽章）。 |
+| **L2 核心安全与本地对抗 E2E** | `npm run test:e2e` | **29/29 离线安全校验**，覆盖 `fingerprint-chromium` 与系统 Chrome 双引擎：双代理零直连、断网 Fail-Closed 阻断、WebRTC 零泄露、反 Hook（`lies=0`）与启动闸门。 |
+| **L3 全 UI 组件自动化测试** | `npm run test:ui` | **26/26 真机 Electron 端到端套件**（隔离 `MULTICHROME_USER_DATA`），**100% 覆盖全部主页面、6 个设置页签、抽屉、确认弹窗、前后台日志面板、回收站生命周期、批量控件与 Windows 前台窗口定位**，全程 0 未捕获异常。附加 `-- --screenshots` 可保存浅深主题截图。 |
+| **L4 外网真站双内核抽检** | `npm run audit:live -- --proxy="<内置代理名>"` | 按需手动运行（或 `--auto-proxies=2` 执行 4 窗口并发抽检），经本地 MCP + 受保护 CDP 分别实测 **C++ 隐私指纹内核（`fingerprint-chromium`）** 与 **系统 Chrome（`system-chrome`）** 在 CreepJS、BrowserScan、BrowserLeaks WebRTC 与 PixelScan 上的表现。 |
 
 ## 文档
 

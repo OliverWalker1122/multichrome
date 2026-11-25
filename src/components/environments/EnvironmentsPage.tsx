@@ -176,6 +176,14 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         ws.selectedTags.length > 0 ||
         ws.statusFilter !== 'all';
 
+    const selectedEnvs = environments.filter((item) =>
+        ws.selectedIds.has(item.id),
+    );
+    const selectedRunningCount = selectedEnvs.filter(
+        (item) => item.isRunning,
+    ).length;
+    const selectedStoppedCount = selectedEnvs.length - selectedRunningCount;
+
     return (
         <div className={styles.workspace}>
             <section
@@ -191,6 +199,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     totalCount={environments.length}
                     runningCount={ws.runningCount}
                     allRunningCount={ws.allRunningCount}
+                    hideCloseAll={selectedRunningCount > 0}
                     closingAll={ws.closingAll}
                     tilingWindows={ws.tilingWindows}
                     consoleDocked={ws.consoleDocked}
@@ -232,30 +241,38 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                 ? `${ws.activeSelectedIds.length} selected`
                                 : `已选 ${ws.activeSelectedIds.length} 项`}
                         </Badge>
-                        <Button
-                            size="small"
-                            appearance="subtle"
-                            icon={<PlayRegular />}
-                            disabled={ws.batchBusy}
-                            onClick={() => void ws.handleBatchLaunchSelected()}
-                        >
-                            {t('批量启动', 'Launch')}
-                        </Button>
-                        <Button
-                            size="small"
-                            appearance="subtle"
-                            icon={
-                                <DismissRegular
-                                    style={{
-                                        color: tokens.colorPaletteRedForeground1,
-                                    }}
-                                />
-                            }
-                            disabled={ws.batchBusy}
-                            onClick={() => void ws.handleBatchStopSelected()}
-                        >
-                            {t('批量关闭', 'Stop')}
-                        </Button>
+                        {selectedStoppedCount > 0 && (
+                            <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={<PlayRegular />}
+                                disabled={ws.batchBusy}
+                                onClick={() =>
+                                    void ws.handleBatchLaunchSelected()
+                                }
+                            >
+                                {t('批量启动', 'Launch')}
+                            </Button>
+                        )}
+                        {selectedRunningCount > 0 && (
+                            <Button
+                                size="small"
+                                appearance="subtle"
+                                icon={
+                                    <DismissRegular
+                                        style={{
+                                            color: tokens.colorPaletteRedForeground1,
+                                        }}
+                                    />
+                                }
+                                disabled={ws.batchBusy}
+                                onClick={() =>
+                                    void ws.handleBatchStopSelected()
+                                }
+                            >
+                                {t('批量关闭', 'Stop')}
+                            </Button>
+                        )}
                         <Menu positioning="below-start">
                             <MenuTrigger disableButtonEnhancement>
                                 <Button

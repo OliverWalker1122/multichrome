@@ -19,6 +19,7 @@
         "lint": "eslint . --ext .js,.ts,.tsx",
         "lint:fix": "eslint . --ext .js,.ts,.tsx --fix",
         "test": "node --test",
+        "test:coverage": "node scripts/run-coverage.mjs",
         "test:e2e": "node scripts/e2e-verify.mjs",
         "test:ui": "node scripts/e2e-ui-suite.mjs",
         "audit:live": "node scripts/audit-live-sites.mjs",

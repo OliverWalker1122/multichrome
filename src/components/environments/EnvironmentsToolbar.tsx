@@ -60,6 +60,7 @@ export interface EnvironmentsToolbarProps {
     totalCount: number;
     runningCount: number;
     allRunningCount: number;
+    hideCloseAll?: boolean;
     closingAll: boolean;
     tilingWindows?: boolean;
     consoleDocked?: boolean;
@@ -95,6 +96,7 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
     totalCount,
     runningCount,
     allRunningCount,
+    hideCloseAll = false,
     closingAll,
     tilingWindows = false,
     consoleDocked = false,
@@ -251,7 +253,7 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                             </MenuPopover>
                         </Menu>
                     )}
-                    {allRunningCount > 0 && (
+                    {allRunningCount > 0 && !hideCloseAll && (
                         <Button
                             appearance="subtle"
                             icon={

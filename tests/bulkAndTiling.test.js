@@ -219,6 +219,17 @@ test('Batch bar has no duplicate tiling buttons and close actions use red cross 
         false,
         'EnvironmentsToolbar Stop All must not use hollow checkbox-like StopRegular',
     );
+    assert.equal(
+        /hideCloseAll=\{selectedRunningCount > 0\}/.test(pageSrc),
+        true,
+        'EnvironmentsPage must hide header Stop All while batch Stop is visible (zero duplicate close buttons)',
+    );
+    assert.equal(
+        /selectedStoppedCount > 0/.test(pageSrc) &&
+            /selectedRunningCount > 0/.test(pageSrc),
+        true,
+        'EnvironmentsPage batch bar must conditionally render Launch/Stop by selection run state',
+    );
 });
 
 test('Window locating uses in-process native Win32 API + CDP with zero AV-sensitive shell/WScript subprocesses', () => {

@@ -9,6 +9,7 @@ import {
     Textarea,
     Tooltip,
     mergeClasses,
+    tokens,
 } from '@fluentui/react-components';
 import {
     CopyRegular,
@@ -17,7 +18,6 @@ import {
     DocumentTextRegular,
     PlayRegular,
     ShieldCheckmarkRegular,
-    StopRegular,
     TargetRegular,
 } from '@fluentui/react-icons';
 import {
@@ -454,7 +454,11 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                     appearance={environment.isRunning ? 'secondary' : 'primary'}
                     icon={
                         environment.isRunning ? (
-                            <StopRegular />
+                            <DismissRegular
+                                style={{
+                                    color: tokens.colorPaletteRedForeground1,
+                                }}
+                            />
                         ) : (
                             <PlayRegular />
                         )
