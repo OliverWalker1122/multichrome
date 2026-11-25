@@ -2,6 +2,7 @@ import type {
     InstalledKernel,
     InstalledSingboxCore,
     KernelDownloadProgress,
+    KernelOpenDirTarget,
     KernelStatus,
 } from '../types';
 import { getElectronApi, subscribeIpcEvent } from './ipcGateway';
@@ -104,10 +105,10 @@ export const kernelApi = {
         return api.removeSingbox(kernelId);
     },
 
-    openDir: async (): Promise<boolean> => {
+    openDir: async (target?: KernelOpenDirTarget): Promise<boolean> => {
         const api = getElectronApi()?.kernels;
         if (!api) return false;
-        return api.openDir();
+        return api.openDir(target);
     },
 
     onDownloadProgress: (

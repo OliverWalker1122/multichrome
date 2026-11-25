@@ -126,6 +126,12 @@ export interface KernelUpdateSummary {
     updateCount: number;
 }
 
+export type KernelOpenDirTarget =
+    | 'kernels'
+    | 'sing-box'
+    | 'fingerprint-chromium'
+    | 'system-chrome';
+
 export interface KernelStatus {
     kernelsDir: string;
     activeKernelId: string | null;
@@ -676,7 +682,7 @@ export interface ElectronAPI {
         }>;
         setActiveSingbox: (kernelId: string) => Promise<KernelStatus>;
         removeSingbox: (kernelId: string) => Promise<KernelStatus>;
-        openDir: () => Promise<boolean>;
+        openDir: (target?: KernelOpenDirTarget) => Promise<boolean>;
     };
     trash: {
         getDeletedEnvironments: () => Promise<ChromeEnvironment[]>;
@@ -688,6 +694,7 @@ export interface ElectronAPI {
         getSettings: () => Promise<AppSettings>;
         saveSettings: (settings: AppSettings) => Promise<boolean>;
         selectFolder: () => Promise<{ canceled: boolean; filePaths: string[] }>;
+        openConfigDir?: () => Promise<boolean>;
     };
     automation?: {
         testConnection: () => Promise<string>;

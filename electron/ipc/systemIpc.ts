@@ -351,10 +351,52 @@ export function registerSystemIpc({
         return getKernelStatusPayload();
     });
 
-    ipcMain.handle('kernels:open-dir', async () => {
+    ipcMain.handle('kernels:open-dir', async (_, rawTarget: unknown = 'kernels') => {
+        const target =
+            rawTarget === 'sing-box' ||
+            rawTarget === 'fingerprint-chromium' ||
+            rawTarget === 'system-chrome'
+                ? rawTarget
+                : 'kernels';
+
+        if (target === 'system-chrome') {
+            const chromePath = chromeManager.getSystemChromePath();
+            if (!chromePath || !fs.existsSync(chromePath)) {
+                return false;
+            }
+            shell.showItemInFolder(chromePath);
+            return true;
+        }
+
+        if (target === 'sing-box') {
+            const activeSingbox = kernelManager.getActiveSingbox();
+            if (activeSingbox?.executablePath && fs.existsSync(activeSingbox.executablePath)) {
+                shell.showItemInFolder(activeSingbox.executablePath);
+                return true;
+            }
+            const dir = kernelManager.getSingboxDir();
+            fs.mkdirSync(dir, { recursive: true });
+            const errMsg = await shell.openPath(dir);
+            if (errMsg) {
+                throw new Error(errMsg);
+            }
+            return true;
+        }
+
+        if (target === 'fingerprint-chromium') {
+            const activeKernel = kernelManager.getActiveKernel();
+            if (activeKernel?.executablePath && fs.existsSync(activeKernel.executablePath)) {
+                shell.showItemInFolder(activeKernel.executablePath);
+                return true;
+            }
+        }
+
         const dir = kernelManager.getKernelsDir();
         fs.mkdirSync(dir, { recursive: true });
-        await shell.openPath(dir);
+        const errMsg = await shell.openPath(dir);
+        if (errMsg) {
+            throw new Error(errMsg);
+        }
         return true;
     });
 
@@ -732,6 +774,16 @@ export function registerSystemIpc({
             if (process.platform === 'win32') {
                 mainWindow.setTitleBarOverlay(getTitleBarOverlay(dark));
             }
+        }
+        return true;
+    });
+
+    ipcMain.handle('settings:open-config-dir', async () => {
+        const dir = app.getPath('userData');
+        fs.mkdirSync(dir, { recursive: true });
+        const errMsg = await shell.openPath(dir);
+        if (errMsg) {
+            throw new Error(errMsg);
         }
         return true;
     });

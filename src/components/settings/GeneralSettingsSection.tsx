@@ -17,6 +17,7 @@ import {
     ArrowDownloadRegular,
     ArrowUploadRegular,
     FolderOpenRegular,
+    OpenRegular,
     SettingsRegular,
     ShieldLockRegular,
 } from '@fluentui/react-icons';
@@ -73,6 +74,20 @@ const GeneralSettingsSection: React.FC<GeneralSettingsSectionProps> = ({
         setBackupPassword('');
         setConfirmPassword('');
         setBackupError('');
+    };
+
+    const handleOpenConfigDir = async () => {
+        try {
+            const opened = await systemApi.openConfigDir();
+            if (!opened) {
+                showNotification(
+                    'error',
+                    t('无法打开配置文件目录', 'Failed to open config folder'),
+                );
+            }
+        } catch (err) {
+            showNotification('error', cleanIpcError(err, locale));
+        }
     };
 
     const handleBackupSubmit = async () => {
@@ -187,7 +202,21 @@ const GeneralSettingsSection: React.FC<GeneralSettingsSectionProps> = ({
                             </span>
                         }
                     >
-                        <Input readOnly value={coreInfo.configDirectory} />
+                        <div className={styles.pathRow}>
+                            <Input
+                                style={{ flex: 1 }}
+                                readOnly
+                                value={coreInfo.configDirectory}
+                            />
+                            <Button
+                                type="button"
+                                appearance="outline"
+                                icon={<OpenRegular />}
+                                onClick={() => void handleOpenConfigDir()}
+                            >
+                                {t('打开目录', 'Open Folder')}
+                            </Button>
+                        </div>
                     </Field>
                 )}
             </div>

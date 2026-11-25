@@ -11,11 +11,17 @@ import {
     MessageBarBody,
     ProgressBar,
     Select,
+    Tooltip,
+    mergeClasses,
 } from '@fluentui/react-components';
 import {
     ArrowDownloadRegular,
+    ArrowSyncRegular,
     BoxRegular,
     CheckmarkCircleRegular,
+    ChevronDownRegular,
+    ChevronUpRegular,
+    CopyRegular,
     DeleteRegular,
     FolderOpenRegular,
     GlobeRegular,
@@ -25,6 +31,7 @@ import {
 } from '@fluentui/react-icons';
 import type {
     KernelDownloadProgress,
+    KernelOpenDirTarget,
     KernelStatus,
     ManagedProxy,
     ProxyCoreInfo,
@@ -34,7 +41,12 @@ import { getToneStyle } from '../../theme/semanticColors';
 import { translateBackendMessage, useI18n } from '../../i18n';
 import { kernelApi } from '../../services';
 import InfoTip from '../common/InfoTip';
-import { cleanIpcError, formatBytes } from './settingsShared';
+import {
+    cleanIpcError,
+    formatBytes,
+    formatDateTime,
+    formatShortSha256,
+} from './settingsShared';
 import { useSettingsStyles } from './settingsStyles';
 
 export interface ComponentsSettingsPanelProps {
@@ -45,6 +57,90 @@ export interface ComponentsSettingsPanelProps {
     fallbackProxyEnabled: boolean;
     fallbackProxyAddress: string;
 }
+
+function isInteractiveClickTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(
+        target.closest(
+            'button, a, input, select, textarea, [role="menu"], [role="menuitem"]',
+        ),
+    );
+}
+
+interface CopyableMonoValueProps {
+    value: string;
+    displayValue?: string;
+    showFullTooltip?: boolean;
+    copyTooltip: string;
+    copyAriaLabel: string;
+    onCopy: () => void;
+    rowClassName: string;
+    monoClassName: string;
+}
+
+const CopyableMonoValue: React.FC<CopyableMonoValueProps> = ({
+    value,
+    displayValue,
+    showFullTooltip = false,
+    copyTooltip,
+    copyAriaLabel,
+    onCopy,
+    rowClassName,
+    monoClassName,
+}) => {
+    const textEl = <span className={monoClassName}>{displayValue || value}</span>;
+    return (
+        <div className={rowClassName}>
+            {showFullTooltip ? (
+                <Tooltip content={value} relationship="label">
+                    {textEl}
+                </Tooltip>
+            ) : (
+                textEl
+            )}
+            <Tooltip content={copyTooltip} relationship="label">
+                <Button
+                    type="button"
+                    size="small"
+                    appearance="subtle"
+                    icon={<CopyRegular />}
+                    aria-label={copyAriaLabel}
+                    onClick={onCopy}
+                />
+            </Tooltip>
+        </div>
+    );
+};
+
+interface ExpandToggleButtonProps {
+    expanded: boolean;
+    testId: string;
+    expandLabel: string;
+    collapseLabel: string;
+    onToggle: () => void;
+}
+
+const ExpandToggleButton: React.FC<ExpandToggleButtonProps> = ({
+    expanded,
+    testId,
+    expandLabel,
+    collapseLabel,
+    onToggle,
+}) => (
+    <Button
+        type="button"
+        size="small"
+        appearance="subtle"
+        data-testid={testId}
+        aria-expanded={expanded}
+        aria-label={expanded ? collapseLabel : expandLabel}
+        icon={expanded ? <ChevronUpRegular /> : <ChevronDownRegular />}
+        onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+        }}
+    />
+);
 
 const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     coreInfo,
@@ -58,6 +154,10 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     const { locale, isEn, t } = useI18n();
     const { showNotification } = useNotification();
 
+    const [singboxExpanded, setSingboxExpanded] = useState(false);
+    const [fpExpanded, setFpExpanded] = useState(false);
+    const [chromeExpanded, setChromeExpanded] = useState(false);
+
     const [selectedRelease, setSelectedRelease] = useState('');
     const [downloadProxyChoice, setDownloadProxyChoice] =
         useState('__direct__');
@@ -65,6 +165,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     const [fpProgress, setFpProgress] =
         useState<KernelDownloadProgress | null>(null);
     const [kernelBusy, setKernelBusy] = useState(false);
+    const [refreshingFp, setRefreshingFp] = useState(false);
     const [kernelError, setKernelError] = useState('');
 
     const [selectedSingboxVersion, setSelectedSingboxVersion] = useState('');
@@ -73,7 +174,10 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     const [singboxProgress, setSingboxProgress] =
         useState<KernelDownloadProgress | null>(null);
     const [singboxBusy, setSingboxBusy] = useState(false);
+    const [refreshingSingbox, setRefreshingSingbox] = useState(false);
     const [singboxError, setSingboxError] = useState('');
+
+    const [redetectingChrome, setRedetectingChrome] = useState(false);
 
     useEffect(() => {
         const releases = kernelStatus?.availableReleases || [];
@@ -119,6 +223,14 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     const singboxSummary = kernelStatus?.updateSummary?.singbox;
     const fpSummary = kernelStatus?.updateSummary?.fingerprint;
 
+    const recommendedSingboxRelease =
+        (kernelStatus?.availableSingboxReleases || []).find(
+            (r) => r.recommended,
+        ) || kernelStatus?.availableSingboxReleases?.[0];
+    const recommendedFpRelease =
+        (kernelStatus?.availableReleases || []).find((r) => r.recommended) ||
+        kernelStatus?.availableReleases?.[0];
+
     const singboxNeedsAction = Boolean(
         !singboxReady || singboxSummary?.hasUpdate || downloadingSingbox,
     );
@@ -142,6 +254,136 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
         }
         return undefined;
     }, [singboxProxyChoice]);
+
+    const handleCopyText = async (value: string, label: string) => {
+        try {
+            await navigator.clipboard.writeText(value);
+            showNotification(
+                'success',
+                isEn ? `Copied ${label}` : `已复制${label}`,
+            );
+        } catch {
+            showNotification(
+                'error',
+                t(
+                    '复制失败，请手动选中复制',
+                    'Copy failed. Select and copy manually.',
+                ),
+            );
+        }
+    };
+
+    const handleOpenComponentDir = async (target: KernelOpenDirTarget) => {
+        try {
+            const opened = await kernelApi.openDir(target);
+            if (!opened) {
+                showNotification(
+                    'error',
+                    t('未找到可打开的本地路径', 'Local path not found'),
+                );
+            }
+        } catch (err) {
+            showNotification('error', cleanIpcError(err, locale));
+        }
+    };
+
+    const handleRefreshSingbox = async () => {
+        if (!kernelApi.isAvailable() || refreshingSingbox) return;
+        try {
+            setRefreshingSingbox(true);
+            setSingboxError('');
+            const next = await kernelApi.refreshSingboxReleases(
+                buildSingboxProxyOptions(),
+            );
+            onKernelStatusChange(next);
+            const sbInfo = next.updateSummary?.singbox;
+            if (sbInfo?.hasUpdate && sbInfo.recommendedVersion) {
+                showNotification(
+                    'info',
+                    isEn
+                        ? `Recommended version v${sbInfo.recommendedVersion} is available`
+                        : `发现可升级版本 v${sbInfo.recommendedVersion}`,
+                );
+            } else {
+                const ver =
+                    sbInfo?.currentVersion ||
+                    coreInfo?.version ||
+                    sbInfo?.recommendedVersion ||
+                    '';
+                showNotification(
+                    'success',
+                    isEn
+                        ? `Proxy engine is up to date${ver ? ` (v${ver})` : ''}`
+                        : `代理引擎已是受控清单推荐版本${ver ? `（v${ver}）` : ''}`,
+                );
+            }
+        } catch (err) {
+            setSingboxError(cleanIpcError(err, locale));
+        } finally {
+            setRefreshingSingbox(false);
+        }
+    };
+
+    const handleRefreshFp = async () => {
+        if (!kernelApi.isAvailable() || refreshingFp) return;
+        try {
+            setRefreshingFp(true);
+            setKernelError('');
+            const next = await kernelApi.refreshReleases(
+                buildFpDownloadProxyOptions(),
+            );
+            onKernelStatusChange(next);
+            const fpInfo = next.updateSummary?.fingerprint;
+            if (fpInfo?.hasUpdate && fpInfo.recommendedChromeMajor) {
+                showNotification(
+                    'info',
+                    isEn
+                        ? `Recommended update Core ${fpInfo.recommendedChromeMajor} is available`
+                        : `发现可升级版本：内核 ${fpInfo.recommendedChromeMajor}`,
+                );
+            } else {
+                const ver =
+                    fpInfo?.currentVersion ||
+                    activeFpKernel?.version ||
+                    fpInfo?.recommendedVersion ||
+                    '';
+                showNotification(
+                    'success',
+                    isEn
+                        ? `Privacy browser is up to date${ver ? ` (${ver})` : ''}`
+                        : `防关联浏览器已是受控清单推荐版本${ver ? `（${ver}）` : ''}`,
+                );
+            }
+        } catch (err) {
+            setKernelError(cleanIpcError(err, locale));
+        } finally {
+            setRefreshingFp(false);
+        }
+    };
+
+    const handleRedetectChrome = async () => {
+        if (!kernelApi.isAvailable() || redetectingChrome) return;
+        try {
+            setRedetectingChrome(true);
+            const next = await kernelApi.getStatus();
+            if (next) {
+                onKernelStatusChange(next);
+                showNotification(
+                    next.systemChromeAvailable ? 'success' : 'info',
+                    next.systemChromeAvailable
+                        ? t('已检测到本机标准 Chrome', 'Standard Chrome detected')
+                        : t(
+                              '仍未检测到本机 Google Chrome',
+                              'Google Chrome not detected on this system',
+                          ),
+                );
+            }
+        } catch (err) {
+            showNotification('error', cleanIpcError(err, locale));
+        } finally {
+            setRedetectingChrome(false);
+        }
+    };
 
     const handleDownloadSingbox = async () => {
         const targetVersion =
@@ -332,15 +574,38 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
     };
 
     const importFileLabel = t('导入本地文件', 'Import Local File');
-
+    const copyPathTip = t('复制路径', 'Copy path');
+    const copyShaTip = t('复制完整摘要', 'Copy full SHA-256');
     const canUseFallbackProxy =
         fallbackProxyEnabled && Boolean(fallbackProxyAddress.trim());
+
+    const activeSingboxVersion =
+        activeSingboxCore?.version || coreInfo?.version || '';
+    const activeSingboxInstalledAt = formatDateTime(
+        activeSingboxCore?.installedAt,
+        locale,
+    );
+    const activeFpInstalledAt = formatDateTime(
+        activeFpKernel?.installedAt,
+        locale,
+    );
+
+    const headerClass = mergeClasses(
+        styles.cardHeader,
+        styles.cardHeaderInteractive,
+    );
 
     return (
         <>
             {/* 代理引擎 */}
             <div className={styles.card}>
-                <div className={styles.cardHeader}>
+                <div
+                    className={headerClass}
+                    onClick={(e) => {
+                        if (isInteractiveClickTarget(e.target)) return;
+                        setSingboxExpanded((prev) => !prev);
+                    }}
+                >
                     <div className={styles.cardTitleGroup}>
                         <BoxRegular
                             className={styles.sectionIcon}
@@ -350,14 +615,10 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             {t('代理引擎', 'Proxy Engine')}
                         </h2>
                         <InfoTip
-                            content={
-                                activeSingboxCore
-                                    ? `${t('内置代理转发核心（sing-box）', 'Built-in proxy core (sing-box)')} · ${activeSingboxCore.executablePath}`
-                                    : t(
-                                          '用于运行内置代理节点，按需安装并自动完成完整性校验',
-                                          'Powers built-in proxy nodes with automatic integrity verification.',
-                                      )
-                            }
+                            content={t(
+                                '内置 sing-box 代理转发核心，按需安装并自动完成 SHA-256 完整性校验',
+                                'Built-in sing-box proxy core, installed on demand with automatic SHA-256 verification.',
+                            )}
                         />
                     </div>
 
@@ -371,8 +632,8 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                         ) : singboxReady ? (
                             <Badge appearance="tint" color="success">
                                 {isEn
-                                    ? `Ready · v${coreInfo?.version || ''}`
-                                    : `已就绪 · v${coreInfo?.version || ''}`}
+                                    ? `Ready · v${activeSingboxVersion}`
+                                    : `已就绪 · v${activeSingboxVersion}`}
                             </Badge>
                         ) : (
                             <Badge appearance="tint" color="subtle">
@@ -393,25 +654,25 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             <MenuPopover>
                                 <MenuList>
                                     <MenuItem
-                                        icon={<FolderOpenRegular />}
-                                        disabled={
-                                            downloadingSingbox || singboxBusy
-                                        }
+                                        icon={<OpenRegular />}
                                         onClick={() =>
-                                            void handleImportSingbox()
+                                            void handleOpenComponentDir('sing-box')
                                         }
                                     >
-                                        {t(
-                                            '导入本地文件',
-                                            'Import Local File',
-                                        )}
+                                        {t('打开所在位置', 'Open Location')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<FolderOpenRegular />}
+                                        disabled={downloadingSingbox || singboxBusy}
+                                        onClick={() => void handleImportSingbox()}
+                                    >
+                                        {importFileLabel}
                                     </MenuItem>
                                     {activeSingboxCore && (
                                         <MenuItem
                                             icon={<DeleteRegular />}
                                             disabled={
-                                                downloadingSingbox ||
-                                                singboxBusy
+                                                downloadingSingbox || singboxBusy
                                             }
                                             onClick={() =>
                                                 void handleRemoveSingbox(
@@ -419,15 +680,26 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                                 )
                                             }
                                         >
-                                            {t(
-                                                '移除当前引擎',
-                                                'Remove Engine',
-                                            )}
+                                            {t('移除当前引擎', 'Remove Engine')}
                                         </MenuItem>
                                     )}
                                 </MenuList>
                             </MenuPopover>
                         </Menu>
+
+                        <ExpandToggleButton
+                            expanded={singboxExpanded}
+                            testId="component-toggle-singbox"
+                            expandLabel={t(
+                                '展开代理引擎详情',
+                                'Show proxy engine details',
+                            )}
+                            collapseLabel={t(
+                                '收起代理引擎详情',
+                                'Hide proxy engine details',
+                            )}
+                            onToggle={() => setSingboxExpanded((prev) => !prev)}
+                        />
                     </div>
                 </div>
 
@@ -437,6 +709,299 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             {translateBackendMessage(singboxError, locale)}
                         </MessageBarBody>
                     </MessageBar>
+                )}
+
+                {singboxExpanded && (
+                    <div
+                        className={styles.subPanel}
+                        data-testid="component-details-singbox"
+                    >
+                        <div className={styles.infoGrid} data-selectable="true">
+                            {singboxReady ? (
+                                <>
+                                    <span className={styles.infoKey}>
+                                        {t('核心版本', 'Version')}
+                                    </span>
+                                    <div className={styles.detailValueRow}>
+                                        <span className={styles.infoVal}>
+                                            sing-box v{activeSingboxVersion}
+                                        </span>
+                                        {!singboxSummary?.hasUpdate &&
+                                            singboxSummary?.recommendedVersion && (
+                                                <Badge
+                                                    size="small"
+                                                    appearance="tint"
+                                                    color="subtle"
+                                                >
+                                                    {t('推荐版本', 'Recommended')}
+                                                </Badge>
+                                            )}
+                                    </div>
+
+                                    <span className={styles.infoKey}>
+                                        {t('安装来源', 'Source')}
+                                    </span>
+                                    <span className={styles.infoVal}>
+                                        {activeSingboxCore?.source ===
+                                        'github-release'
+                                            ? t(
+                                                  'GitHub 官方发行版',
+                                                  'Official GitHub Release',
+                                              )
+                                            : activeSingboxCore?.source ===
+                                                'local-import'
+                                              ? t('本地导入', 'Local Import')
+                                              : t('内置核心', 'Bundled Core')}
+                                    </span>
+
+                                    <span className={styles.infoKey}>
+                                        {t('完整性校验', 'Verification')}
+                                    </span>
+                                    <div className={styles.detailValueRow}>
+                                        <Badge
+                                            size="small"
+                                            appearance="tint"
+                                            color={
+                                                activeSingboxCore?.checksumVerified
+                                                    ? 'success'
+                                                    : 'subtle'
+                                            }
+                                        >
+                                            {activeSingboxCore?.checksumVerified
+                                                ? t(
+                                                      'SHA-256 已校验',
+                                                      'SHA-256 Verified',
+                                                  )
+                                                : t(
+                                                      '本地文件已登记',
+                                                      'Local File Registered',
+                                                  )}
+                                        </Badge>
+                                    </div>
+
+                                    {activeSingboxCore?.executableSha256 && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('文件摘要', 'SHA-256')}
+                                            </span>
+                                            <CopyableMonoValue
+                                                value={
+                                                    activeSingboxCore.executableSha256
+                                                }
+                                                displayValue={formatShortSha256(
+                                                    activeSingboxCore.executableSha256,
+                                                )}
+                                                showFullTooltip
+                                                copyTooltip={copyShaTip}
+                                                copyAriaLabel={t(
+                                                    '复制文件摘要',
+                                                    'Copy SHA-256',
+                                                )}
+                                                onCopy={() =>
+                                                    void handleCopyText(
+                                                        activeSingboxCore.executableSha256,
+                                                        t('文件摘要', 'SHA-256'),
+                                                    )
+                                                }
+                                                rowClassName={
+                                                    styles.detailValueRow
+                                                }
+                                                monoClassName={styles.monoValue}
+                                            />
+                                        </>
+                                    )}
+
+                                    {activeSingboxCore?.sizeBytes ? (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('占用空间', 'Size')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                {formatBytes(
+                                                    activeSingboxCore.sizeBytes,
+                                                )}
+                                            </span>
+                                        </>
+                                    ) : null}
+
+                                    {activeSingboxInstalledAt && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('安装时间', 'Installed')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                {activeSingboxInstalledAt}
+                                            </span>
+                                        </>
+                                    )}
+
+                                    {activeSingboxCore?.executablePath && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('可执行路径', 'Executable')}
+                                            </span>
+                                            <CopyableMonoValue
+                                                value={
+                                                    activeSingboxCore.executablePath
+                                                }
+                                                copyTooltip={copyPathTip}
+                                                copyAriaLabel={t(
+                                                    '复制代理引擎路径',
+                                                    'Copy proxy engine path',
+                                                )}
+                                                onCopy={() =>
+                                                    void handleCopyText(
+                                                        activeSingboxCore.executablePath,
+                                                        t('路径', 'path'),
+                                                    )
+                                                }
+                                                rowClassName={
+                                                    styles.detailValueRow
+                                                }
+                                                monoClassName={styles.monoValue}
+                                            />
+                                        </>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    {recommendedSingboxRelease && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('推荐版本', 'Recommended')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                sing-box v
+                                                {recommendedSingboxRelease.version}
+                                            </span>
+
+                                            {recommendedSingboxRelease.sizeBytes ? (
+                                                <>
+                                                    <span
+                                                        className={styles.infoKey}
+                                                    >
+                                                        {t(
+                                                            '预计大小',
+                                                            'Download Size',
+                                                        )}
+                                                    </span>
+                                                    <span
+                                                        className={styles.infoVal}
+                                                    >
+                                                        {formatBytes(
+                                                            recommendedSingboxRelease.sizeBytes,
+                                                        )}
+                                                    </span>
+                                                </>
+                                            ) : null}
+
+                                            {recommendedSingboxRelease.sha256 && (
+                                                <>
+                                                    <span
+                                                        className={styles.infoKey}
+                                                    >
+                                                        {t(
+                                                            '官方摘要',
+                                                            'Official SHA-256',
+                                                        )}
+                                                    </span>
+                                                    <CopyableMonoValue
+                                                        value={
+                                                            recommendedSingboxRelease.sha256
+                                                        }
+                                                        displayValue={formatShortSha256(
+                                                            recommendedSingboxRelease.sha256,
+                                                        )}
+                                                        showFullTooltip
+                                                        copyTooltip={copyShaTip}
+                                                        copyAriaLabel={t(
+                                                            '复制官方摘要',
+                                                            'Copy official SHA-256',
+                                                        )}
+                                                        onCopy={() =>
+                                                            void handleCopyText(
+                                                                recommendedSingboxRelease.sha256,
+                                                                t(
+                                                                    '官方摘要',
+                                                                    'SHA-256',
+                                                                ),
+                                                            )
+                                                        }
+                                                        rowClassName={
+                                                            styles.detailValueRow
+                                                        }
+                                                        monoClassName={
+                                                            styles.monoValue
+                                                        }
+                                                    />
+                                                </>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {kernelStatus?.singboxDir && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('安装目录', 'Install Dir')}
+                                            </span>
+                                            <span className={styles.monoValue}>
+                                                {kernelStatus.singboxDir}
+                                            </span>
+                                        </>
+                                    )}
+
+                                    <span className={styles.infoKey}>
+                                        {t('安全策略', 'Security')}
+                                    </span>
+                                    <span className={styles.infoVal}>
+                                        {t(
+                                            '仅从 GitHub 官方发行版下载并强制校验 SHA-256 摘要',
+                                            'Downloaded exclusively from official GitHub Releases with strict SHA-256 verification.',
+                                        )}
+                                    </span>
+                                </>
+                            )}
+                        </div>
+
+                        <div className={styles.detailFooter}>
+                            <div className={styles.detailActions}>
+                                <Button
+                                    type="button"
+                                    size="small"
+                                    appearance="subtle"
+                                    disabled={
+                                        refreshingSingbox ||
+                                        downloadingSingbox ||
+                                        singboxBusy
+                                    }
+                                    icon={<ArrowSyncRegular />}
+                                    onClick={() => void handleRefreshSingbox()}
+                                >
+                                    {refreshingSingbox
+                                        ? t('检查中…', 'Checking…')
+                                        : t('检查版本', 'Check Version')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<OpenRegular />}
+                                    onClick={() =>
+                                        void handleOpenComponentDir('sing-box')
+                                    }
+                                >
+                                    {t('定位文件', 'Reveal File')}
+                                </Button>
+                            </div>
+                            {installedSingbox.length > 0 && (
+                                <span className={styles.detailHint}>
+                                    {isEn
+                                        ? `${installedSingbox.length} installed`
+                                        : `已安装 ${installedSingbox.length} 个版本`}
+                                </span>
+                            )}
+                        </div>
+                    </div>
                 )}
 
                 {installedSingbox.length > 1 && (
@@ -481,6 +1046,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                             appearance="subtle"
                                             icon={<DeleteRegular />}
                                             disabled={singboxBusy}
+                                            aria-label={t('移除版本', 'Remove')}
                                             onClick={() =>
                                                 void handleRemoveSingbox(
                                                     item.id,
@@ -577,7 +1143,13 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
 
             {/* 防关联浏览器 */}
             <div className={styles.card}>
-                <div className={styles.cardHeader}>
+                <div
+                    className={headerClass}
+                    onClick={(e) => {
+                        if (isInteractiveClickTarget(e.target)) return;
+                        setFpExpanded((prev) => !prev);
+                    }}
+                >
                     <div className={styles.cardTitleGroup}>
                         <WindowMultipleRegular
                             className={styles.sectionIcon}
@@ -587,14 +1159,10 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             {t('防关联浏览器', 'Privacy Browser')}
                         </h2>
                         <InfoTip
-                            content={
-                                activeFpKernel
-                                    ? `${t('内置防关联 Chromium 浏览器', 'Built-in anti-correlation Chromium')} · ${activeFpKernel.executablePath}`
-                                    : t(
-                                          '提供原生级硬件指纹隔离，适合多账号防关联场景',
-                                          'Provides native fingerprint isolation for multi-account workflows.',
-                                      )
-                            }
+                            content={t(
+                                '内置防关联 Chromium 浏览器，提供原生级硬件指纹隔离，适合多账号防关联场景',
+                                'Built-in anti-correlation Chromium providing native hardware fingerprint isolation.',
+                            )}
                         />
                     </div>
 
@@ -631,7 +1199,9 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                 <MenuList>
                                     <MenuItem
                                         icon={<OpenRegular />}
-                                        onClick={() => void kernelApi.openDir()}
+                                        onClick={() =>
+                                            void handleOpenComponentDir('kernels')
+                                        }
                                     >
                                         {t('打开组件目录', 'Open Folder')}
                                     </MenuItem>
@@ -656,24 +1226,33 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                     {activeFpKernel && (
                                         <MenuItem
                                             icon={<DeleteRegular />}
-                                            disabled={
-                                                downloadingFp || kernelBusy
-                                            }
+                                            disabled={downloadingFp || kernelBusy}
                                             onClick={() =>
                                                 void handleRemoveKernel(
                                                     activeFpKernel.id,
                                                 )
                                             }
                                         >
-                                            {t(
-                                                '移除当前浏览器',
-                                                'Remove Browser',
-                                            )}
+                                            {t('移除当前浏览器', 'Remove Browser')}
                                         </MenuItem>
                                     )}
                                 </MenuList>
                             </MenuPopover>
                         </Menu>
+
+                        <ExpandToggleButton
+                            expanded={fpExpanded}
+                            testId="component-toggle-fingerprint"
+                            expandLabel={t(
+                                '展开防关联浏览器详情',
+                                'Show privacy browser details',
+                            )}
+                            collapseLabel={t(
+                                '收起防关联浏览器详情',
+                                'Hide privacy browser details',
+                            )}
+                            onToggle={() => setFpExpanded((prev) => !prev)}
+                        />
                     </div>
                 </div>
 
@@ -685,16 +1264,348 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                     </MessageBar>
                 )}
 
+                {fpExpanded && (
+                    <div
+                        className={styles.subPanel}
+                        data-testid="component-details-fingerprint"
+                    >
+                        <div className={styles.infoGrid} data-selectable="true">
+                            {activeFpKernel ? (
+                                <>
+                                    <span className={styles.infoKey}>
+                                        {t('完整版本', 'Version')}
+                                    </span>
+                                    <div className={styles.detailValueRow}>
+                                        <span className={styles.infoVal}>
+                                            Chrome {activeFpKernel.chromeMajor} (
+                                            {activeFpKernel.version})
+                                        </span>
+                                        {!fpSummary?.hasUpdate &&
+                                            fpSummary?.recommendedVersion && (
+                                                <Badge
+                                                    size="small"
+                                                    appearance="tint"
+                                                    color="subtle"
+                                                >
+                                                    {t('推荐版本', 'Recommended')}
+                                                </Badge>
+                                            )}
+                                    </div>
+
+                                    <span className={styles.infoKey}>
+                                        {t('安装来源', 'Source')}
+                                    </span>
+                                    <span className={styles.infoVal}>
+                                        {activeFpKernel.source ===
+                                        'github-release'
+                                            ? t(
+                                                  'GitHub 官方发行版',
+                                                  'Official GitHub Release',
+                                              )
+                                            : t('本地导入', 'Local Import')}
+                                    </span>
+
+                                    <span className={styles.infoKey}>
+                                        {t('安全审计', 'Auditability')}
+                                    </span>
+                                    <div className={styles.detailValueRow}>
+                                        <Badge
+                                            size="small"
+                                            appearance="tint"
+                                            color={
+                                                activeFpKernel.sourceAuditable
+                                                    ? 'success'
+                                                    : 'subtle'
+                                            }
+                                        >
+                                            {activeFpKernel.sourceAuditable
+                                                ? t(
+                                                      '源码已公开',
+                                                      'Source Auditable',
+                                                  )
+                                                : t(
+                                                      '延迟开源',
+                                                      'Delayed Source',
+                                                  )}
+                                        </Badge>
+                                        <Badge
+                                            size="small"
+                                            appearance="tint"
+                                            color={
+                                                activeFpKernel.checksumVerified
+                                                    ? 'success'
+                                                    : 'subtle'
+                                            }
+                                        >
+                                            {activeFpKernel.checksumVerified
+                                                ? t(
+                                                      'SHA-256 已校验',
+                                                      'SHA-256 Verified',
+                                                  )
+                                                : t(
+                                                      '本地文件已登记',
+                                                      'Local File Registered',
+                                                  )}
+                                        </Badge>
+                                    </div>
+
+                                    {activeFpKernel.executableSha256 && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('文件摘要', 'SHA-256')}
+                                            </span>
+                                            <CopyableMonoValue
+                                                value={
+                                                    activeFpKernel.executableSha256
+                                                }
+                                                displayValue={formatShortSha256(
+                                                    activeFpKernel.executableSha256,
+                                                )}
+                                                showFullTooltip
+                                                copyTooltip={copyShaTip}
+                                                copyAriaLabel={t(
+                                                    '复制内核摘要',
+                                                    'Copy kernel SHA-256',
+                                                )}
+                                                onCopy={() =>
+                                                    void handleCopyText(
+                                                        activeFpKernel.executableSha256,
+                                                        t('文件摘要', 'SHA-256'),
+                                                    )
+                                                }
+                                                rowClassName={
+                                                    styles.detailValueRow
+                                                }
+                                                monoClassName={styles.monoValue}
+                                            />
+                                        </>
+                                    )}
+
+                                    {activeFpKernel.sizeBytes ? (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('占用空间', 'Size')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                {formatBytes(
+                                                    activeFpKernel.sizeBytes,
+                                                )}
+                                            </span>
+                                        </>
+                                    ) : null}
+
+                                    {activeFpInstalledAt && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('安装时间', 'Installed')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                {activeFpInstalledAt}
+                                            </span>
+                                        </>
+                                    )}
+
+                                    <span className={styles.infoKey}>
+                                        {t('可执行路径', 'Executable')}
+                                    </span>
+                                    <CopyableMonoValue
+                                        value={activeFpKernel.executablePath}
+                                        copyTooltip={copyPathTip}
+                                        copyAriaLabel={t(
+                                            '复制防关联浏览器路径',
+                                            'Copy privacy browser path',
+                                        )}
+                                        onCopy={() =>
+                                            void handleCopyText(
+                                                activeFpKernel.executablePath,
+                                                t('路径', 'path'),
+                                            )
+                                        }
+                                        rowClassName={styles.detailValueRow}
+                                        monoClassName={styles.monoValue}
+                                    />
+                                </>
+                            ) : (
+                                <>
+                                    {recommendedFpRelease && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('推荐版本', 'Recommended')}
+                                            </span>
+                                            <span className={styles.infoVal}>
+                                                Chrome{' '}
+                                                {recommendedFpRelease.chromeMajor}{' '}
+                                                ({recommendedFpRelease.version})
+                                            </span>
+
+                                            <span className={styles.infoKey}>
+                                                {t('安全审计', 'Auditability')}
+                                            </span>
+                                            <div className={styles.detailValueRow}>
+                                                <Badge
+                                                    size="small"
+                                                    appearance="tint"
+                                                    color={
+                                                        recommendedFpRelease.sourceAuditable
+                                                            ? 'success'
+                                                            : 'subtle'
+                                                    }
+                                                >
+                                                    {recommendedFpRelease.sourceAuditable
+                                                        ? t(
+                                                              '源码已公开',
+                                                              'Source Auditable',
+                                                          )
+                                                        : t(
+                                                              '延迟开源',
+                                                              'Delayed Source',
+                                                          )}
+                                                </Badge>
+                                            </div>
+
+                                            {recommendedFpRelease.sizeBytes ? (
+                                                <>
+                                                    <span
+                                                        className={styles.infoKey}
+                                                    >
+                                                        {t(
+                                                            '安装包大小',
+                                                            'Package Size',
+                                                        )}
+                                                    </span>
+                                                    <span
+                                                        className={styles.infoVal}
+                                                    >
+                                                        {formatBytes(
+                                                            recommendedFpRelease.sizeBytes,
+                                                        )}
+                                                    </span>
+                                                </>
+                                            ) : null}
+
+                                            {recommendedFpRelease.sha256 && (
+                                                <>
+                                                    <span
+                                                        className={styles.infoKey}
+                                                    >
+                                                        {t(
+                                                            '官方摘要',
+                                                            'Official SHA-256',
+                                                        )}
+                                                    </span>
+                                                    <CopyableMonoValue
+                                                        value={
+                                                            recommendedFpRelease.sha256
+                                                        }
+                                                        displayValue={formatShortSha256(
+                                                            recommendedFpRelease.sha256,
+                                                        )}
+                                                        showFullTooltip
+                                                        copyTooltip={copyShaTip}
+                                                        copyAriaLabel={t(
+                                                            '复制官方摘要',
+                                                            'Copy official SHA-256',
+                                                        )}
+                                                        onCopy={() =>
+                                                            void handleCopyText(
+                                                                recommendedFpRelease.sha256 ||
+                                                                    '',
+                                                                t(
+                                                                    '官方摘要',
+                                                                    'SHA-256',
+                                                                ),
+                                                            )
+                                                        }
+                                                        rowClassName={
+                                                            styles.detailValueRow
+                                                        }
+                                                        monoClassName={
+                                                            styles.monoValue
+                                                        }
+                                                    />
+                                                </>
+                                            )}
+                                        </>
+                                    )}
+
+                                    {kernelStatus?.kernelsDir && (
+                                        <>
+                                            <span className={styles.infoKey}>
+                                                {t('组件目录', 'Kernels Dir')}
+                                            </span>
+                                            <span className={styles.monoValue}>
+                                                {kernelStatus.kernelsDir}
+                                            </span>
+                                        </>
+                                    )}
+
+                                    <span className={styles.infoKey}>
+                                        {t('隔离机制', 'Isolation')}
+                                    </span>
+                                    <span className={styles.infoVal}>
+                                        {t(
+                                            '原生 C++ 硬件指纹隔离，默认零扩展与零 JS 注入',
+                                            'Native C++ hardware fingerprint isolation with zero extensions and zero JS hooks by default.',
+                                        )}
+                                    </span>
+                                </>
+                            )}
+                        </div>
+
+                        <div className={styles.detailFooter}>
+                            <div className={styles.detailActions}>
+                                <Button
+                                    type="button"
+                                    size="small"
+                                    appearance="subtle"
+                                    disabled={
+                                        refreshingFp ||
+                                        downloadingFp ||
+                                        kernelBusy
+                                    }
+                                    icon={<ArrowSyncRegular />}
+                                    onClick={() => void handleRefreshFp()}
+                                >
+                                    {refreshingFp
+                                        ? t('检查中…', 'Checking…')
+                                        : t('检查版本', 'Check Version')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="small"
+                                    appearance="subtle"
+                                    icon={<OpenRegular />}
+                                    onClick={() =>
+                                        void handleOpenComponentDir(
+                                            activeFpKernel
+                                                ? 'fingerprint-chromium'
+                                                : 'kernels',
+                                        )
+                                    }
+                                >
+                                    {activeFpKernel
+                                        ? t('定位文件', 'Reveal File')
+                                        : t('打开组件目录', 'Open Folder')}
+                                </Button>
+                            </div>
+                            {installedFpList.length > 0 && (
+                                <span className={styles.detailHint}>
+                                    {isEn
+                                        ? `${installedFpList.length} installed`
+                                        : `已安装 ${installedFpList.length} 个版本`}
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {installedFpList.length > 1 && (
                     <div className={styles.listStack}>
                         {installedFpList.map((kernel) => {
                             const isActive =
                                 kernel.id === kernelStatus?.activeKernelId;
                             return (
-                                <div
-                                    key={kernel.id}
-                                    className={styles.listItem}
-                                >
+                                <div key={kernel.id} className={styles.listItem}>
                                     <span className={styles.listItemTitle}>
                                         Chrome {kernel.chromeMajor} (
                                         {kernel.version})
@@ -731,6 +1642,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                             appearance="subtle"
                                             icon={<DeleteRegular />}
                                             disabled={kernelBusy}
+                                            aria-label={t('移除版本', 'Remove')}
                                             onClick={() =>
                                                 void handleRemoveKernel(
                                                     kernel.id,
@@ -768,10 +1680,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                 )}
                                 {singboxReady &&
                                     managedProxies.map((proxy) => (
-                                        <option
-                                            key={proxy.id}
-                                            value={proxy.id}
-                                        >
+                                        <option key={proxy.id} value={proxy.id}>
                                             {t('代理：', 'Proxy: ')}
                                             {proxy.name}
                                         </option>
@@ -832,42 +1741,162 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                         )}
                     </div>
                 )}
+            </div>
 
-                <div className={styles.divider} />
-
-                <div className={styles.row}>
+            {/* 标准 Chrome */}
+            <div className={styles.card}>
+                <div
+                    className={headerClass}
+                    onClick={(e) => {
+                        if (isInteractiveClickTarget(e.target)) return;
+                        setChromeExpanded((prev) => !prev);
+                    }}
+                >
                     <div className={styles.cardTitleGroup}>
                         <GlobeRegular
                             className={styles.sectionIcon}
                             style={getToneStyle('blue')}
                         />
-                        <span className={styles.rowLabel}>
+                        <h2 className={styles.cardTitle}>
                             {t('标准 Chrome', 'Standard Chrome')}
-                            <InfoTip
-                                content={
-                                    kernelStatus?.systemChromePath
-                                        ? `${t('系统自带 Google Chrome，适合高安全主号', 'System Google Chrome, ideal for sensitive primary accounts')} · ${kernelStatus.systemChromePath}`
-                                        : t(
-                                              '未检测到本机安装的 Google Chrome',
-                                              'Google Chrome not detected on this system.',
-                                          )
-                                }
-                            />
-                        </span>
+                        </h2>
+                        <InfoTip
+                            content={t(
+                                '调用系统已安装的 Google Chrome，具备官方签名与自动安全更新，适合高安全主号',
+                                'Uses system-installed Google Chrome with official signing and automatic security updates.',
+                            )}
+                        />
                     </div>
-                    <Badge
-                        appearance="tint"
-                        color={
-                            kernelStatus?.systemChromeAvailable
-                                ? 'success'
-                                : 'subtle'
-                        }
-                    >
-                        {kernelStatus?.systemChromeAvailable
-                            ? t('已就绪', 'Ready')
-                            : t('未检测到', 'Not Found')}
-                    </Badge>
+
+                    <div className={styles.componentRight}>
+                        <Badge
+                            appearance="tint"
+                            color={
+                                kernelStatus?.systemChromeAvailable
+                                    ? 'success'
+                                    : 'subtle'
+                            }
+                        >
+                            {kernelStatus?.systemChromeAvailable
+                                ? t('已就绪', 'Ready')
+                                : t('未检测到', 'Not Found')}
+                        </Badge>
+
+                        <ExpandToggleButton
+                            expanded={chromeExpanded}
+                            testId="component-toggle-chrome"
+                            expandLabel={t(
+                                '展开标准 Chrome 详情',
+                                'Show Standard Chrome details',
+                            )}
+                            collapseLabel={t(
+                                '收起标准 Chrome 详情',
+                                'Hide Standard Chrome details',
+                            )}
+                            onToggle={() => setChromeExpanded((prev) => !prev)}
+                        />
+                    </div>
                 </div>
+
+                {chromeExpanded && (
+                    <div
+                        className={styles.subPanel}
+                        data-testid="component-details-chrome"
+                    >
+                        <div className={styles.infoGrid} data-selectable="true">
+                            <span className={styles.infoKey}>
+                                {t('检测状态', 'Status')}
+                            </span>
+                            <span className={styles.infoVal}>
+                                {kernelStatus?.systemChromeAvailable
+                                    ? t(
+                                          '已检测到系统安装的 Google Chrome',
+                                          'System Google Chrome detected',
+                                      )
+                                    : t(
+                                          '未在本机默认路径检测到 Google Chrome',
+                                          'Google Chrome not detected in default system paths',
+                                      )}
+                            </span>
+
+                            <span className={styles.infoKey}>
+                                {t('适用场景', 'Recommended Use')}
+                            </span>
+                            <span className={styles.infoVal}>
+                                {t(
+                                    '高安全要求的敏感业务与主账号，完整保留官方签名与自动更新',
+                                    'Sensitive primary accounts requiring official signing and automatic security updates.',
+                                )}
+                            </span>
+
+                            <span className={styles.infoKey}>
+                                {t('隔离机制', 'Isolation')}
+                            </span>
+                            <span className={styles.infoVal}>
+                                {t(
+                                    '独立用户数据目录、严格代理防泄露与原生地区对齐',
+                                    'Isolated user data directory, strict fail-closed proxy routing, and native locale alignment.',
+                                )}
+                            </span>
+
+                            {kernelStatus?.systemChromePath && (
+                                <>
+                                    <span className={styles.infoKey}>
+                                        {t('可执行路径', 'Executable')}
+                                    </span>
+                                    <CopyableMonoValue
+                                        value={kernelStatus.systemChromePath}
+                                        copyTooltip={copyPathTip}
+                                        copyAriaLabel={t(
+                                            '复制标准 Chrome 路径',
+                                            'Copy Standard Chrome path',
+                                        )}
+                                        onCopy={() =>
+                                            void handleCopyText(
+                                                kernelStatus.systemChromePath,
+                                                t('路径', 'path'),
+                                            )
+                                        }
+                                        rowClassName={styles.detailValueRow}
+                                        monoClassName={styles.monoValue}
+                                    />
+                                </>
+                            )}
+                        </div>
+
+                        <div className={styles.detailFooter}>
+                            <div className={styles.detailActions}>
+                                <Button
+                                    type="button"
+                                    size="small"
+                                    appearance="subtle"
+                                    disabled={redetectingChrome}
+                                    icon={<ArrowSyncRegular />}
+                                    onClick={() => void handleRedetectChrome()}
+                                >
+                                    {redetectingChrome
+                                        ? t('检测中…', 'Detecting…')
+                                        : t('重新检测', 'Re-detect')}
+                                </Button>
+                                {kernelStatus?.systemChromeAvailable && (
+                                    <Button
+                                        type="button"
+                                        size="small"
+                                        appearance="subtle"
+                                        icon={<OpenRegular />}
+                                        onClick={() =>
+                                            void handleOpenComponentDir(
+                                                'system-chrome',
+                                            )
+                                        }
+                                    >
+                                        {t('定位文件', 'Reveal File')}
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </>
     );

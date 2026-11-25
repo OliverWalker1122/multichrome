@@ -27,6 +27,12 @@ export const systemApi = {
         return api.selectFolder();
     },
 
+    openConfigDir: async (): Promise<boolean> => {
+        const fn = getElectronApi()?.settings?.openConfigDir;
+        if (!fn) return false;
+        return fn();
+    },
+
     getAppInfo: async (): Promise<AppInfo | null> => {
         const api = getElectronApi()?.app;
         if (!api?.getInfo) return null;

@@ -116,6 +116,21 @@ export const useSettingsStyles = makeStyles({
         gap: '10px',
         flexWrap: 'wrap',
     },
+    cardHeaderInteractive: {
+        cursor: 'pointer',
+        borderRadius: '10px',
+        margin: '-6px -8px',
+        padding: '6px 8px',
+        userSelect: 'none',
+        transitionProperty: 'background-color',
+        transitionDuration: '120ms',
+        ':hover': {
+            backgroundColor: tokens.colorSubtleBackgroundHover,
+        },
+        '@media (prefers-reduced-motion: reduce)': {
+            transitionDuration: '0ms',
+        },
+    },
     cardTitleGroup: {
         display: 'inline-flex',
         alignItems: 'center',
@@ -268,6 +283,7 @@ export const useSettingsStyles = makeStyles({
         rowGap: '8px',
         columnGap: '12px',
         fontSize: '13px',
+        alignItems: 'center',
     },
     infoKey: {
         color: tokens.colorNeutralForeground3,
@@ -275,5 +291,38 @@ export const useSettingsStyles = makeStyles({
     infoVal: {
         color: tokens.colorNeutralForeground1,
         wordBreak: 'break-all',
+    },
+    detailValueRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        minWidth: 0,
+        flexWrap: 'wrap',
+    },
+    monoValue: {
+        fontFamily: tokens.fontFamilyMonospace,
+        fontSize: '12px',
+        color: tokens.colorNeutralForeground1,
+        wordBreak: 'break-all',
+    },
+    detailFooter: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '8px',
+        flexWrap: 'wrap',
+        paddingTop: '10px',
+        borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    },
+    detailActions: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+    },
+    detailHint: {
+        fontSize: '12px',
+        lineHeight: '18px',
+        color: tokens.colorNeutralForeground3,
     },
 });

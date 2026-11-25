@@ -173,6 +173,9 @@ try {
 
             // 选择文件夹
             selectFolder: () => ipcRenderer.invoke('select-folder'),
+
+            // 打开本地配置文件目录
+            openConfigDir: () => ipcRenderer.invoke('settings:open-config-dir'),
         },
 
         // 浏览器内核与 sing-box 代理核心管理API
@@ -200,7 +203,7 @@ try {
                 ipcRenderer.invoke('kernels:set-active-singbox', kernelId),
             removeSingbox: (kernelId) =>
                 ipcRenderer.invoke('kernels:remove-singbox', kernelId),
-            openDir: () => ipcRenderer.invoke('kernels:open-dir'),
+            openDir: (target) => ipcRenderer.invoke('kernels:open-dir', target),
         },
 
         // 本地 CDP 透传守卫与 MCP 服务

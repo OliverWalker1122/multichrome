@@ -3261,9 +3261,12 @@ async function main() {
                 await cdp.eval(`document.querySelector('nav button[aria-label="设置"]')?.click()`);
                 await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[data-testid="settings-tab-general"]'))`), 4000);
 
-                // 1) General tab: Export & Restore Encrypted Backup dialogs + short-password validation UI
+                // 1) General tab: Config directory open button + Export & Restore Encrypted Backup dialogs + short-password validation UI
                 await cdp.eval(`document.querySelector('[data-testid="settings-tab-general"]').click()`);
                 await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('加密备份')`), 3000);
+                const configOpenBtnVisible = await cdp.eval(
+                    `Array.from(document.querySelectorAll('main button')).some((btn) => (btn.textContent || '').trim() === '打开目录')`,
+                );
                 await cdp.eval(`window.__e2e.clickExact('导出备份', 'main button')`);
                 await waitUntil(() => cdp.eval(`(document.querySelector('[role="dialog"]')?.innerText || '').includes('导出加密备份')`), 3000);
                 await cdp.eval(`(() => {
@@ -3286,7 +3289,7 @@ async function main() {
                 );
                 await cdp.eval(`window.__e2e.clickExact('取消', '[role="dialog"] button')`);
                 await waitUntil(() => cdp.eval(`!document.querySelector('[role="dialog"]')`), 3000);
-                generalBackupUiOk = Boolean(shortPwdErrorShown && restoreDlgShown);
+                generalBackupUiOk = Boolean(configOpenBtnVisible && shortPwdErrorShown && restoreDlgShown);
 
                 // 2) Privacy tab: expand & collapse Device Spoofing ('设备伪装' -> '自定义' -> 5 switches -> '收起')
                 await cdp.eval(`document.querySelector('[data-testid="settings-tab-privacy"]').click()`);
@@ -3304,15 +3307,38 @@ async function main() {
                 );
                 privacySpoofingExpandOk = Boolean(spoofExpanded && spoofCollapsed);
 
-                // 3) Components tab: Proxy Engine (sing-box) & Privacy Browser cards + import/update controls
+                // 3) Components tab: Proxy Engine (sing-box), Privacy Browser & Standard Chrome cards + expandable details
                 await cdp.eval(`document.querySelector('[data-testid="settings-tab-components"]').click()`);
-                componentsTabOk = await waitUntil(
+                const componentsLoaded = await waitUntil(
                     () => cdp.eval(`(() => {
                         const t = window.__e2e.bodyText();
-                        return t.includes('代理引擎') && t.includes('防关联浏览器');
+                        return t.includes('代理引擎') && t.includes('防关联浏览器') && t.includes('标准 Chrome');
                     })()`),
                     4000,
                 );
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-singbox"]')?.click()`);
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-fingerprint"]')?.click()`);
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-chrome"]')?.click()`);
+                const componentsExpanded = await waitUntil(
+                    () => cdp.eval(`(() => {
+                        const sb = document.querySelector('[data-testid="component-details-singbox"]');
+                        const fp = document.querySelector('[data-testid="component-details-fingerprint"]');
+                        const ch = document.querySelector('[data-testid="component-details-chrome"]');
+                        const sbExp = document.querySelector('[data-testid="component-toggle-singbox"]')?.getAttribute('aria-expanded') === 'true';
+                        const fpExp = document.querySelector('[data-testid="component-toggle-fingerprint"]')?.getAttribute('aria-expanded') === 'true';
+                        const chExp = document.querySelector('[data-testid="component-toggle-chrome"]')?.getAttribute('aria-expanded') === 'true';
+                        return Boolean(sb && fp && ch && sbExp && fpExp && chExp && (ch.textContent || '').includes('适用场景'));
+                    })()`),
+                    3000,
+                );
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-singbox"]')?.click()`);
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-fingerprint"]')?.click()`);
+                await cdp.eval(`document.querySelector('[data-testid="component-toggle-chrome"]')?.click()`);
+                const componentsCollapsed = await waitUntil(
+                    () => cdp.eval(`!document.querySelector('[data-testid="component-details-singbox"]') && !document.querySelector('[data-testid="component-details-fingerprint"]') && !document.querySelector('[data-testid="component-details-chrome"]')`),
+                    3000,
+                );
+                componentsTabOk = Boolean(componentsLoaded && componentsExpanded && componentsCollapsed);
 
                 // 4) About tab: MultiChrome hero, app version, GitHub Star, Export Diagnostics, Check Updates
                 await cdp.eval(`document.querySelector('[data-testid="settings-tab-about"]').click()`);

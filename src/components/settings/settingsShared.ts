@@ -91,6 +91,27 @@ export function formatBytes(bytes?: number): string {
     return `${Math.round(bytes / 1024)} KB`;
 }
 
+export function formatShortSha256(hash?: string): string {
+    const clean = typeof hash === 'string' ? hash.trim() : '';
+    if (!clean) return '';
+    if (clean.length <= 24) return clean;
+    return `${clean.slice(0, 12)}…${clean.slice(-8)}`;
+}
+
+export function formatDateTime(iso?: string, locale: AppLocale = 'en-US'): string {
+    if (!iso) return '';
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return '';
+    try {
+        return new Intl.DateTimeFormat(locale === 'zh-CN' ? 'zh-CN' : 'en-US', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        }).format(date);
+    } catch {
+        return date.toISOString();
+    }
+}
+
 export function cleanIpcError(err: unknown, locale: AppLocale): string {
     const raw =
         err instanceof Error
