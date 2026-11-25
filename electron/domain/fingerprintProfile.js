@@ -224,10 +224,6 @@ export function buildFingerprintChromiumArgs(config, options = {}) {
         `--fingerprint-brand=${normalized.brand}`,
         `--fingerprint-hardware-concurrency=${normalized.hardwareConcurrency}`,
         '--disable-non-proxied-udp',
-        // 禁用 Chromium 148 的 W3C DeviceBoundSessions (DBSC)：
-        // 1) 其在高延迟/住宅代理下刷新 /RotateBoundCookies 时无独立超时，且阻塞全部 *.google.com 凭据请求，易导致 Gmail 等站点永久卡加载屏；
-        // 2) DBSC 将短生命周期 Cookie 绑定到宿主机 TPM，破坏多环境迁移与跨环境隔离。
-        '--disable-features=DeviceBoundSessions,PersistDeviceBoundSessions',
     ];
 
     if (normalized.platformVersion) {

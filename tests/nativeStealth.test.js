@@ -168,7 +168,7 @@ test('EnvironmentService.inspectEnvironmentHealth never excludes the inspected e
     assert.equal(/ensureManagedProxyReady\(\s*env\.proxyId\s*,\s*id\s*\)/.test(fnBody), false);
 });
 
-test('buildFingerprintChromiumArgs disables DeviceBoundSessions to prevent Chromium 148 DBSC request deferral deadlocks behind proxies', () => {
+test('buildFingerprintChromiumArgs preserves native DeviceBoundSessions so existing Google DBSC sessions keep rotating bound cookies', () => {
     const args = buildFingerprintChromiumArgs(
         {
             seed: 123456,
@@ -179,13 +179,10 @@ test('buildFingerprintChromiumArgs disables DeviceBoundSessions to prevent Chrom
         },
         { timezone: 'America/La_Paz' },
     );
-    const disableFeaturesArg = args.find((arg) =>
-        arg.startsWith('--disable-features='),
-    );
-    assert.ok(disableFeaturesArg);
-    const features = disableFeaturesArg
-        .slice('--disable-features='.length)
-        .split(',');
-    assert.ok(features.includes('DeviceBoundSessions'));
-    assert.ok(features.includes('PersistDeviceBoundSessions'));
+    const disabledFeatures = args
+        .filter((arg) => arg.startsWith('--disable-features='))
+        .flatMap((arg) => arg.slice('--disable-features='.length).split(','));
+    assert.equal(disabledFeatures.includes('DeviceBoundSessions'), false);
+    assert.equal(disabledFeatures.includes('PersistDeviceBoundSessions'), false);
+    assert.equal(disabledFeatures.includes('EnableBoundSessionCredentials'), false);
 });
