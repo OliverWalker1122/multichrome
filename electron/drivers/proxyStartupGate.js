@@ -1,6 +1,12 @@
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
+import {
+    isDbscAuthRefreshHost,
+    normalizeTunnelWatchdogConfig,
+    parseHttpConnectTarget,
+    parseHttpProxyStatusCode,
+} from '../domain/proxyTunnelPolicy.js';
 import { parseProxyAddress } from './proxyProbeClient.js';
 
 /**
@@ -23,6 +29,8 @@ import { parseProxyAddress } from './proxyProbeClient.js';
  *     heldCount: number;
  *     droppedCount: number;
  *     forwardedCount: number;
+ *     watchdogTerminatedCount: number;
+ *     watchdogReasons: Record<string, number>;
  *   };
  *   release: () => number;
  *   dropHeldAndRelease: () => { droppedCount: number };
@@ -151,11 +159,279 @@ export function cleanupLegacyFingerprintExtension(dataDir, prefs, options = {}) 
 }
 
 /**
- * Create a lightweight L4 loopback TCP Startup Hold-Gate in front of a proxy.
+ * Attach a passive, zero-MITM HTTP CONNECT stall watchdog to a piped socket
+ * pair. Observes framing bytes without mutating or intercepting TLS traffic:
+ * - All HTTP CONNECT tunnels: guards against stalled proxy CONNECT responses
+ *   and stalled TLS ClientHello -> ServerHello handshakes, then detaches so
+ *   steady-state traffic incurs zero ongoing callback overhead.
+ * - Dedicated DBSC auth-refresh hosts (`accounts.google.com`,
+ *   `accounts.youtube.com`): additionally guards against stalled active
+ *   requests (equivalent to upstream Chromium's DBSC `URLFetcher` timeout) and
+ *   recycles long-idle connections so 10-minute cookie rotations never hit
+ *   zombie residential NAT tunnels.
  *
- * - Starts in HOLD mode: accepts TCP connections from Chrome and pauses reads so
- *   restored session tabs cannot fetch network responses or send beacons before
- *   CDP attaches and applies native V8 Emulation overrides.
+ * @param {net.Socket} clientSocket
+ * @param {net.Socket} upstream
+ * @param {{
+ *   connectHandshakeTimeoutMs: number;
+ *   tlsHandshakeTimeoutMs: number;
+ *   dbscResponseTimeoutMs: number;
+ *   dbscIdleTimeoutMs: number;
+ *   minResponseTriggerBytes: number;
+ * }} config
+ * @param {(reason: string, host: string) => void} onTerminated
+ * @param {GateLogger | undefined} logger
+ */
+function attachHttpConnectTunnelWatchdog(
+    clientSocket,
+    upstream,
+    config,
+    onTerminated,
+    logger,
+) {
+    let phase = 'client_head';
+    let clientHeadBuf = '';
+    let upstreamHeadBuf = '';
+    let isConnectTunnel = false;
+    let isWatchedDbscHost = false;
+    let targetHost = '';
+    let unansweredClientBytes = 0;
+    let awaitingResponse = false;
+    let cleanedUp = false;
+
+    /** @type {NodeJS.Timeout | null} */
+    let handshakeTimer = null;
+    /** @type {NodeJS.Timeout | null} */
+    let tlsTimer = null;
+    /** @type {NodeJS.Timeout | null} */
+    let responseTimer = null;
+    /** @type {NodeJS.Timeout | null} */
+    let idleTimer = null;
+
+    const clearTimer = (ref) => {
+        if (ref) clearTimeout(ref);
+        return null;
+    };
+
+    const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        handshakeTimer = clearTimer(handshakeTimer);
+        tlsTimer = clearTimer(tlsTimer);
+        responseTimer = clearTimer(responseTimer);
+        idleTimer = clearTimer(idleTimer);
+        clientHeadBuf = '';
+        upstreamHeadBuf = '';
+        clientSocket.off('data', onClientData);
+        upstream.off('data', onUpstreamData);
+        clientSocket.off('close', cleanup);
+        upstream.off('close', cleanup);
+    };
+
+    const detachToPassthrough = () => {
+        phase = 'detached';
+        cleanup();
+    };
+
+    const terminate = (reason) => {
+        if (cleanedUp) return;
+        cleanup();
+        onTerminated(reason, targetHost);
+        if (reason !== 'dbsc_idle_recycle') {
+            logger?.warn?.(
+                `[代理隧道看门狗] 检测到卡死连接 (${reason}${targetHost ? `, host=${targetHost}` : ''})，已主动断链触发重连`,
+            );
+        }
+        if (!upstream.destroyed) upstream.destroy();
+        if (!clientSocket.destroyed) clientSocket.destroy();
+    };
+
+    const armHandshakeTimer = () => {
+        handshakeTimer = clearTimer(handshakeTimer);
+        if (config.connectHandshakeTimeoutMs > 0) {
+            handshakeTimer = setTimeout(
+                () => terminate('connect_handshake_timeout'),
+                config.connectHandshakeTimeoutMs,
+            );
+            handshakeTimer.unref?.();
+        }
+    };
+
+    const armTlsTimer = () => {
+        tlsTimer = clearTimer(tlsTimer);
+        if (config.tlsHandshakeTimeoutMs > 0) {
+            tlsTimer = setTimeout(
+                () => terminate('tls_handshake_timeout'),
+                config.tlsHandshakeTimeoutMs,
+            );
+            tlsTimer.unref?.();
+        }
+    };
+
+    const armIdleTimer = () => {
+        idleTimer = clearTimer(idleTimer);
+        if (
+            isWatchedDbscHost &&
+            !awaitingResponse &&
+            config.dbscIdleTimeoutMs > 0
+        ) {
+            idleTimer = setTimeout(
+                () => terminate('dbsc_idle_recycle'),
+                config.dbscIdleTimeoutMs,
+            );
+            idleTimer.unref?.();
+        }
+    };
+
+    const armResponseTimerIfNeeded = () => {
+        if (awaitingResponse || !isWatchedDbscHost) return;
+        awaitingResponse = true;
+        idleTimer = clearTimer(idleTimer);
+        if (config.dbscResponseTimeoutMs > 0) {
+            responseTimer = setTimeout(
+                () => terminate('dbsc_response_timeout'),
+                config.dbscResponseTimeoutMs,
+            );
+            responseTimer.unref?.();
+        }
+    };
+
+    /** @param {Buffer} chunk */
+    function onClientData(chunk) {
+        if (cleanedUp || !chunk || chunk.length === 0) return;
+
+        if (phase === 'client_head') {
+            if (clientHeadBuf.length === 0) {
+                const firstByte = chunk[0];
+                if (firstByte < 0x41 || firstByte > 0x5a) {
+                    detachToPassthrough();
+                    return;
+                }
+            }
+            clientHeadBuf += chunk.toString('latin1');
+            if (clientHeadBuf.length > 8192) {
+                detachToPassthrough();
+                return;
+            }
+            const headerEnd = clientHeadBuf.indexOf('\r\n\r\n');
+            if (headerEnd < 0) {
+                if (!handshakeTimer) armHandshakeTimer();
+                return;
+            }
+
+            const head = clientHeadBuf.slice(0, headerEnd);
+            clientHeadBuf = '';
+            const connectTarget = parseHttpConnectTarget(head);
+            if (connectTarget) {
+                isConnectTunnel = true;
+                targetHost = connectTarget.host;
+                isWatchedDbscHost = isDbscAuthRefreshHost(connectTarget.host);
+            } else {
+                isConnectTunnel = false;
+            }
+            phase = 'proxy_response';
+            armHandshakeTimer();
+            return;
+        }
+
+        if (phase === 'tls_handshake') {
+            if (!tlsTimer) {
+                armTlsTimer();
+            }
+            return;
+        }
+
+        if (phase === 'tunnel' && isWatchedDbscHost) {
+            unansweredClientBytes += chunk.length;
+            if (unansweredClientBytes >= config.minResponseTriggerBytes) {
+                armResponseTimerIfNeeded();
+            }
+        }
+    }
+
+    /** @param {Buffer} chunk */
+    function onUpstreamData(chunk) {
+        if (cleanedUp || !chunk || chunk.length === 0) return;
+
+        if (phase === 'client_head') {
+            detachToPassthrough();
+            return;
+        }
+
+        if (phase === 'proxy_response') {
+            if (!isConnectTunnel) {
+                detachToPassthrough();
+                return;
+            }
+            upstreamHeadBuf += chunk.toString('latin1');
+            if (upstreamHeadBuf.length > 8192) {
+                detachToPassthrough();
+                return;
+            }
+            const headerEnd = upstreamHeadBuf.indexOf('\r\n\r\n');
+            if (headerEnd < 0) return;
+
+            const statusCode = parseHttpProxyStatusCode(
+                upstreamHeadBuf.slice(0, headerEnd),
+            );
+            const trailingBytes = upstreamHeadBuf.length - (headerEnd + 4);
+            upstreamHeadBuf = '';
+            handshakeTimer = clearTimer(handshakeTimer);
+
+            if (statusCode !== 200) {
+                detachToPassthrough();
+                return;
+            }
+
+            phase = 'tls_handshake';
+            if (trailingBytes > 0) {
+                if (isWatchedDbscHost) {
+                    phase = 'tunnel';
+                    armIdleTimer();
+                } else {
+                    detachToPassthrough();
+                }
+            } else {
+                armTlsTimer();
+            }
+            return;
+        }
+
+        if (phase === 'tls_handshake') {
+            tlsTimer = clearTimer(tlsTimer);
+            if (!isWatchedDbscHost) {
+                detachToPassthrough();
+                return;
+            }
+            phase = 'tunnel';
+            unansweredClientBytes = 0;
+            awaitingResponse = false;
+            armIdleTimer();
+            return;
+        }
+
+        if (phase === 'tunnel' && isWatchedDbscHost) {
+            unansweredClientBytes = 0;
+            awaitingResponse = false;
+            responseTimer = clearTimer(responseTimer);
+            armIdleTimer();
+        }
+    }
+
+    clientSocket.on('data', onClientData);
+    upstream.on('data', onUpstreamData);
+    clientSocket.once('close', cleanup);
+    upstream.once('close', cleanup);
+}
+
+/**
+ * Create a lightweight L4 loopback TCP Startup Hold-Gate / Tunnel Watchdog in front of a proxy.
+ *
+ * - When `holdOnStart` is true (default): starts in HOLD mode, accepting TCP connections from
+ *   Chrome and pausing reads until CDP attaches and applies native V8 Emulation overrides.
+ * - When `holdOnStart` is false: starts immediately released in zero-hold passthrough mode so
+ *   engines with native C++ flags still benefit from the HTTP CONNECT stall watchdog without
+ *   adding startup latency.
  * - `release()`: forwards all held sockets to upstream and switches to direct
  *   passthrough for all future connections.
  * - `dropHeldAndRelease()`: destroys all held pre-CDP sockets (preventing any
@@ -169,8 +445,10 @@ export function cleanupLegacyFingerprintExtension(dataDir, prefs, options = {}) 
  * @param {{
  *   upstreamHost: string;
  *   upstreamPort: number;
+ *   holdOnStart?: boolean;
  *   maxHoldMs?: number;
  *   failClosedOnTimeout?: boolean;
+ *   tunnelWatchdog?: boolean | Partial<typeof import('../domain/proxyTunnelPolicy.js').DEFAULT_TUNNEL_WATCHDOG_CONFIG>;
  *   onTimeoutAbort?: () => void;
  *   logger?: GateLogger;
  * }} options
@@ -179,16 +457,22 @@ export function cleanupLegacyFingerprintExtension(dataDir, prefs, options = {}) 
 export function createProxyStartupGate({
     upstreamHost,
     upstreamPort,
+    holdOnStart = true,
     maxHoldMs = 8000,
     failClosedOnTimeout = true,
+    tunnelWatchdog = false,
     onTimeoutAbort,
     logger,
 }) {
-    let released = false;
+    const watchdogConfig = normalizeTunnelWatchdogConfig(tunnelWatchdog);
+    let released = !holdOnStart;
     let aborted = false;
     let closed = false;
     let droppedCount = 0;
     let forwardedCount = 0;
+    let watchdogTerminatedCount = 0;
+    /** @type {Record<string, number>} */
+    const watchdogReasons = {};
     /** @type {Set<net.Socket>} */
     const heldSockets = new Set();
     /** @type {Set<net.Socket>} */
@@ -211,6 +495,19 @@ export function createProxyStartupGate({
         clientSocket.on('error', () => {
             if (!upstream.destroyed) upstream.destroy();
         });
+        if (watchdogConfig) {
+            attachHttpConnectTunnelWatchdog(
+                clientSocket,
+                upstream,
+                watchdogConfig,
+                (reason) => {
+                    watchdogTerminatedCount += 1;
+                    watchdogReasons[reason] =
+                        (watchdogReasons[reason] || 0) + 1;
+                },
+                logger,
+            );
+        }
         clientSocket.pipe(upstream);
         upstream.pipe(clientSocket);
         clientSocket.resume();
@@ -323,7 +620,7 @@ export function createProxyStartupGate({
             const port =
                 address && typeof address === 'object' ? address.port : 0;
 
-            if (maxHoldMs > 0) {
+            if (holdOnStart && maxHoldMs > 0) {
                 safetyTimer = setTimeout(() => {
                     if (!released && !closed && !aborted) {
                         if (failClosedOnTimeout) {
@@ -359,6 +656,8 @@ export function createProxyStartupGate({
                     heldCount: heldSockets.size,
                     droppedCount,
                     forwardedCount,
+                    watchdogTerminatedCount,
+                    watchdogReasons: { ...watchdogReasons },
                 }),
                 release,
                 dropHeldAndRelease,

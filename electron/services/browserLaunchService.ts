@@ -37,6 +37,7 @@ import {
     buildManagedProxyArgs,
     buildManualProxyArgs,
 } from '../domain/managedProxyArgs.js';
+import { shouldEnableHttpConnectWatchdog } from '../domain/proxyTunnelPolicy.js';
 import {
     buildFingerprintChromiumArgs,
     generateFingerprintConfig,
@@ -87,6 +88,7 @@ export interface RunningEnvironmentRecord {
     launchedAt: number;
     proxyId?: string;
     startupGate?: ProxyStartupGate;
+    hasStartupHoldGate?: boolean;
 }
 
 interface ManagedProxySummary {
@@ -228,6 +230,10 @@ export class BrowserLaunchService {
                 }
                 if (endedRecord?.debugPort) {
                     this.portPool.release(endedRecord.debugPort);
+                }
+                if (endedRecord?.startupGate) {
+                    void endedRecord.startupGate.close();
+                    endedRecord.startupGate = undefined;
                 }
                 this.runningProcesses.delete(id);
             });
@@ -697,19 +703,25 @@ export class BrowserLaunchService {
                     : undefined;
 
             let chromeProxyAddress = proxyAddress;
-            const needStartupGate =
+            const needStartupHold =
                 !isFingerprintChromium &&
                 Boolean(proxyAddress) &&
                 Boolean(effectiveTimezone || startupGeolocation);
-            if (needStartupGate && proxyAddress) {
+            const needTunnelWatchdog =
+                Boolean(proxyAddress) &&
+                shouldEnableHttpConnectWatchdog(proxyAddress);
+            const needProxyRelay = needStartupHold || needTunnelWatchdog;
+            if (needProxyRelay && proxyAddress) {
                 const parsedUpstream = parseProxyAddress(proxyAddress);
                 if (parsedUpstream) {
                     try {
                         startupGate = await createProxyStartupGate({
                             upstreamHost: parsedUpstream.host,
                             upstreamPort: parsedUpstream.port,
-                            maxHoldMs: 8000,
-                            failClosedOnTimeout: true,
+                            holdOnStart: needStartupHold,
+                            maxHoldMs: needStartupHold ? 8000 : 0,
+                            failClosedOnTimeout: needStartupHold,
+                            tunnelWatchdog: needTunnelWatchdog,
                             logger: log,
                         });
                         const rewritten = rewriteProxyAddressForGate(
@@ -719,7 +731,9 @@ export class BrowserLaunchService {
                         if (rewritten) {
                             chromeProxyAddress = rewritten.gateProxyAddress;
                             log.info(
-                                `[${env.name}] 已启用 Fail-Closed 启动流量闸门 (127.0.0.1:${startupGate.port} -> ${rewritten.upstreamHost}:${rewritten.upstreamPort})`,
+                                needStartupHold
+                                    ? `[${env.name}] 已启用 Fail-Closed 启动流量闸门与隧道防卡死看门狗 (127.0.0.1:${startupGate.port} -> ${rewritten.upstreamHost}:${rewritten.upstreamPort})`
+                                    : `[${env.name}] 已启用代理隧道防卡死看门狗 (127.0.0.1:${startupGate.port} -> ${rewritten.upstreamHost}:${rewritten.upstreamPort})`,
                             );
                         } else {
                             await startupGate.close();
@@ -727,7 +741,7 @@ export class BrowserLaunchService {
                         }
                     } catch (gateErr) {
                         log.warn(
-                            `[${env.name}] 启动流量闸门初始化失败，回退直连代理入口:`,
+                            `[${env.name}] 代理通道看门狗初始化失败，回退直连代理入口:`,
                             gateErr,
                         );
                         if (startupGate) {
@@ -929,6 +943,7 @@ export class BrowserLaunchService {
                 launchedAt: Date.now(),
                 proxyId: env.proxyId,
                 startupGate,
+                hasStartupHoldGate: Boolean(startupGate && needStartupHold),
             });
             if (env.proxyId) {
                 this.deps.proxyService?.touchActivity?.(env.proxyId);
@@ -1034,7 +1049,7 @@ export class BrowserLaunchService {
                 }
             };
 
-            if (startupGate) {
+            if (startupGate && needStartupHold) {
                 let gateHandshakeOk = false;
                 try {
                     const debugReady = await this.waitForDebugEndpoint(
@@ -1345,7 +1360,7 @@ export class BrowserLaunchService {
                     wsLiveSince > 0 ? Date.now() - wsLiveSince : 0;
                 if (
                     isCdpReady ||
-                    Boolean(procRecord.startupGate) ||
+                    Boolean(procRecord.hasStartupHoldGate) ||
                     waitedForCdp >= cdpConnectGraceMs
                 ) {
                     break;
