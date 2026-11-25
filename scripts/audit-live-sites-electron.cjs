@@ -16,6 +16,7 @@ const { pathToFileURL } = require('url');
 const { app, safeStorage } = require('electron');
 const Store = require('electron-store');
 const WebSocket = require('ws');
+const inspectPixelScan = require('./inspect-pixelscan.cjs');
 
 const projectRoot = path.resolve(__dirname, '..');
 const distElectron = path.join(projectRoot, 'dist', 'electron');
@@ -260,6 +261,7 @@ async function visitAndInspect(cdp, url, waitMs, extractJs, pollUntilReadyMs = 0
                 !pollUntilReadyMs ||
                 lastVal.ready ||
                 lastVal.blocked ||
+                (lastVal.error && lastVal.error !== 'empty result') ||
                 Date.now() >= deadline
             ) {
                 return lastVal;
@@ -351,18 +353,8 @@ const SITE_SPECS = {
         label: 'PixelScan',
         url: 'https://pixelscan.net/fingerprint-check',
         waitMs: 12000,
-        pollMs: 0,
-        extractJs: `(() => {
-            const text = (document.body?.innerText || '').trim();
-            if (/verify you are human|just a moment|turnstile|captcha/i.test(text)) {
-                return { blocked: 'CAPTCHA/Challenge' };
-            }
-            const lines = text.split('\\n').map(s => s.trim()).filter(Boolean);
-            return {
-                title: document.title,
-                snippet: lines.slice(0, 40).join(' | '),
-            };
-        })()`,
+        pollMs: 60000,
+        extractJs: `(${inspectPixelScan.toString()})(document)`,
     },
 };
 
@@ -420,7 +412,7 @@ function summarizeSiteResult(siteKey, res) {
         return `noLeak=${noLeak}, ${localIp.replace(/\t/g, '=')}, ${publicIp.replace(/\t/g, '=')}`;
     }
     if (siteKey === 'pixelscan') {
-        return res.title ? `title=${res.title}` : 'loaded';
+        return res.ready && res.verdict ? `fingerprint=${res.verdict}` : 'INCONCLUSIVE (no explicit verdict)';
     }
     return 'ok';
 }
