@@ -5,7 +5,7 @@
   "color": "ca8a04",
   "metrics": {
     "lines": 77.35,
-    "branches": 71.13,
+    "branches": 71.05,
     "functions": 84.95,
     "testsTotal": 189,
     "testsPassed": 189,
