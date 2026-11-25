@@ -96,7 +96,7 @@ export const proxyApi = {
 
     batchRemove: async (
         ids: string[],
-    ): Promise<{ removedCount: number; skippedInUseCount: number }> => {
+    ): Promise<{ removedCount: number; skippedInUseCount: number; failedCount?: number; remainingIds?: string[] }> => {
         const fn = getElectronApi()?.proxies?.batchRemove;
         if (!fn) throw new Error('Proxy API unavailable');
         return fn(ids);

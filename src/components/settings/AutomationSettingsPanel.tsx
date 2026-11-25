@@ -1,8 +1,14 @@
+import { moveTabFocus } from '../../utils/tabKeyboard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Badge,
     Button,
     Input,
+    Menu,
+    MenuItem,
+    MenuList,
+    MenuPopover,
+    MenuTrigger,
     MessageBar,
     MessageBarActions,
     MessageBarBody,
@@ -15,7 +21,7 @@ import {
     tokens,
 } from '@fluentui/react-components';
 import {
-    ArrowClockwiseRegular,
+    MoreHorizontalRegular,
     CheckmarkRegular,
     ChevronDownRegular,
     ChevronUpRegular,
@@ -34,11 +40,12 @@ import type {
     AutomationStatus,
     RunningProfileOption,
 } from '../../types';
+import { ConfirmAction } from '../common/ConfirmAction';
 import InfoTip from '../common/InfoTip';
 
 export type { AutomationConfigPatch, AutomationStatus, RunningProfileOption };
 
-type SnippetTab = 'mcpJson' | 'claudeCli' | 'devtoolsMcp' | 'playwrightCode';
+type SnippetTab = 'stdio' | 'mcpJson' | 'claudeCli' | 'devtoolsMcp' | 'playwrightCode';
 
 const DEFAULT_PORT = 18922;
 const MASKED_TOKEN_PLACEHOLDER = '••••••••••••';
@@ -79,6 +86,7 @@ function cleanIpcError(err: unknown, fallback: string): string {
 function buildSnippets(
     port: number,
     tokenSegment: string,
+    bridgePath: string,
 ): Record<SnippetTab, string> {
     const baseUrl = `http://127.0.0.1:${port}`;
     const hasToken = Boolean(tokenSegment);
@@ -96,28 +104,24 @@ function buildSnippets(
                     multichrome: {
                         url: mcpUrl,
                     },
-                    playwright: {
-                        command: 'npx',
-                        args: [
-                            '@playwright/mcp@latest',
-                            '--cdp-endpoint',
-                            cdpWsUrl,
-                        ],
-                    },
                 },
             },
             null,
             2,
         ),
+        stdio: JSON.stringify({ mcpServers: { multichrome: {
+            command: 'node', args: [bridgePath],
+            env: { MULTICHROME_API_URL: baseUrl, ...(hasToken ? { MULTICHROME_API_TOKEN: tokenSegment } : {}) },
+        } } }, null, 2),
         claudeCli: [
             `claude mcp add --transport http multichrome ${mcpUrl}`,
-            `claude mcp add playwright -- npx @playwright/mcp@latest --cdp-endpoint ${cdpWsUrl}`,
+            `claude mcp add playwright -- npx @playwright/mcp@0.0.86 --cdp-endpoint ${cdpWsUrl}`,
         ].join('\n'),
         devtoolsMcp: [
             `claude mcp add --transport http multichrome ${mcpUrl}`,
             hasToken
-                ? `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest --wsEndpoint=${cdpWsUrl}`
-                : `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@latest --browserUrl=${baseUrl}`,
+                ? `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@1.14.0 --wsEndpoint=${cdpWsUrl}`
+                : `claude mcp add chrome-devtools -- npx chrome-devtools-mcp@1.14.0 --browserUrl=${baseUrl}`,
         ].join('\n'),
         playwrightCode: hasToken
             ? [
@@ -356,12 +360,15 @@ const AutomationSettingsPanel: React.FC = () => {
     const [status, setStatus] = useState<AutomationStatus>(FALLBACK_STATUS);
     const [loading, setLoading] = useState(bridgeAvailable);
     const [busy, setBusy] = useState(false);
+    const [connectionResult, setConnectionResult] = useState('');
     const [actionError, setActionError] = useState('');
     const [portInput, setPortInput] = useState(String(DEFAULT_PORT));
     const [snippetsOpen, setSnippetsOpen] = useState(false);
     const [snippetTab, setSnippetTab] = useState<SnippetTab>('mcpJson');
+    const [manualTemplate, setManualTemplate] = useState(false);
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
     const [tokenValue, setTokenValue] = useState<string>('');
+    const [resetOpen, setResetOpen] = useState(false);
     const [tokenRevealed, setTokenRevealed] = useState(false);
 
     const applyStatus = useCallback((next: AutomationStatus) => {
@@ -426,8 +433,9 @@ const AutomationSettingsPanel: React.FC = () => {
     }, [applyStatus, refreshStatus]);
 
     useEffect(() => {
+        setConnectionResult('');
         setPortInput(String(status.port || DEFAULT_PORT));
-    }, [status.port]);
+    }, [status.port, status.running]);
 
     const reportActionError = useCallback(
         (err: unknown, fallbackZh: string, fallbackEn: string) => {
@@ -488,6 +496,21 @@ const AutomationSettingsPanel: React.FC = () => {
                 setBusy(false);
             }
         }
+    };
+
+    const testConnection = async () => {
+        setBusy(true);
+        setConnectionResult('');
+        try {
+            const result = await automationApi.testConnection();
+            setConnectionResult(result === 'ready'
+                ? t('监听、鉴权和四项工具发现成功', 'Listening, authentication and four tools verified')
+                : result === 'auth' ? t('鉴权失败，请检查密钥库', 'Authentication failed. Check secure storage.')
+                : result === 'tools' ? t('工具发现失败', 'Tool discovery failed')
+                : t('监听服务不可达', 'Listener unavailable'));
+        } catch {
+            setConnectionResult(t('无法完成连接检查', 'Connection check failed'));
+        } finally { setBusy(false); }
     };
 
     const handleApplyPort = async () => {
@@ -665,16 +688,21 @@ const AutomationSettingsPanel: React.FC = () => {
         }
     };
 
-    const handleCopySnippet = async () => {
+    const handleCopySnippet = async (template = false) => {
+        let copying = false;
         try {
             const authActive = status.authRequired !== false;
-            const liveTok = authActive ? await ensureTokenLoaded() : '';
+            const liveTok = authActive ? (template ? '<ACCESS_TOKEN>' : await ensureTokenLoaded()) : '';
+            if (authActive && !liveTok) throw new Error('Token unavailable');
             const liveSnippets = buildSnippets(
                 status.port || DEFAULT_PORT,
                 liveTok,
+                status.stdioBridgePath || FALLBACK_STATUS.stdioBridgePath || '',
             );
+            copying = true;
             await navigator.clipboard.writeText(liveSnippets[snippetTab]);
-            setCopiedKey(snippetTab);
+            setManualTemplate(false);
+            setCopiedKey(template ? 'template' : snippetTab);
             if (copyTimerRef.current !== null) {
                 window.clearTimeout(copyTimerRef.current);
             }
@@ -688,11 +716,12 @@ const AutomationSettingsPanel: React.FC = () => {
                 t('接入命令已复制', 'Command copied to clipboard'),
             );
         } catch {
+            if (copying) setManualTemplate(true);
             showNotification(
                 'error',
                 t(
-                    '无法访问剪贴板，请手动选择并复制',
-                    'Clipboard unavailable. Please select and copy manually.',
+                    copying ? '剪贴板不可用，请手动选取下方模板，粘贴后按需填入密钥' : '未能读取访问密钥，请检查系统密钥库',
+                    copying ? 'Clipboard unavailable. Select the template below and fill in your token if needed.' : 'Could not read the access token. Check OS secure storage.',
                 ),
             );
         }
@@ -701,14 +730,16 @@ const AutomationSettingsPanel: React.FC = () => {
     const authRequired = status.authRequired !== false;
     const visibleTokenSegment = !authRequired
         ? ''
-        : tokenRevealed && tokenValue
+        : manualTemplate
+          ? '<ACCESS_TOKEN>'
+          : tokenRevealed && tokenValue
           ? tokenValue
           : MASKED_TOKEN_PLACEHOLDER;
 
     const snippets = useMemo(
         () =>
-            buildSnippets(status.port || DEFAULT_PORT, visibleTokenSegment),
-        [status.port, visibleTokenSegment],
+            buildSnippets(status.port || DEFAULT_PORT, visibleTokenSegment, status.stdioBridgePath || FALLBACK_STATUS.stdioBridgePath || ''),
+        [status.port, status.stdioBridgePath, visibleTokenSegment],
     );
 
     const isEnabled = Boolean(
@@ -744,9 +775,10 @@ const AutomationSettingsPanel: React.FC = () => {
     }> = [
         {
             id: 'mcpJson',
-            label: 'MCP JSON',
+            label: 'HTTP',
             testId: 'automation-snippet-tab-mcp-json',
         },
+        { id: 'stdio', label: 'stdio', testId: 'automation-snippet-tab-stdio' },
         {
             id: 'claudeCli',
             label: 'Claude Code',
@@ -767,6 +799,11 @@ const AutomationSettingsPanel: React.FC = () => {
     return (
         <div className={styles.stack} data-testid="automation-settings-panel">
             {/* 1. 本地服务 */}
+            {resetOpen && <ConfirmAction title={t('重置访问密钥？', 'Reset access token?')}
+                action={t('重置密钥', 'Reset token')} onCancel={() => setResetOpen(false)}
+                onConfirm={() => { setResetOpen(false); void handleRotateToken(); }}>
+                {t('现有连接将断开。请在客户端更新配置后重新连接。', 'Existing connections will close. Update the client configuration to reconnect.')}
+            </ConfirmAction>}
             <div className={styles.card} data-testid="automation-status-card">
                 <div className={styles.cardHeader}>
                     <div className={styles.cardTitleGroup}>
@@ -811,6 +848,12 @@ const AutomationSettingsPanel: React.FC = () => {
                     </div>
                 </div>
 
+                <div className={styles.inlineControls}>
+                    <Button appearance="subtle" size="small" disabled={controlsDisabled || !status.running} onClick={() => void testConnection()}>
+                        {t('测试连接', 'Test connection')}
+                    </Button>
+                    <span role="status">{connectionResult}</span>
+                </div>
                 {loading && (
                     <div className={styles.loadingBox}>
                         <Spinner size="tiny" />
@@ -900,7 +943,7 @@ const AutomationSettingsPanel: React.FC = () => {
                         className={styles.profileSelect}
                         data-testid="automation-active-profile-select"
                         disabled={controlsDisabled || runningProfiles.length === 0}
-                        value={status.activeProfileId || ''}
+                        value={status.selectedProfileId || ''}
                         aria-label={t('当前调试环境', 'Target Profile')}
                         onChange={(_, data) =>
                             void handleActiveProfileChange(data.value)
@@ -910,8 +953,8 @@ const AutomationSettingsPanel: React.FC = () => {
                             {runningProfiles.length === 0
                                 ? t('暂无运行中的环境', 'No running profiles')
                                 : t(
-                                      '自动（单环境自动命中）',
-                                      'Auto (Single running profile)',
+                                      status.activeProfileName ? `自动 · 当前 ${status.activeProfileName}` : '自动（多个环境时请选择目标）',
+                                      status.activeProfileName ? `Auto · ${status.activeProfileName}` : 'Auto (select a target when multiple profiles run)',
                                   )}
                         </option>
                         {runningProfiles.map((item) => (
@@ -1076,24 +1119,25 @@ const AutomationSettingsPanel: React.FC = () => {
                                         onClick={() => void handleCopyToken()}
                                     />
                                 </Tooltip>
-                                <Tooltip
-                                    content={t(
-                                        '重置密钥并立即断开旧连接',
-                                        'Reset token and disconnect existing sessions',
-                                    )}
-                                    relationship="label"
-                                >
-                                    <Button
-                                        type="button"
-                                        size="small"
-                                        appearance="subtle"
-                                        data-testid="automation-rotate-token"
-                                        icon={<ArrowClockwiseRegular />}
-                                        aria-label={t('重置密钥', 'Reset token')}
-                                        disabled={controlsDisabled}
-                                        onClick={() => void handleRotateToken()}
-                                    />
-                                </Tooltip>
+                                <Menu>
+                                    <MenuTrigger disableButtonEnhancement>
+                                        <Button
+                                            size="small"
+                                            appearance="subtle"
+                                            icon={<MoreHorizontalRegular />}
+                                            aria-label={t('更多密钥操作', 'More token actions')}
+                                            data-testid="automation-token-menu"
+                                            disabled={controlsDisabled}
+                                        />
+                                    </MenuTrigger>
+                                    <MenuPopover>
+                                        <MenuList>
+                                            <MenuItem data-testid="automation-rotate-token" onClick={() => setResetOpen(true)}>
+                                                {t('重置密钥', 'Reset token')}
+                                            </MenuItem>
+                                        </MenuList>
+                                    </MenuPopover>
+                                </Menu>
                             </div>
                         </div>
                     </>
@@ -1131,6 +1175,7 @@ const AutomationSettingsPanel: React.FC = () => {
                                 )
                             }
                             iconPosition="after"
+                            aria-expanded={snippetsOpen}
                             onClick={() => setSnippetsOpen((prev) => !prev)}
                         >
                             {snippetsOpen
@@ -1145,7 +1190,7 @@ const AutomationSettingsPanel: React.FC = () => {
                         <div className={styles.snippetToolbar}>
                             <div
                                 className={styles.pillTabsBar}
-                                role="tablist"
+                                role="tablist" onKeyDown={moveTabFocus}
                                 aria-label={t(
                                     '接入标准选择',
                                     'Integration standard',
@@ -1158,7 +1203,7 @@ const AutomationSettingsPanel: React.FC = () => {
                                             key={tab.id}
                                             type="button"
                                             role="tab"
-                                            aria-selected={active}
+                                            aria-selected={active} tabIndex={active ? 0 : -1}
                                             data-testid={tab.testId}
                                             className={mergeClasses(
                                                 styles.pillTab,
@@ -1174,6 +1219,9 @@ const AutomationSettingsPanel: React.FC = () => {
                                 })}
                             </div>
 
+                            <Button size="small" appearance="subtle" onClick={() => void handleCopySnippet(true)}>
+                                {t('复制模板', 'Copy template')}
+                            </Button>
                             <Button
                                 type="button"
                                 size="small"
@@ -1190,7 +1238,7 @@ const AutomationSettingsPanel: React.FC = () => {
                             >
                                 {copiedKey === snippetTab
                                     ? t('已复制', 'Copied')
-                                    : t('复制', 'Copy')}
+                                    : authRequired ? t('复制含密钥配置', 'Copy with token') : t('复制配置', 'Copy configuration')}
                             </Button>
                         </div>
 

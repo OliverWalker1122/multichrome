@@ -489,6 +489,25 @@ export function validateOptionalString(
     return trimmed;
 }
 
+function checkKeys(args, keys) {
+    if (Object.keys(args).some((key) => !keys.includes(key))) {
+        throw createValidationError('Unknown tool argument', 'INVALID_INPUT', 400);
+    }
+}
+
+export function validateProfileAction(args, start = false) {
+    checkKeys(args, start ? ['profileId', 'name', 'setActive'] : ['profileId', 'name']);
+    const profileId = args.profileId == null ? undefined : validateUuid(args.profileId, 'profileId');
+    const name = validateOptionalString(args.name, 'name', { maxLength: 120 });
+    if (Boolean(profileId) === Boolean(name)) {
+        throw createValidationError('Exactly one of profileId or name is required', 'INVALID_INPUT', 400);
+    }
+    if (start && args.setActive !== undefined && typeof args.setActive !== 'boolean') {
+        throw createValidationError('setActive must be a boolean', 'INVALID_INPUT', 400);
+    }
+    return { profileId, name, ...(start ? { setActive: args.setActive ?? true } : {}) };
+}
+
 const VALID_PROFILE_STATUS_FILTERS = new Set(['all', 'running', 'stopped']);
 
 export function validateProfileListFilters(raw = {}) {
@@ -498,6 +517,15 @@ export function validateProfileListFilters(raw = {}) {
             'INVALID_FILTER',
             400,
         );
+    }
+    checkKeys(raw, ['group', 'tag', 'query', 'status', 'view', 'limit', 'offset']);
+    if (raw.view !== undefined && !['summary', 'detail'].includes(raw.view)) {
+        throw createValidationError('Invalid profile view', 'INVALID_FILTER', 400);
+    }
+    for (const [key, min, max] of [['limit', 1, 200], ['offset', 0, Number.MAX_SAFE_INTEGER]]) {
+        if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || raw[key] < min || raw[key] > max)) {
+            throw createValidationError('Invalid pagination parameter', 'INVALID_FILTER', 400);
+        }
     }
     const group = validateOptionalString(raw.group, 'group', { maxLength: 120 });
     const tag = validateOptionalString(raw.tag, 'tag', { maxLength: 60 });
@@ -521,5 +549,8 @@ export function validateProfileListFilters(raw = {}) {
         tag: tag || undefined,
         status: rawStatus,
         query: query || undefined,
+        ...(raw.view && { view: raw.view }),
+        ...(raw.limit !== undefined && { limit: raw.limit }),
+        ...(raw.offset !== undefined && { offset: raw.offset }),
     };
 }

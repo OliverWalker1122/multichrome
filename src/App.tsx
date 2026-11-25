@@ -503,7 +503,7 @@ const AppShell: React.FC = () => {
                                         typeof open === 'boolean' ? open : !prev,
                                     )
                                 }
-                                narrowWindow={lifecycle.contentWidth < 920}
+                                narrowWindow={lifecycle.contentWidth - (proxyDetailsOpen && !overlayDetails ? 348 : 0) < 990}
                                 overlayDetails={overlayDetails}
                                 onRefreshProxies={lifecycle.triggerProxyRefresh}
                                 onEnvironmentChanged={

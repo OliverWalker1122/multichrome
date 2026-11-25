@@ -44,7 +44,7 @@ async function packageWindows({ outputDirectory, expectedVersion } = {}) {
                 // Signing remains disabled through this explicit no-op signer.
                 signAndEditExecutable: true,
                 forceCodeSigning: false,
-                sign: async () => {},
+                signtoolOptions: { sign: async () => {} },
             },
         },
     });
@@ -95,6 +95,8 @@ async function packageWindows({ outputDirectory, expectedVersion } = {}) {
             throw new Error(`Missing bundled application module: ${relPath}`);
         }
     }
+    const { verifyPackagedBridge } = await import('./verify-mcp-clients.mjs');
+    await verifyPackagedBridge(resources);
     console.log('WINDOWS_PACKAGE_VERIFIED');
     return output;
 }

@@ -270,8 +270,12 @@ export function createCdpGuard({
         let resolved;
         try {
             resolved = await backend.resolveGuardedCdpTarget(
-                wsRoute.profileId,
+                wsRoute.isActiveSlot ? null : wsRoute.profileId,
             );
+            if (wsRoute.isActiveSlot && wsRoute.profileId && wsRoute.profileId !== resolved.profileId) {
+                writeUpgradeError(socket, 409, 'Conflict', 'Active profile changed. Refresh discovery.');
+                return;
+            }
         } catch (err) {
             const statusCode =
                 err &&
@@ -347,6 +351,13 @@ export function createCdpGuard({
             opened = true;
             clearTimeout(connectTimer);
 
+            // Discovery and the upstream connection may straddle an active-target switch.
+            const snapshot = wsRoute.isActiveSlot && backend.getActiveTargetSnapshot?.();
+            if (snapshot && snapshot.activeProfileId !== resolved.profileId) {
+                upstreamWs.terminate();
+                writeUpgradeError(socket, 409, 'Conflict', 'Active profile changed. Refresh discovery.');
+                return;
+            }
             wss.handleUpgrade(req, socket, head, (clientWs) => {
                 const entry = {
                     profileId: resolved.profileId,

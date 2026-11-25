@@ -65,6 +65,7 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
     '代理服务正在退出': 'Proxy service is shutting down',
     '代理配置无效': 'Invalid proxy configuration',
     '代理输入方式无效': 'Invalid proxy input mode',
+    '系统安全存储无法解密代理地址': 'OS secure storage could not decrypt the proxy address',
     '系统安全存储不可用，无法保存代理配置':
         'OS secure storage is unavailable; unable to save proxy configuration',
     '代理配置加密失败': 'Failed to encrypt proxy configuration',

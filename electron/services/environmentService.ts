@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { reserveProfileDirectory } from '../drivers/profileDirectory.js';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import log from 'electron-log';
@@ -113,6 +114,7 @@ export class EnvironmentService {
             options?.repository ||
             new EnvironmentRepository({
                 appDataPath,
+                proxyAddresses: this.settingsManager.proxyAddresses,
                 defaultChromeExecutable: findSystemChromeExecutable(),
             });
 
@@ -146,6 +148,14 @@ export class EnvironmentService {
 
     public getSystemChromePath(): string {
         return this.launchService.getSystemChromePath();
+    }
+
+    private reserveDirectory(importedId?: string) {
+        return reserveProfileDirectory(this.environmentsDataDir, (directory: string) => this.repository.hasDataDir(directory), importedId);
+    }
+
+    public getActiveEnvironment(id: string): ChromeEnvironment | null {
+        return this.repository.findActiveById(id, this.launchService.isRunning(id));
     }
 
     public async getAllEnvironments(): Promise<ChromeEnvironment[]> {
@@ -182,10 +192,7 @@ export class EnvironmentService {
         },
     ): Promise<ChromeEnvironment> {
         try {
-            const id = uuidv4();
-            const envId = id.substring(0, 8);
-            const dataDir = path.join(this.environmentsDataDir, envId);
-            fs.mkdirSync(dataDir, { recursive: true });
+            const { id, dataDir } = this.reserveDirectory();
 
             const now = new Date().toISOString();
             const fpDefaults = normalizeDefaultFingerprintSettings(
@@ -256,10 +263,7 @@ export class EnvironmentService {
                 throw new Error('源环境不存在或已移入回收站');
             }
 
-            const id = uuidv4();
-            const envId = id.substring(0, 8);
-            const dataDir = path.join(this.environmentsDataDir, envId);
-            fs.mkdirSync(dataDir, { recursive: true });
+            const { id, dataDir } = this.reserveDirectory();
 
             const now = new Date().toISOString();
             const fpDefaults = normalizeDefaultFingerprintSettings(
@@ -658,10 +662,7 @@ export class EnvironmentService {
         const baseTime = Date.now();
         for (let i = 0; i < specs.length; i += 1) {
             const spec = specs[i];
-            const id = uuidv4();
-            const envId = id.substring(0, 8);
-            const dataDir = path.join(this.environmentsDataDir, envId);
-            fs.mkdirSync(dataDir, { recursive: true });
+            const { id, dataDir } = this.reserveDirectory();
             const iso = new Date(baseTime + i).toISOString();
             const env: ChromeEnvironment = {
                 id,
@@ -784,74 +785,82 @@ export class EnvironmentService {
         let restoredCount = 0;
         let skippedCount = 0;
 
-        for (const raw of envs) {
-            const id =
-                typeof raw?.id === 'string' && raw.id.trim()
-                    ? raw.id.trim()
-                    : uuidv4();
-            if (this.repository.findAnyById(id, false)) {
-                skippedCount += 1;
-                continue;
+        const reserved: string[] = [];
+        try {
+            this.repository.transaction(() => {
+                for (const raw of envs) {
+                    const id =
+                        typeof raw?.id === 'string' && raw.id.trim()
+                            ? raw.id.trim()
+                            : uuidv4();
+                    if (this.repository.findAnyById(id, false)) {
+                        skippedCount += 1;
+                        continue;
+                    }
+                    const name =
+                        typeof raw?.name === 'string' && raw.name.trim()
+                            ? raw.name.trim()
+                            : `Profile ${id.substring(0, 6)}`;
+                    const groupName =
+                        typeof raw?.groupName === 'string' && raw.groupName.trim()
+                            ? raw.groupName.trim()
+                            : '默认分组';
+                    const { dataDir } = this.reserveDirectory(id);
+                    reserved.push(dataDir);
+                    const now = new Date().toISOString();
+                    const env: ChromeEnvironment = {
+                        id,
+                        name,
+                        groupName,
+                        notes: typeof raw?.notes === 'string' ? raw.notes : '',
+                        dataDir,
+                        tags: normalizeEnvironmentTags(raw?.tags),
+                        proxy: typeof raw?.proxy === 'string' ? raw.proxy : undefined,
+                        proxyId:
+                            typeof raw?.proxyId === 'string' ? raw.proxyId : undefined,
+                        proxyLabel:
+                            typeof raw?.proxyLabel === 'string'
+                                ? raw.proxyLabel
+                                : undefined,
+                        userAgent:
+                            typeof raw?.userAgent === 'string'
+                                ? raw.userAgent
+                                : undefined,
+                        timezone:
+                            typeof raw?.timezone === 'string'
+                                ? raw.timezone
+                                : undefined,
+                        language:
+                            typeof raw?.language === 'string'
+                                ? raw.language
+                                : undefined,
+                        startupUrl:
+                            typeof raw?.startupUrl === 'string'
+                                ? raw.startupUrl
+                                : undefined,
+                        browserEngine: normalizeBrowserEngine(
+                            raw?.browserEngine || fpDefaults.defaultEngine,
+                        ) as BrowserEngineType,
+                        fingerprintConfig: normalizeFingerprintConfig(
+                            raw?.fingerprintConfig,
+                            fpDefaults,
+                        ) as FingerprintConfig,
+                        createdAt:
+                            typeof raw?.createdAt === 'string' ? raw.createdAt : now,
+                        lastUsed:
+                            typeof raw?.lastUsed === 'string' ? raw.lastUsed : now,
+                        isRunning: false,
+                    };
+                    this.repository.insert(env);
+                    restoredCount += 1;
+                }
+            });
+        } catch (error) {
+            for (const directory of reserved) {
+                // rmdir only accepts empty directories reserved by this transaction.
+                try { fs.rmdirSync(directory); } catch { log.warn('Could not release an empty restore directory'); }
             }
-            const name =
-                typeof raw?.name === 'string' && raw.name.trim()
-                    ? raw.name.trim()
-                    : `Profile ${id.substring(0, 6)}`;
-            const groupName =
-                typeof raw?.groupName === 'string' && raw.groupName.trim()
-                    ? raw.groupName.trim()
-                    : '默认分组';
-            const dataDir = path.join(
-                this.environmentsDataDir,
-                id.substring(0, 8),
-            );
-            fs.mkdirSync(dataDir, { recursive: true });
-            const now = new Date().toISOString();
-            const env: ChromeEnvironment = {
-                id,
-                name,
-                groupName,
-                notes: typeof raw?.notes === 'string' ? raw.notes : '',
-                dataDir,
-                tags: normalizeEnvironmentTags(raw?.tags),
-                proxy: typeof raw?.proxy === 'string' ? raw.proxy : undefined,
-                proxyId:
-                    typeof raw?.proxyId === 'string' ? raw.proxyId : undefined,
-                proxyLabel:
-                    typeof raw?.proxyLabel === 'string'
-                        ? raw.proxyLabel
-                        : undefined,
-                userAgent:
-                    typeof raw?.userAgent === 'string'
-                        ? raw.userAgent
-                        : undefined,
-                timezone:
-                    typeof raw?.timezone === 'string'
-                        ? raw.timezone
-                        : undefined,
-                language:
-                    typeof raw?.language === 'string'
-                        ? raw.language
-                        : undefined,
-                startupUrl:
-                    typeof raw?.startupUrl === 'string'
-                        ? raw.startupUrl
-                        : undefined,
-                browserEngine: normalizeBrowserEngine(
-                    raw?.browserEngine || fpDefaults.defaultEngine,
-                ) as BrowserEngineType,
-                fingerprintConfig: normalizeFingerprintConfig(
-                    raw?.fingerprintConfig,
-                    fpDefaults,
-                ) as FingerprintConfig,
-                createdAt:
-                    typeof raw?.createdAt === 'string' ? raw.createdAt : now,
-                lastUsed:
-                    typeof raw?.lastUsed === 'string' ? raw.lastUsed : now,
-                isRunning: false,
-            };
-            this.repository.insert(env);
-            restoredCount += 1;
+            throw error;
         }
         return { restoredCount, skippedCount };
     }
@@ -949,7 +958,12 @@ export class EnvironmentService {
                 return false;
             }
             if (fs.existsSync(env.dataDir)) {
-                fs.rmSync(env.dataDir, { recursive: true, force: true });
+                await fs.promises.rm(env.dataDir, {
+                    recursive: true,
+                    force: true,
+                    maxRetries: 6,
+                    retryDelay: 150,
+                });
             }
             log.info(`永久删除Chrome环境: ${env.name} (${id})`);
             return true;
@@ -969,7 +983,12 @@ export class EnvironmentService {
             let cleanedCount = 0;
             for (const env of envs) {
                 if (fs.existsSync(env.dataDir)) {
-                    fs.rmSync(env.dataDir, { recursive: true, force: true });
+                    await fs.promises.rm(env.dataDir, {
+                        recursive: true,
+                        force: true,
+                        maxRetries: 6,
+                        retryDelay: 150,
+                    });
                 }
                 cleanedCount += 1;
             }
@@ -1042,7 +1061,7 @@ export class EnvironmentService {
                 );
                 if (migrated.changed) {
                     await this.settingsManager.saveSettings({
-                        ...currentSettings,
+                        dataPath: currentSettings.dataPath,
                         groupStartupUrls: migrated.next,
                     });
                 }
@@ -1084,7 +1103,7 @@ export class EnvironmentService {
                 );
                 if (cleaned.changed) {
                     await this.settingsManager.saveSettings({
-                        ...currentSettings,
+                        dataPath: currentSettings.dataPath,
                         groupStartupUrls: cleaned.next,
                     });
                 }

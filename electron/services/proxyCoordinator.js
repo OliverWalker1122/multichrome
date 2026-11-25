@@ -11,16 +11,16 @@ export class ProxyCoordinator {
         this.chromeManager = chromeManager;
         this.pending = Promise.resolve();
         this.activeLaunches = new Set();
+        this.profileOperations = new Map();
         this.closing = false;
         this.shutdownPromise = null;
     }
 
     run(operation) {
         if (this.closing) return Promise.reject(new Error('程序正在退出'));
+        const precedingLaunches = [...this.activeLaunches];
         const result = this.pending.then(async () => {
-            if (this.activeLaunches.size > 0) {
-                await Promise.allSettled([...this.activeLaunches]);
-            }
+            await Promise.allSettled(precedingLaunches);
             return operation();
         });
         this.pending = result.catch(() => {});
@@ -42,6 +42,17 @@ export class ProxyCoordinator {
         return launchPromise;
     }
 
+    runForProfile(id, operation) {
+        const preceding = this.profileOperations.get(id) || Promise.resolve();
+        const result = this.runLaunch(() => preceding.then(operation));
+        const settled = result.catch(() => {});
+        this.profileOperations.set(id, settled);
+        settled.then(() => {
+            if (this.profileOperations.get(id) === settled) this.profileOperations.delete(id);
+        });
+        return result;
+    }
+
     async assertProxyUnused(id, removing = false) {
         const bindings = await this.chromeManager.getProxyBindings();
         if (
@@ -49,11 +60,13 @@ export class ProxyCoordinator {
                 (item) => item.proxyId === id && (removing || item.isRunning),
             )
         ) {
-            throw new Error(
+            const error = new Error(
                 removing
                     ? '请先解除所有环境与此代理的绑定（包括回收站中的环境）'
                     : '仍有环境正在使用此代理，请先关闭对应浏览器',
             );
+            error.code = 'PROXY_IN_USE';
+            throw error;
         }
     }
 

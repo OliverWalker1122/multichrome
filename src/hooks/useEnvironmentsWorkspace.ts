@@ -144,6 +144,10 @@ export function useEnvironmentsWorkspace({
         (value): value is number =>
             typeof value === 'number' && value >= 160 && value <= 480,
     );
+    const [groupWidth, setGroupWidth] = useSavedTableValue(
+        'multichrome.env.groupWidth', 124,
+        (value): value is number => typeof value === 'number' && value >= 88 && value <= 480,
+    );
     const [proxyWidth, setProxyWidth] = useSavedTableValue(
         'multichrome.env.proxyWidth',
         184,
@@ -257,7 +261,9 @@ export function useEnvironmentsWorkspace({
                         : isEn
                           ? `Closed all ${closedCount} running environment(s)`
                           : `已关闭全部 ${closedCount} 个运行中环境`
-                    : t('当前没有运行中的环境', 'No running environments'),
+                    : failedCount > 0
+                      ? t(`关闭失败：${failedCount} 个环境仍需检查`, `Failed to close ${failedCount} environments`)
+                      : t('当前没有运行中的环境', 'No running environments'),
             );
         } catch (error) {
             showNotification(
@@ -369,12 +375,6 @@ export function useEnvironmentsWorkspace({
         [environments],
     );
 
-    const { selected: selectedEnv, rowProps } = useTableSelection(
-        filtered,
-        selectedEnvId,
-        onSelectEnv,
-        () => onToggleDetails(true),
-    );
     const {
         containerRef: tableWrapRef,
         visibleItems: visibleEnvironments,
@@ -382,11 +382,20 @@ export function useEnvironmentsWorkspace({
         topSpacerHeight,
         bottomSpacerHeight,
         isVirtualized,
+        scrollToIndex,
     } = useVirtualRows(filtered, {
         rowHeight: 50,
         overscan: 8,
         threshold: 80,
     });
+    const { selected: selectedEnv, rowProps } = useTableSelection(
+        filtered,
+        selectedEnvId,
+        onSelectEnv,
+        () => onToggleDetails(true),
+        scrollToIndex,
+    );
+
 
     const handleRunToggle = async (env: ChromeEnvironment) => {
         if (busyId) return;
@@ -511,10 +520,9 @@ export function useEnvironmentsWorkspace({
             );
             const stopped = results.filter(Boolean).length;
             showNotification(
-                'success',
-                isEn
-                    ? `Stopped ${stopped} environment(s)`
-                    : `已关闭 ${stopped} 个环境`,
+                stopped === targets.length ? 'success' : stopped ? 'warning' : 'error',
+                t(`已关闭 ${stopped} 个环境，失败 ${targets.length - stopped} 个`,
+                  `Stopped ${stopped} environments, ${targets.length - stopped} failed`),
             );
         } finally {
             setBatchBusy(false);
@@ -668,6 +676,8 @@ export function useEnvironmentsWorkspace({
         setSortOrder,
         nameWidth,
         setNameWidth,
+        groupWidth,
+        setGroupWidth,
         proxyWidth,
         setProxyWidth,
         optionalColumns,

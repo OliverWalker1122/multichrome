@@ -4,7 +4,7 @@ English · [简体中文](development_zh.md)
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22.23.4 (the version used by CI)
 - npm 9+
 - Git
 
@@ -73,6 +73,16 @@ npm run package:win    # Windows x64 NSIS installer
 npm run package:mac    # macOS .dmg / .zip
 npm run package:linux  # Linux .AppImage / .deb
 ```
+
+## Desktop UI conventions
+
+| Area | Implementation |
+| --- | --- |
+| Materials and spacing | Reuse the [Win11 theme](../src/theme/win11Theme.ts) and [semantic colors](../src/theme/semanticColors.css). Use `--glass-shell`, `--glass-workspace` and `--glass-card` for their respective surfaces. Standard cards use a 14px radius, 16px 18px padding, a 1px `--glass-border` and `--glass-shadow`. Allow one inner surface with `--glass-card-inner` and an 8–10px radius. Use `--glass-pill` for chips. |
+| Color and status | Use 24×24px section icons with a 7px radius. Apply semantic colors through `getToneStyle` to icons and chips. Check light, dark and forced-colors modes. Use tinted Fluent badges with text for success, warning, failure and neutral states. |
+| Settings and help | Give ordinary settings rows a minimum height of 34px, a label on the left, a control on the right and a 1px `colorNeutralStroke2` divider. Put technical details in [InfoTip](../src/components/common/InfoTip.tsx). Keep advanced settings and connection examples collapsed initially, show a summary and update `aria-expanded` on the toggle. |
+| Copy and actions | Give each title or button a single purpose, such as “Health check” or “Import local file”. Put protocol and algorithm details in help text or examples. Avoid slash-separated synonyms. Use a clear primary action and subtle buttons, accessible labeled icon buttons with tooltips, or an overflow menu for secondary actions. Show Save on immediate-effect tabs only when a draft has changes. |
+| Layout and input | Show code in a single inner surface with `white-space: pre-wrap`. Verify action columns, dialogs and drawers at narrow widths. Keep keyboard focus visible and support arrows, Home and End on tabs. Use 100–140ms transitions and respect `prefers-reduced-motion`. |
 
 ## Contributor Notes
 

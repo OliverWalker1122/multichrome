@@ -205,6 +205,7 @@ try {
 
         // 本地 CDP 透传守卫与 MCP 服务
         automation: {
+            testConnection: () => ipcRenderer.invoke('automation:test-connection'),
             getStatus: () => ipcRenderer.invoke('automation:get-status'),
             updateConfig: (patch) =>
                 ipcRenderer.invoke('automation:update-config', patch),

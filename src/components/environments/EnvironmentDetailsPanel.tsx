@@ -1,3 +1,4 @@
+import { useDraftField } from '../../hooks/useDraftField';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Button,
@@ -106,24 +107,26 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
     const keyboardProps = useDetailsKeyboard(overlay, onClose);
     const { showNotification } = useNotification();
 
-    const [name, setName] = useState(environment.name);
-    const [groupName, setGroupName] = useState(environment.groupName);
-    const [tags, setTags] = useState<string[]>(
+    const [name, setName] = useDraftField(environment.name, environment.id);
+    const [groupName, setGroupName] = useDraftField(environment.groupName, environment.id);
+    const [tags, setTags] = useDraftField<string[]>(
         normalizeEnvironmentTags(environment.tags),
+        environment.id,
     );
-    const [proxyId, setProxyId] = useState(environment.proxyId || '');
-    const [proxy, setProxy] = useState(environment.proxy || '');
-    const [proxyLabel, setProxyLabel] = useState(environment.proxyLabel || '');
-    const [timezone, setTimezone] = useState(environment.timezone || '');
-    const [language, setLanguage] = useState(environment.language || '');
-    const [startupUrl, setStartupUrl] = useState(environment.startupUrl || '');
-    const [notes, setNotes] = useState(environment.notes || '');
-    const [browserEngine, setBrowserEngine] = useState<BrowserEngineType>(
+    const [proxyId, setProxyId] = useDraftField(environment.proxyId || '', environment.id);
+    const [proxy, setProxy] = useDraftField(environment.proxy || '', environment.id);
+    const [proxyLabel, setProxyLabel] = useDraftField(environment.proxyLabel || '', environment.id);
+    const [timezone, setTimezone] = useDraftField(environment.timezone || '', environment.id);
+    const [language, setLanguage] = useDraftField(environment.language || '', environment.id);
+    const [startupUrl, setStartupUrl] = useDraftField(environment.startupUrl || '', environment.id);
+    const [notes, setNotes] = useDraftField(environment.notes || '', environment.id);
+    const [browserEngine, setBrowserEngine] = useDraftField<BrowserEngineType>(
         environment.browserEngine || 'system-chrome',
+        environment.id,
     );
-    const [fingerprintConfig, setFingerprintConfig] = useState<
+    const [fingerprintConfig, setFingerprintConfig] = useDraftField<
         FingerprintConfig | undefined
-    >(environment.fingerprintConfig);
+    >(environment.fingerprintConfig, environment.id);
     const [regenerating, setRegenerating] = useState(false);
     const [saving, setSaving] = useState(false);
     const [saveError, setSaveError] = useState('');
@@ -133,35 +136,6 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
     const [clearingCache, setClearingCache] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [showFpDetails, setShowFpDetails] = useState(false);
-
-    useEffect(() => {
-        setName(environment.name);
-        setGroupName(environment.groupName);
-        setTags(normalizeEnvironmentTags(environment.tags));
-        setProxyId(environment.proxyId || '');
-        setProxy(environment.proxy || '');
-        setProxyLabel(environment.proxyLabel || '');
-        setTimezone(environment.timezone || '');
-        setLanguage(environment.language || '');
-        setStartupUrl(environment.startupUrl || '');
-        setNotes(environment.notes || '');
-        setFingerprintConfig(environment.fingerprintConfig);
-        setBrowserEngine(environment.browserEngine || 'system-chrome');
-    }, [
-        environment.id,
-        environment.name,
-        environment.groupName,
-        environment.tags,
-        environment.proxyId,
-        environment.proxy,
-        environment.proxyLabel,
-        environment.timezone,
-        environment.language,
-        environment.startupUrl,
-        environment.notes,
-        environment.fingerprintConfig,
-        environment.browserEngine,
-    ]);
 
     const existingTagSuggestions = useMemo(
         () => collectTagStats(allEnvironments).map((item) => item.tag),

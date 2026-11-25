@@ -141,7 +141,10 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         (detailsOpen && ws.selectedEnv && !overlayDetails
             ? ENV_DETAILS_WIDTH
             : 0);
-    const narrowWindow = listWidth < 810;
+    const actionWidth = ws.filtered.some(env => env.isRunning) ? 156 : 120;
+    const baseColumnsWidth = 44 + ws.nameWidth + 88 + ws.proxyWidth + 100 + actionWidth +
+        (currentGroup === '用户分组' ? ws.groupWidth : 0);
+    const narrowWindow = listWidth < Math.max(810, baseColumnsWidth + 24);
     const activeOptionalCols = narrowWindow ? [] : ws.optionalColumns;
     const showGroupCol = !narrowWindow && currentGroup === '用户分组';
     const showLastUsedCol = !narrowWindow;
@@ -179,6 +182,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     const selectedEnvs = environments.filter((item) =>
         ws.selectedIds.has(item.id),
     );
+    const visibleSelectionCount = ws.filtered.filter(item => ws.selectedIds.has(item.id)).length;
+    const hiddenSelectionCount = selectedEnvs.length - visibleSelectionCount;
     const selectedRunningCount = selectedEnvs.filter(
         (item) => item.isRunning,
     ).length;
@@ -237,7 +242,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             color="brand"
                             className={styles.batchCountLabel}
                         >
-                            {isEn
+                            {hiddenSelectionCount > 0 ? t(`可见 ${visibleSelectionCount}，隐藏 ${hiddenSelectionCount}`, `${visibleSelectionCount} visible, ${hiddenSelectionCount} hidden`) : isEn
                                 ? `${ws.activeSelectedIds.length} selected`
                                 : `已选 ${ws.activeSelectedIds.length} 项`}
                         </Badge>
@@ -439,11 +444,11 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     : 44 +
                                       ws.nameWidth +
                                       88 +
-                                      (showGroupCol ? 88 : 0) +
+                                      (showGroupCol ? ws.groupWidth : 0) +
                                       (showProxyCol ? ws.proxyWidth : 0) +
                                       optionalColsWidth +
                                       (showLastUsedCol ? 100 : 0) +
-                                      160,
+                                      actionWidth,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -501,9 +506,10 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     {showGroupCol && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: '88px' }}
+                                            style={{ width: ws.groupWidth }}
                                         >
                                             {t('分组', 'Group')}
+                                            <ColumnResizeHandle label={t('分组', 'Group')} width={ws.groupWidth} min={88} onChange={ws.setGroupWidth} />
                                         </th>
                                     )}
                                     {showProxyCol && (
@@ -579,7 +585,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: '160px' }}
+                                        style={{ width: actionWidth }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>

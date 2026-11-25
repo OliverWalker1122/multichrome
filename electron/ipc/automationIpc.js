@@ -5,6 +5,7 @@ export function registerAutomationIpc({ ipcMain, integration }) {
     if (!integration) {
         throw new Error('registerAutomationIpc requires integration');
     }
+    ipcMain.handle('automation:test-connection', () => integration.testConnection());
     ipcMain.handle('automation:get-status', () => integration.getStatus());
     ipcMain.handle('automation:update-config', (_, patch) =>
         integration.updateConfig(patch),

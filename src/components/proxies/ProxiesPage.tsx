@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ConfirmAction } from '../common/ConfirmAction';
 import {
     Badge,
     Button,
@@ -88,6 +89,10 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
         onEnvironmentChanged,
     });
 
+    const [removal, setRemoval] = useState<string[] | null>(null);
+    const visibleSelected = ctrl.filtered.filter(p => ctrl.selectedProxyIds.has(p.id)).length;
+    const hiddenSelected = ctrl.activeSelectedProxyIds.length - visibleSelected;
+
     return (
         <div className={styles.workspace}>
             <section
@@ -134,7 +139,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                     color: tokens.colorPaletteRedForeground1,
                                 }}
                                 disabled={!!ctrl.busy || !!ctrl.batchChecking}
-                                onClick={ctrl.handleBatchRemoveSelected}
+                                onClick={() => setRemoval([...ctrl.activeSelectedProxyIds])}
                             >
                                 <Badge
                                     size="small"
@@ -142,7 +147,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                     color="danger"
                                     style={{ marginRight: '6px' }}
                                 >
-                                    {ctrl.activeSelectedProxyIds.length}
+                                    {hiddenSelected ? t(`可见 ${visibleSelected}，隐藏 ${hiddenSelected}`, `${visibleSelected} visible, ${hiddenSelected} hidden`) : ctrl.activeSelectedProxyIds.length}
                                 </Badge>
                                 {t('批量删除', 'Remove Selected')}
                             </Button>
@@ -285,25 +290,17 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                 color: tokens.colorNeutralForeground1,
                             }}
                         >
-                            {ctrl.search.trim()
-                                ? t('未找到匹配的代理', 'No matching proxies')
-                                : t(
-                                      '还没有配置代理',
-                                      'No proxies configured yet',
-                                  )}
+                            {proxies.length > 0
+                                ? t('没有匹配的代理', 'No matching proxies')
+                                : t('还没有配置代理', 'No proxies configured yet')}
                         </span>
-                        <span style={{ fontSize: '12px' }}>
-                            {ctrl.search.trim()
-                                ? t(
-                                      '尝试更换代理名称、协议或出口 IP 关键词。',
-                                      'Try a different name, protocol, or exit IP keyword.',
-                                  )
-                                : t(
-                                      '支持粘贴一行地址或分享链接（HTTP、SOCKS5、VLESS、VMess、Trojan、SS、Hy2、TUIC），也支持 sing-box 出口 JSON。',
-                                      'Paste a single line or share URI (HTTP, SOCKS5, VLESS, VMess, Trojan, SS, Hy2, TUIC), or sing-box outbound JSON.',
-                                  )}
-                        </span>
-                        {!ctrl.search.trim() && (
+                        {proxies.length > 0 && (
+                            <Button appearance="subtle" onClick={() => {
+                                ctrl.setSearch('');
+                                ctrl.setStatusFilter('all');
+                            }}>{t('清除筛选', 'Clear filters')}</Button>
+                        )}
+                        {proxies.length === 0 && (
                             <Button
                                 appearance="primary"
                                 icon={<AddRegular />}
@@ -600,6 +597,13 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                 onSubmit={() => void ctrl.handleBatchImport()}
             />
 
+            {removal && (
+                <ConfirmAction title={t('永久删除所选代理？', 'Permanently delete selected proxies?')}
+                    action={t('删除', 'Delete')} onCancel={() => setRemoval(null)}
+                    onConfirm={() => { ctrl.handleBatchRemoveSelected(removal); setRemoval(null); }}>
+                    {proxies.filter(p => removal.includes(p.id)).map(p => p.name).join(' · ')}
+                </ConfirmAction>
+            )}
             <ProxyActionDialogs
                 styles={styles}
                 busy={ctrl.busy}

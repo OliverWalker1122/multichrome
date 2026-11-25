@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { requestHeaders } from '../domain/mcpProtocol.js';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
@@ -72,6 +73,7 @@ export async function forwardJsonRpcOverHttp(
         token = process.env.MULTICHROME_API_TOKEN || '',
         fetchImpl = globalThis.fetch,
         timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+        negotiatedVersion,
     } = {},
 ) {
     if (typeof fetchImpl !== 'function') {
@@ -156,6 +158,7 @@ export async function forwardJsonRpcOverHttp(
 
     try {
         const headers = {
+            ...requestHeaders(requestObj, negotiatedVersion),
             'Content-Type': 'application/json',
             Accept: 'application/json, text/event-stream',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -296,7 +299,9 @@ export async function runStdioBridge({
         crlfDelay: Infinity,
     });
 
-    let queue = Promise.resolve();
+    let writes = Promise.resolve();
+    let negotiatedVersion;
+    const pending = new Set();
 
     const processLine = async (line) => {
         const trimmed = line.trim();
@@ -307,7 +312,9 @@ export async function runStdioBridge({
             token,
             fetchImpl,
             timeoutMs,
+            negotiatedVersion,
         });
+        if (outcome.response?.result?.protocolVersion) negotiatedVersion = outcome.response.result.protocolVersion;
 
         if (outcome.error && errorOutput && typeof errorOutput.write === 'function') {
             errorOutput.write(`[multichrome-mcp] ${outcome.error}\n`);
@@ -320,25 +327,20 @@ export async function runStdioBridge({
         }
     };
 
-    return new Promise((resolve, reject) => {
-        rl.on('line', (line) => {
-            queue = queue.then(() => processLine(line)).catch((err) => {
-                if (errorOutput && typeof errorOutput.write === 'function') {
-                    errorOutput.write(
-                        `[multichrome-mcp] ${sanitizeAutomationErrorMessage(err)}\n`,
-                    );
-                }
-            });
-        });
-
-        rl.on('close', () => {
-            queue.then(() => resolve()).catch(reject);
-        });
-
-        rl.on('error', (err) => {
-            reject(err);
-        });
-    });
+    for await (const line of rl) {
+        let message;
+        try { message = JSON.parse(line); } catch { /* processLine returns the parse error */ }
+        const readOnly = ['ping', 'tools/list', 'resources/list', 'resources/read', 'server/discover'].includes(message?.method)
+            || (message?.method === 'tools/call' && message.params?.name === 'list_profiles');
+        const task = (readOnly ? Promise.resolve() : writes).then(() => processLine(line));
+        const settled = task.catch((error) => errorOutput?.write('[multichrome-mcp] ' + sanitizeAutomationErrorMessage(error) + '\n'));
+        if (!readOnly) writes = settled;
+        pending.add(settled);
+        settled.finally(() => pending.delete(settled));
+        if (message?.method === 'initialize') await settled;
+        if (pending.size >= 8) await Promise.race(pending);
+    }
+    await Promise.all(pending);
 }
 
 const isDirectEntry =

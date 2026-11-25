@@ -123,10 +123,14 @@ export class EnvironmentRepository {
     private readonly db: Database.Database;
     private readonly binaryStore: Store<{ chromeExecutablePath: unknown }>;
 
+    private readonly proxyAddresses: import('./settingsRepository.js').SettingsManager['proxyAddresses'];
+
     constructor(options: {
         appDataPath: string;
+        proxyAddresses: import('./settingsRepository.js').SettingsManager['proxyAddresses'];
         defaultChromeExecutable?: string;
     }) {
+        this.proxyAddresses = options.proxyAddresses;
         const dbPath = path.join(options.appDataPath, 'chrome-environments.db');
         this.db = new Database(dbPath);
         try {
@@ -257,8 +261,10 @@ export class EnvironmentRepository {
             ...rest
         } = dbEnv as DBEnvironment & { walletAddress?: string };
         void _legacyWalletAddress;
+        const addresses = this.proxyAddresses;
         return {
             ...rest,
+            get proxy() { return dbEnv.proxy ? addresses.open(dbEnv.id, dbEnv.proxy) : undefined; },
             tags: parseStoredEnvironmentTags(dbEnv.tags),
             browserEngine: normalizeBrowserEngine(
                 dbEnv.browserEngine,
@@ -328,7 +334,7 @@ export class EnvironmentRepository {
                 env.notes,
                 env.dataDir,
                 JSON.stringify(env.tags),
-                env.proxy ?? null,
+                env.proxy ? this.proxyAddresses.seal(env.id, env.proxy) : null,
                 env.proxyId ?? null,
                 env.proxyLabel ?? null,
                 env.userAgent ?? null,
@@ -381,7 +387,10 @@ export class EnvironmentRepository {
             if (!ALLOWED_UPDATE_COLUMNS.has(key)) {
                 return;
             }
-            if (key === 'tags' && Array.isArray(value)) {
+            if (key === 'proxy') {
+                updates.push('proxy = ?');
+                params.push(value ? this.proxyAddresses.seal(id, value) : null);
+            } else if (key === 'tags' && Array.isArray(value)) {
                 updates.push(`${key} = ?`);
                 params.push(JSON.stringify(normalizeEnvironmentTags(value)));
             } else if (key === 'browserEngine') {
@@ -485,6 +494,14 @@ export class EnvironmentRepository {
                 .run(cutoffIso);
         }
         return envs;
+    }
+
+    public hasDataDir(directory: string): boolean {
+        return Boolean(this.db.prepare('SELECT 1 FROM environments WHERE dataDir = ? COLLATE NOCASE LIMIT 1').get(directory));
+    }
+
+    public transaction<T>(operation: () => T): T {
+        return this.db.transaction(operation)();
     }
 
     public findDataDirById(id: string): string {

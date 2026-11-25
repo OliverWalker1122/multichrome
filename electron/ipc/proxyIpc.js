@@ -58,17 +58,20 @@ export function registerProxyIpc({ ipcMain, integration, validateId }) {
             }
             let removedCount = 0;
             let skippedInUseCount = 0;
-            for (const rawId of ids) {
-                const validId = validateId(rawId);
+            let failedCount = 0;
+            const remainingIds = [];
+            for (const validId of new Set(ids.map(id => validateId(id)))) {
                 try {
                     await integration.assertProxyUnused(validId, true);
                     await manager.remove(validId);
                     removedCount += 1;
-                } catch {
-                    skippedInUseCount += 1;
+                } catch (error) {
+                    remainingIds.push(validId);
+                    if (error?.code === 'PROXY_IN_USE') skippedInUseCount += 1;
+                    else failedCount += 1;
                 }
             }
-            return { removedCount, skippedInUseCount };
+            return { removedCount, skippedInUseCount, failedCount, remainingIds };
         }),
     );
 }

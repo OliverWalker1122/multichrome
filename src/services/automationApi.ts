@@ -39,6 +39,12 @@ export const automationApi = {
         return api.setActiveProfile(profileId);
     },
 
+    testConnection: async (): Promise<string> => {
+        const api = getElectronApi()?.automation;
+        if (!api?.testConnection) throw new Error('Connection check unavailable');
+        return api.testConnection();
+    },
+
     getToken: async (): Promise<string | null> => {
         const api = getElectronApi()?.automation;
         if (!api?.getToken) return null;

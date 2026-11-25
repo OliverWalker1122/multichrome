@@ -1,16 +1,12 @@
+import { LEGACY_MCP_VERSIONS, MCP_VERSIONS, MODERN_MCP_VERSION, requestVersion, unsupportedVersion } from '../domain/mcpProtocol.js';
 import {
     createValidationError,
     sanitizeAutomationErrorMessage,
-    validateOptionalString,
+    validateProfileAction,
     validateProfileListFilters,
-    validateUuid,
 } from '../domain/automationPolicy.js';
 
-export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
-    '2025-06-18',
-    '2025-03-26',
-    '2024-11-05',
-];
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = LEGACY_MCP_VERSIONS;
 export const DEFAULT_MCP_PROTOCOL_VERSION = '2025-06-18';
 export const DEFAULT_MCP_SERVER_NAME = 'multichrome-mcp';
 export const DEFAULT_MCP_SERVER_VERSION = '1.6.0';
@@ -61,6 +57,9 @@ export const MCP_TOOLS = [
             type: 'object',
             additionalProperties: false,
             properties: {
+                view: { type: 'string', enum: ['summary', 'detail'], description: 'Use summary for discovery and detail for inspection.' },
+                limit: { type: 'integer', minimum: 1, maximum: 200 },
+                offset: { type: 'integer', minimum: 0 },
                 group: {
                     type: 'string',
                     description: 'Optional group name filter.',
@@ -96,6 +95,7 @@ export const MCP_TOOLS = [
         inputSchema: {
             type: 'object',
             additionalProperties: false,
+            oneOf: [{ required: ['profileId'] }, { required: ['name'] }],
             properties: {
                 ...PROFILE_SELECTOR_PROPERTIES,
                 setActive: {
@@ -109,7 +109,7 @@ export const MCP_TOOLS = [
     {
         name: 'stop_profile',
         description:
-            'Gracefully close a running MultiChrome browser profile and release its managed proxy resources.',
+            'Close all pages in the selected profile, including unsaved work. A shared proxy may stay warm for other profiles.',
         annotations: {
             title: 'Stop Browser Profile',
             readOnlyHint: false,
@@ -120,6 +120,7 @@ export const MCP_TOOLS = [
         inputSchema: {
             type: 'object',
             additionalProperties: false,
+            oneOf: [{ required: ['profileId'] }, { required: ['name'] }],
             properties: {
                 ...PROFILE_SELECTOR_PROPERTIES,
             },
@@ -139,6 +140,7 @@ export const MCP_TOOLS = [
         inputSchema: {
             type: 'object',
             additionalProperties: false,
+            oneOf: [{ required: ['profileId'] }, { required: ['name'] }],
             properties: {
                 ...PROFILE_SELECTOR_PROPERTIES,
             },
@@ -148,29 +150,6 @@ export const MCP_TOOLS = [
 
 function isPlainObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function normalizeProfileSelectorArgs(args) {
-    const profileId =
-        args.profileId !== undefined &&
-        args.profileId !== null &&
-        String(args.profileId).trim()
-            ? validateUuid(args.profileId, 'profileId')
-            : undefined;
-    const name =
-        args.name !== undefined && args.name !== null
-            ? validateOptionalString(args.name, 'name', { maxLength: 120 })
-            : undefined;
-
-    if (!profileId && !name) {
-        throw createValidationError(
-            'Either profileId or name is required',
-            'INVALID_INPUT',
-            400,
-        );
-    }
-
-    return { profileId, name };
 }
 
 function buildJsonRpcResult(id, result) {
@@ -257,19 +236,14 @@ export function createMcpHandler({
                 return backend.listProfiles(filters);
             }
             case 'start_profile': {
-                const selector = normalizeProfileSelectorArgs(args);
-                const setActive =
-                    args.setActive === undefined
-                        ? true
-                        : Boolean(args.setActive);
-                return backend.startProfile({ ...selector, setActive });
+                return backend.startProfile(validateProfileAction(args, true));
             }
             case 'stop_profile': {
-                const selector = normalizeProfileSelectorArgs(args);
+                const selector = validateProfileAction(args);
                 return backend.stopProfile(selector);
             }
             case 'switch_active_profile': {
-                const selector = normalizeProfileSelectorArgs(args);
+                const selector = validateProfileAction(args);
                 return backend.switchActiveProfile(selector);
             }
             default: {
@@ -281,6 +255,14 @@ export function createMcpHandler({
     }
 
     async function handleSingleMessage(msg) {
+        const version = requestVersion(msg);
+        if (version && !MCP_VERSIONS.includes(version)) return unsupportedVersion(msg?.id, version);
+        const response = await dispatch(msg);
+        if (version === MODERN_MCP_VERSION && response?.result) response.result.resultType = 'complete';
+        return response;
+    }
+
+    async function dispatch(msg) {
         if (!isPlainObject(msg) || msg.jsonrpc !== '2.0') {
             return buildJsonRpcError(
                 isPlainObject(msg) && 'id' in msg ? msg.id : null,
@@ -304,6 +286,11 @@ export function createMcpHandler({
 
         try {
             switch (method) {
+                case 'server/discover':
+                    return buildJsonRpcResult(id, {
+                        resultType: 'complete', supportedVersions: MCP_VERSIONS, capabilities: { tools: {}, resources: {} },
+                        _meta: { 'io.modelcontextprotocol/serverInfo': { name: serverName, version: serverVersion } },
+                    });
                 case 'initialize': {
                     const requestedVersion =
                         typeof params.protocolVersion === 'string'
@@ -322,7 +309,7 @@ export function createMcpHandler({
                         },
                         serverInfo: { name: serverName, version: serverVersion },
                         instructions:
-                            'MultiChrome manages anti-detect profiles and Fail-Closed proxies. Use start_profile or switch_active_profile to select an environment, then use standard @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP against cdpEndpoint or wsEndpoint for all page automation.',
+                            'MultiChrome manages anti-detect profiles and Fail-Closed proxies. Use start_profile or switch_active_profile to select an environment, then use standard @playwright/mcp, chrome-devtools-mcp, or Playwright connectOverCDP against the profile-specific profileCdpEndpoint or wsEndpoint for all page automation.',
                     });
                 }
 

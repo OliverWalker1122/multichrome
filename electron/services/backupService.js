@@ -1,3 +1,4 @@
+import { isProfileId } from '../drivers/profileDirectory.js';
 import {
     decryptBackupBundle,
     encryptBackupBundle,
@@ -76,21 +77,36 @@ export class BackupService {
         const payload = decryptBackupBundle(rawContent, password);
         const currentSettings = this.settingsRepository.getSettings();
         const portableSettings = sanitizePortableSettings(payload.settings);
-        if (Object.keys(portableSettings).length > 0) {
-            await this.settingsRepository.saveSettings({
-                ...currentSettings,
-                ...portableSettings,
-                dataPath: currentSettings.dataPath,
-            });
+        const english = currentSettings.locale === 'en-US';
+        if (payload.environments.some(env => !isProfileId(env?.id)) ||
+            payload.proxies.some(proxy => typeof proxy?.id !== 'string' || !proxy.id.trim() || !proxy.data?.config) ||
+            (portableSettings.globalProxy !== undefined && (
+                typeof portableSettings.globalProxy?.enabled !== 'boolean' ||
+                typeof portableSettings.globalProxy?.address !== 'string'
+            ))) {
+            throw new Error(english ? 'Invalid records in backup' : '备份记录格式无效');
         }
-
-        const proxyRes = this.proxyService.importProxiesFromBackup(
-            payload.proxies,
-        );
-        const envRes =
-            this.environmentService.importEnvironmentsFromBackup(
-                payload.environments,
-            );
+        const completed = [];
+        let stage = english ? 'destination' : '目标目录';
+        let proxyRes, envRes;
+        try {
+            this.settingsRepository.assertRestoreTargetWritable(currentSettings.dataPath);
+            stage = english ? 'proxies' : '代理';
+            proxyRes = this.proxyService.importProxiesFromBackup(payload.proxies);
+            completed.push(stage);
+            stage = english ? 'environments' : '环境';
+            envRes = this.environmentService.importEnvironmentsFromBackup(payload.environments);
+            completed.push(stage);
+            stage = english ? 'settings' : '设置';
+            if (Object.keys(portableSettings).length && !await this.settingsRepository.saveSettings({
+                ...portableSettings, dataPath: currentSettings.dataPath,
+            })) throw new Error('Settings write failed');
+        } catch {
+            const done = completed.join(english ? ', ' : '、') || (english ? 'none' : '无');
+            throw new Error(english
+                ? 'Restore failed during ' + stage + '. Completed: ' + done + '. Retry the same backup to resume.'
+                : '恢复在“' + stage + '”步骤失败。已完成：' + done + '。可使用同一份备份重试。');
+        }
 
         return {
             restoredEnvironments: envRes.restoredCount,

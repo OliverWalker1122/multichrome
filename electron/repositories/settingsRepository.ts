@@ -2,7 +2,8 @@ import path from 'path';
 import fs from 'fs';
 import Store from 'electron-store';
 import log from 'electron-log';
-import { app } from 'electron';
+import { app, safeStorage } from 'electron';
+import { createProxyAddressStorage } from './proxyAddressStorage.js';
 import {
     DEFAULT_FINGERPRINT_SETTINGS,
     normalizeDefaultFingerprintSettings,
@@ -74,11 +75,17 @@ export interface AppSettings {
 // 设置管理器类
 export class SettingsManager {
     private store: Store<AppSettings>;
+    readonly proxyAddresses: ReturnType<typeof createProxyAddressStorage>;
 
-    constructor() {
+    constructor(options: {
+        directory?: string;
+        proxyAddresses?: ReturnType<typeof createProxyAddressStorage>;
+    } = {}) {
+        this.proxyAddresses = options.proxyAddresses ?? createProxyAddressStorage(safeStorage);
         // 初始化存储
         this.store = new Store<AppSettings>({
             name: 'app-settings',
+            cwd: options.directory,
             schema: {
                 dataPath: {
                     type: 'string',
@@ -153,9 +160,14 @@ export class SettingsManager {
     // 获取应用设置
     public getSettings(): AppSettings {
         try {
+            const storedProxy = this.store.get('globalProxy');
+            const addresses = this.proxyAddresses;
             return {
                 dataPath: this.store.get('dataPath'),
-                globalProxy: this.store.get('globalProxy'),
+                globalProxy: storedProxy && {
+                    enabled: storedProxy.enabled,
+                    get address() { return addresses.open('global', storedProxy.address); },
+                },
                 startupUrl: this.store.get('startupUrl'),
                 theme: this.store.get('theme') || 'system',
                 locale:
@@ -212,96 +224,27 @@ export class SettingsManager {
                 fs.mkdirSync(settings.dataPath, { recursive: true });
             }
 
-            // 检查文件夹是否可写
-            try {
-                const testFile = path.join(settings.dataPath, '.write-test');
-                fs.writeFileSync(testFile, 'test');
-                fs.unlinkSync(testFile);
-            } catch (error) {
-                log.error('路径不可写:', error);
-                return false;
-            }
+            this.assertRestoreTargetWritable(settings.dataPath);
 
-            // 保存设置
-            this.store.set('dataPath', settings.dataPath);
-
-            // 保存全局代理设置
+            // Persist once so a failed encryption or a failed disk write leaves the prior settings intact.
+            const next: Partial<AppSettings> = { dataPath: settings.dataPath };
             if (settings.globalProxy !== undefined) {
-                this.store.set('globalProxy', settings.globalProxy);
+                next.globalProxy = {
+                    enabled: settings.globalProxy.enabled,
+                    address: this.proxyAddresses.seal('global', settings.globalProxy.address),
+                };
             }
-
-            // 保存启动页设置
-            if (settings.startupUrl !== undefined) {
-                this.store.set('startupUrl', settings.startupUrl);
+            if (settings.startupUrl !== undefined) next.startupUrl = settings.startupUrl;
+            if (['system', 'light', 'dark'].includes(settings.theme || '')) next.theme = settings.theme;
+            if (settings.locale === 'zh-CN' || settings.locale === 'en-US') next.locale = settings.locale;
+            for (const key of ['memorySaverMode', 'allowExtensionsOnFingerprintKernel', 'requireHealthCheckOnLaunch'] as const) {
+                if (typeof settings[key] === 'boolean') next[key] = settings[key];
             }
-
-            // 保存主题设置
-            if (
-                settings.theme === 'system' ||
-                settings.theme === 'light' ||
-                settings.theme === 'dark'
-            ) {
-                this.store.set('theme', settings.theme);
-            }
-
-            if (settings.locale === 'zh-CN' || settings.locale === 'en-US') {
-                this.store.set('locale', settings.locale);
-            }
-
-            if (typeof settings.memorySaverMode === 'boolean') {
-                this.store.set('memorySaverMode', settings.memorySaverMode);
-            }
-
-            if (settings.bookmarkTemplates !== undefined) {
-                this.store.set(
-                    'bookmarkTemplates',
-                    normalizeBookmarkTemplates(
-                        settings.bookmarkTemplates,
-                    ) as BookmarkTemplate[],
-                );
-            }
-
-            if (settings.extensionTemplates !== undefined) {
-                this.store.set(
-                    'extensionTemplates',
-                    normalizeExtensionTemplates(
-                        settings.extensionTemplates,
-                    ) as ExtensionTemplate[],
-                );
-            }
-
-            if (
-                typeof settings.allowExtensionsOnFingerprintKernel === 'boolean'
-            ) {
-                this.store.set(
-                    'allowExtensionsOnFingerprintKernel',
-                    settings.allowExtensionsOnFingerprintKernel,
-                );
-            }
-
-            if (typeof settings.requireHealthCheckOnLaunch === 'boolean') {
-                this.store.set(
-                    'requireHealthCheckOnLaunch',
-                    settings.requireHealthCheckOnLaunch,
-                );
-            }
-
-            if (settings.groupStartupUrls !== undefined) {
-                this.store.set(
-                    'groupStartupUrls',
-                    normalizeGroupStartupUrls(
-                        settings.groupStartupUrls,
-                    ) as Record<string, string>,
-                );
-            }
-
-            // 保存默认指纹与防泄露策略设置
-            if (settings.fingerprint !== undefined) {
-                const normalizedFp = normalizeDefaultFingerprintSettings(
-                    settings.fingerprint,
-                ) as DefaultFingerprintSettings;
-                this.store.set('fingerprint', normalizedFp);
-            }
+            if (settings.bookmarkTemplates !== undefined) next.bookmarkTemplates = normalizeBookmarkTemplates(settings.bookmarkTemplates);
+            if (settings.extensionTemplates !== undefined) next.extensionTemplates = normalizeExtensionTemplates(settings.extensionTemplates);
+            if (settings.groupStartupUrls !== undefined) next.groupStartupUrls = normalizeGroupStartupUrls(settings.groupStartupUrls);
+            if (settings.fingerprint !== undefined) next.fingerprint = normalizeDefaultFingerprintSettings(settings.fingerprint) as DefaultFingerprintSettings;
+            this.store.set(next);
 
             // 如果数据路径已更改，需要迁移数据
             const currentDataPath = app.getPath('userData');
@@ -317,6 +260,14 @@ export class SettingsManager {
             log.error('保存设置失败:', error);
             return false;
         }
+    }
+
+    public assertRestoreTargetWritable(dataPath: string): void {
+        if (!this.isValidPath(dataPath) || !fs.statSync(dataPath).isDirectory()) {
+            throw new Error('Invalid settings directory');
+        }
+        fs.accessSync(dataPath, fs.constants.W_OK);
+        fs.accessSync(path.dirname(this.store.path), fs.constants.W_OK);
     }
 
     // 检查路径是否有效

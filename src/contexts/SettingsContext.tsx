@@ -143,7 +143,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
             setSettings(nextSettings);
             if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
                 try {
-                    await systemApi.saveSettings(nextSettings);
+                    await systemApi.saveSettings({ dataPath: nextSettings.dataPath, theme: nextTheme });
                 } catch {
                     // keep live theme if dataPath is not ready
                 }
@@ -162,7 +162,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
             setSettings(nextSettings);
             if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
                 try {
-                    await systemApi.saveSettings(nextSettings);
+                    await systemApi.saveSettings({ dataPath: nextSettings.dataPath, locale: nextLocale });
                 } catch {
                     // keep local cache if dataPath is not ready
                 }

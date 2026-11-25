@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { ProxyCoordinator } from './proxyCoordinator.js';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,10 +111,14 @@ export function createAutomationBackend({
     let stateListener = null;
     const boundProxyByProfile = new Map();
 
-    const runLaunch = (op) =>
-        proxyIntegration && typeof proxyIntegration.runLaunch === 'function'
-            ? proxyIntegration.runLaunch(op)
-            : Promise.resolve().then(op);
+    const coordinator = proxyIntegration?.runForProfile
+        ? proxyIntegration
+        : new ProxyCoordinator({ chromeManager, proxyManager });
+
+    async function runProfileOperation(selector, operation) {
+        const id = selector.profileId || (await findProfileBySelector(selector)).env.id;
+        return coordinator.runForProfile(id, () => operation(id));
+    }
 
     function notifyStateChanged() {
         if (typeof stateListener === 'function') {
@@ -204,10 +209,9 @@ export function createAutomationBackend({
 
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
-            const envs = await chromeManager.getAllEnvironments();
-            const current = Array.isArray(envs)
-                ? envs.find((item) => item.id === envId)
-                : null;
+            const current = chromeManager.getActiveEnvironment
+                ? await chromeManager.getActiveEnvironment(envId)
+                : (await chromeManager.getAllEnvironments()).find((item) => item.id === envId);
             if (!current || !current.isRunning) {
                 break;
             }
@@ -241,6 +245,12 @@ export function createAutomationBackend({
     }
 
     async function findProfileBySelector({ profileId, name } = {}) {
+        if (profileId && chromeManager.getActiveEnvironment) {
+            const id = validateUuid(profileId, 'profileId');
+            const env = await chromeManager.getActiveEnvironment(id);
+            if (!env) throw createValidationError('Profile not found', 'PROFILE_NOT_FOUND', 404);
+            return { env };
+        }
         const allEnvs = await chromeManager.getAllEnvironments();
         const list = Array.isArray(allEnvs) ? allEnvs : [];
 
@@ -344,7 +354,7 @@ export function createAutomationBackend({
             if (found) {
                 resolvedActiveId = found.id;
                 resolvedActiveName = found.name;
-            } else if (runningProfiles.length > 0) {
+            } else if (typeof chromeManager.getRunningEnvironmentSummary === 'function') {
                 activeProfileId = null;
             } else {
                 resolvedActiveId = activeProfileId;
@@ -356,6 +366,7 @@ export function createAutomationBackend({
         }
 
         return {
+            selectedProfileId: activeProfileId,
             activeProfileId: resolvedActiveId,
             activeProfileName: resolvedActiveName,
             runningProfiles,
@@ -391,6 +402,7 @@ export function createAutomationBackend({
             if (!proxyId) {
                 return true;
             }
+            if (proxyManager?.isRunning) return proxyManager.isRunning(proxyId);
             const summary = getProxySummaryMap().get(proxyId);
             return Boolean(summary && summary.status === 'running');
         },
@@ -516,7 +528,9 @@ export function createAutomationBackend({
                 return true;
             });
 
-            const profiles = filtered.map((env) => {
+            const offset = filters.offset || 0;
+            const page = filtered.slice(offset, filters.limit ? offset + filters.limit : undefined);
+            const profiles = page.map((env) => {
                 if (env.isRunning) {
                     boundProxyByProfile.set(env.id, env.proxyId || '');
                 }
@@ -529,6 +543,11 @@ export function createAutomationBackend({
                 const isActiveTarget = Boolean(
                     activeEnv && activeEnv.id === env.id,
                 );
+                if (filters.view === 'summary') {
+                    return { id: env.id, name: env.name, groupName: env.groupName,
+                        isRunning: Boolean(env.isRunning), isActiveTarget,
+                        proxyStatus: proxySummary?.status ?? (env.proxyId ? 'unknown' : null) };
+                }
                 return sanitizeProfileForAutomation(
                     env,
                     guardedCdp,
@@ -539,129 +558,129 @@ export function createAutomationBackend({
 
             return {
                 count: profiles.length,
+                ...(filters.limit || offset ? { total: filtered.length, nextOffset: offset + profiles.length < filtered.length ? offset + profiles.length : null } : {}),
                 cdpEndpoint: `http://127.0.0.1:${port}`,
                 activeProfileId: activeEnv ? activeEnv.id : null,
                 profiles,
             };
         },
 
-        async startProfile({ profileId, name, setActive = true } = {}) {
-            const { env: initialEnv } = await findProfileBySelector({
-                profileId,
-                name,
-            });
-            const resolvedId = initialEnv.id;
+        startProfile({ profileId, name, setActive = true } = {}) {
+            return runProfileOperation({ profileId, name }, async (resolvedId) => {
+                await findProfileBySelector({ profileId: resolvedId });
 
-            let initialInternalConn = null;
-            if (typeof chromeManager.launchEnvironmentForAutomation === 'function') {
-                const res = await runLaunch(() =>
-                    chromeManager.launchEnvironmentForAutomation(resolvedId),
-                );
-                initialInternalConn = normalizeCdpConnectionInfo(
-                    res?.cdp || res,
-                );
-            } else {
-                const launched = await runLaunch(() =>
-                    chromeManager.launchEnvironment(resolvedId),
-                );
-                if (!launched) {
-                    throw createValidationError(
-                        `Failed to launch profile: ${resolvedId}`,
-                        'LAUNCH_FAILED',
-                        500,
+                let initialInternalConn = null;
+                if (typeof chromeManager.launchEnvironmentForAutomation === 'function') {
+                    const res = await chromeManager.launchEnvironmentForAutomation(resolvedId);
+                    initialInternalConn = normalizeCdpConnectionInfo(
+                        res?.cdp || res,
                     );
+                } else {
+                    const launched = await chromeManager.launchEnvironment(resolvedId);
+                    if (!launched) {
+                        throw createValidationError(
+                            `Failed to launch profile: ${resolvedId}`,
+                            'LAUNCH_FAILED',
+                            500,
+                        );
+                    }
                 }
-            }
 
-            await waitForReadyInternalConnection(
-                resolvedId,
-                initialInternalConn,
-                8000,
-            );
+                await waitForReadyInternalConnection(
+                    resolvedId,
+                    initialInternalConn,
+                    8000,
+                );
 
-            const refreshedList = await chromeManager.getAllEnvironments();
-            const list = Array.isArray(refreshedList) ? refreshedList : [];
-            const updatedEnv =
-                list.find((item) => item.id === resolvedId) || {
-                    ...initialEnv,
-                    isRunning: true,
-                };
-            const proxyMap = getProxySummaryMap();
-            ensureProfileProxyRunning(updatedEnv, proxyMap);
-
-            if (setActive !== false) {
-                const previousActive = activeProfileId;
-                activeProfileId = resolvedId;
-                if (previousActive !== resolvedId) {
-                    cdpGuard?.disconnectActiveSlotSessions?.(
-                        resolvedId,
-                        'Switched active target profile',
-                    );
+                const refreshedList = await chromeManager.getAllEnvironments();
+                const list = Array.isArray(refreshedList) ? refreshedList : [];
+                const updatedEnv = list.find((item) => item.id === resolvedId);
+                if (!updatedEnv?.isRunning) {
+                    throw createValidationError('Profile stopped before startup completed', 'PROFILE_NOT_RUNNING', 409);
                 }
-            }
+                const proxyMap = getProxySummaryMap();
+                ensureProfileProxyRunning(updatedEnv, proxyMap);
 
-            const activeEnv = computeEffectiveActiveEnv(list);
-            const isActiveTarget = Boolean(
-                activeEnv && activeEnv.id === resolvedId,
-            );
-            const guardedCdp = buildGuardedEndpointsForProfile(resolvedId);
-            const proxySummary = updatedEnv.proxyId
-                ? proxyMap.get(updatedEnv.proxyId) || null
-                : null;
-            const port = getBoundPort();
+                if (setActive !== false) {
+                    const previousActive = activeProfileId;
+                    activeProfileId = resolvedId;
+                    if (previousActive !== resolvedId) {
+                        cdpGuard?.disconnectActiveSlotSessions?.(
+                            resolvedId,
+                            'Switched active target profile',
+                        );
+                    }
+                }
 
-            notifyStateChanged();
+                const activeEnv = computeEffectiveActiveEnv(list);
+                const isActiveTarget = Boolean(
+                    activeEnv && activeEnv.id === resolvedId,
+                );
+                const guardedCdp = buildGuardedEndpointsForProfile(resolvedId);
+                const proxySummary = updatedEnv.proxyId
+                    ? proxyMap.get(updatedEnv.proxyId) || null
+                    : null;
+                const port = getBoundPort();
 
-            return {
-                started: true,
-                profileId: resolvedId,
-                name: updatedEnv.name,
-                isActiveTarget,
-                cdpEndpoint: `http://127.0.0.1:${port}`,
-                wsEndpoint: guardedCdp.wsEndpoint,
-                profile: sanitizeProfileForAutomation(
-                    updatedEnv,
-                    guardedCdp,
-                    proxySummary,
+                notifyStateChanged();
+
+                return {
+                    started: true,
+                    profileId: resolvedId,
+                    name: updatedEnv.name,
                     isActiveTarget,
-                ),
-            };
+                    cdpEndpoint: `http://127.0.0.1:${port}`,
+                    profileCdpEndpoint: guardedCdp.httpEndpoint,
+                    activeCdpEndpoint: `http://127.0.0.1:${port}`,
+                    wsEndpoint: guardedCdp.wsEndpoint,
+                    profile: sanitizeProfileForAutomation(
+                        updatedEnv,
+                        guardedCdp,
+                        proxySummary,
+                        isActiveTarget,
+                    ),
+                };
+            });
         },
 
-        async stopProfile({ profileId, name } = {}) {
-            const { env } = await findProfileBySelector({ profileId, name });
-            const resolvedId = env.id;
+        stopProfile({ profileId, name } = {}) {
+            return runProfileOperation({ profileId, name }, async (resolvedId) => {
+                const { env } = await findProfileBySelector({ profileId: resolvedId });
 
-            cdpGuard?.disconnectProfileSessions?.(
-                resolvedId,
-                'Profile stopped',
-            );
-            boundProxyByProfile.delete(resolvedId);
-
-            let stopped = false;
-            if (env.isRunning) {
-                stopped = Boolean(
-                    await chromeManager.closeEnvironment(resolvedId),
+                cdpGuard?.disconnectProfileSessions?.(
+                    resolvedId,
+                    'Profile stopped',
                 );
-            }
-            if (
-                env.proxyId &&
-                proxyIntegration &&
-                typeof proxyIntegration.releaseIfUnused === 'function'
-            ) {
-                await proxyIntegration.releaseIfUnused(env.proxyId);
-            }
 
-            if (activeProfileId === resolvedId) {
-                activeProfileId = null;
-            }
-            notifyStateChanged();
+                let stopped = false;
+                if (env.isRunning) {
+                    stopped = Boolean(
+                        await chromeManager.closeEnvironment(resolvedId),
+                    );
+                    if (!stopped && (await findProfileBySelector({ profileId: resolvedId })).env.isRunning) {
+                        throw new Error('Profile is still running. Retry stopping it.');
+                    }
+                }
+                boundProxyByProfile.delete(resolvedId);
+                if (
+                    env.proxyId &&
+                    proxyIntegration &&
+                    typeof proxyIntegration.releaseIfUnused === 'function'
+                ) {
+                    await proxyIntegration.releaseIfUnused(env.proxyId);
+                }
 
-            return {
-                profileId: resolvedId,
-                name: env.name,
-                stopped,
-            };
+                if (activeProfileId === resolvedId) {
+                    activeProfileId = null;
+                }
+                notifyStateChanged();
+
+                return {
+                    profileId: resolvedId,
+                    name: env.name,
+                    stopped,
+                };
+            });
         },
 
         async switchActiveProfile({ profileId, name } = {}) {
@@ -832,6 +851,7 @@ export class AutomationIntegration {
             running: this.server.isRunning(),
             lastError: this.lastError || this.server.getLastError(),
             stdioBridgePath: this.stdioBridgePath,
+            selectedProfileId: targetSnapshot.selectedProfileId,
             activeProfileId: targetSnapshot.activeProfileId,
             activeProfileName: targetSnapshot.activeProfileName,
             runningProfiles: targetSnapshot.runningProfiles,
@@ -854,6 +874,33 @@ export class AutomationIntegration {
         const status = this.getStatus();
         this.emitStateChange();
         return status;
+    }
+
+    async testConnection() {
+        const status = this.getStatus();
+        if (!status.running) return 'listener';
+        let token;
+        try { token = this.getToken(); } catch { return 'auth'; }
+        const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+        if (token) headers.Authorization = 'Bearer ' + token;
+        try {
+            const call = async (method, params) => {
+                const response = await fetch('http://127.0.0.1:' + status.port + '/mcp', {
+                    method: 'POST', headers, redirect: 'error', signal: AbortSignal.timeout(3000),
+                    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+                });
+                return { status: response.status, data: await response.json() };
+            };
+            const init = await call('initialize', { protocolVersion: '2025-11-25', capabilities: {},
+                clientInfo: { name: 'MultiChrome Settings', version: '1' } });
+            if ([401, 403].includes(init.status)) return 'auth';
+            if (!init.data.result?.protocolVersion) return 'tools';
+            headers['MCP-Protocol-Version'] = init.data.result.protocolVersion;
+            const found = await call('tools/list', {});
+            const tools = found.data.result?.tools || [];
+            return ['list_profiles', 'start_profile', 'stop_profile', 'switch_active_profile'].every(name =>
+                tools.some(tool => tool.name === name)) ? 'ready' : 'tools';
+        } catch { return 'listener'; }
     }
 
     getToken() {

@@ -512,6 +512,7 @@ export interface AutomationStatus {
     mcpEndpoint?: string;
     running: boolean;
     lastError?: string;
+    selectedProfileId?: string | null;
     activeProfileId?: string | null;
     activeProfileName?: string | null;
     runningProfiles?: RunningProfileOption[];
@@ -556,6 +557,8 @@ export interface ElectronAPI {
         batchRemove?: (ids: string[]) => Promise<{
             removedCount: number;
             skippedInUseCount: number;
+            failedCount?: number;
+            remainingIds?: string[];
         }>;
     };
     appLogs: {
@@ -687,6 +690,7 @@ export interface ElectronAPI {
         selectFolder: () => Promise<{ canceled: boolean; filePaths: string[] }>;
     };
     automation?: {
+        testConnection: () => Promise<string>;
         getStatus: () => Promise<AutomationStatus>;
         updateConfig: (
             patch: AutomationConfigPatch,

@@ -54,6 +54,7 @@ test('sanitizeDiagnosticText and buildSanitizedSupportBundle strip usernames, cr
     const bundle = buildSanitizedSupportBundle({
         appVersion: '1.6.0',
         dbIntegrity: 'ok',
+        sharedProfileDirectories: 2,
         activeProfiles: 4,
         recentLogs: [
             {
@@ -66,6 +67,7 @@ test('sanitizeDiagnosticText and buildSanitizedSupportBundle strip usernames, cr
     assert.equal(bundle.database.integrity, 'ok');
     assert.equal(bundle.recentLogs[0].message.includes('bob'), false);
     assert.equal(bundle.recentLogs[0].message.includes('198.51.100.9'), false);
+    assert.equal(bundle.database.sharedProfileDirectories, 2);
 });
 
 test('selectPlatformReleaseAsset and parseSha256Sums resolve installer assets and digests cleanly', () => {

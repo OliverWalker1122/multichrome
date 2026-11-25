@@ -1,11 +1,12 @@
 import http from 'node:http';
+import { validateTransport, requestVersion, MODERN_MCP_VERSION } from '../domain/mcpProtocol.js';
 import {
     DEFAULT_AUTOMATION_PORT,
     authenticateAutomationRequest,
     formatAutomationBindError,
     sanitizeAutomationErrorMessage,
     validateAutomationPort,
-    validateOptionalString,
+    validateProfileAction,
     validateProfileListFilters,
     validateUuid,
     verifyLoopbackRequestSecurity,
@@ -492,6 +493,8 @@ export class AutomationServer {
             return;
         }
 
+        const invalid = validateTransport(parsed, req.headers);
+        if (invalid) { sendJson(res, 400, invalid); return; }
         const rpcResponse = await this.mcpHandler.handlePayload(parsed);
         if (rpcResponse === null) {
             res.writeHead(202, BASE_SECURITY_HEADERS);
@@ -499,7 +502,8 @@ export class AutomationServer {
             return;
         }
 
-        sendJson(res, 200, rpcResponse);
+        const missingModernMethod = requestVersion(parsed) === MODERN_MCP_VERSION && rpcResponse.error?.code === -32601;
+        sendJson(res, missingModernMethod ? 404 : 200, rpcResponse);
     }
 
     async handleRestRequest(req, res, urlObj) {
@@ -518,6 +522,9 @@ export class AutomationServer {
                 tag: urlObj.searchParams.get('tag') ?? undefined,
                 status: urlObj.searchParams.get('status') ?? undefined,
                 query: urlObj.searchParams.get('query') ?? undefined,
+                view: urlObj.searchParams.get('view') ?? undefined,
+                limit: urlObj.searchParams.has('limit') ? Number(urlObj.searchParams.get('limit')) : undefined,
+                offset: urlObj.searchParams.has('offset') ? Number(urlObj.searchParams.get('offset')) : undefined,
             });
             const data = await this.backend.listProfiles(filters);
             sendJson(res, 200, { ok: true, data });
@@ -530,34 +537,14 @@ export class AutomationServer {
                 pathname === '/api/v1/profiles/stop')
         ) {
             const body = await parseOptionalJsonBody(req, this.maxBodyBytes);
-            const profileId =
-                body.profileId !== undefined &&
-                body.profileId !== null &&
-                String(body.profileId).trim()
-                    ? validateUuid(body.profileId, 'profileId')
-                    : undefined;
-            const name =
-                body.name !== undefined && body.name !== null
-                    ? validateOptionalString(body.name, 'name', {
-                          maxLength: 120,
-                      })
-                    : undefined;
-            if (!profileId && !name) {
-                throw new BadJsonError('Either profileId or name is required');
-            }
-            if (pathname.endsWith('/start')) {
-                const data = await this.backend.startProfile({
-                    profileId,
-                    name,
-                    setActive:
-                        body.setActive === undefined
-                            ? true
-                            : Boolean(body.setActive),
-                });
+            const start = pathname.endsWith('/start');
+            const selector = validateProfileAction(body, start);
+            if (start) {
+                const data = await this.backend.startProfile(selector);
                 sendJson(res, 200, { ok: true, data });
                 return;
             }
-            const data = await this.backend.stopProfile({ profileId, name });
+            const data = await this.backend.stopProfile(selector);
             sendJson(res, 200, { ok: true, data });
             return;
         }
@@ -573,13 +560,8 @@ export class AutomationServer {
             const action = actionMatch[2];
             if (action === 'start') {
                 const body = await parseOptionalJsonBody(req, this.maxBodyBytes);
-                const data = await this.backend.startProfile({
-                    profileId,
-                    setActive:
-                        body.setActive === undefined
-                            ? true
-                            : Boolean(body.setActive),
-                });
+                if ('profileId' in body || 'name' in body) throw new BadJsonError('Target is already specified in path');
+                const data = await this.backend.startProfile(validateProfileAction({ ...body, profileId }, true));
                 sendJson(res, 200, { ok: true, data });
                 return;
             }
@@ -590,25 +572,7 @@ export class AutomationServer {
 
         if (method === 'POST' && pathname === '/api/v1/active-profile') {
             const body = await parseOptionalJsonBody(req, this.maxBodyBytes);
-            const profileId =
-                body.profileId !== undefined &&
-                body.profileId !== null &&
-                String(body.profileId).trim()
-                    ? validateUuid(body.profileId, 'profileId')
-                    : undefined;
-            const name =
-                body.name !== undefined && body.name !== null
-                    ? validateOptionalString(body.name, 'name', {
-                          maxLength: 120,
-                      })
-                    : undefined;
-            if (!profileId && !name) {
-                throw new BadJsonError('Either profileId or name is required');
-            }
-            const data = await this.backend.switchActiveProfile({
-                profileId,
-                name,
-            });
+            const data = await this.backend.switchActiveProfile(validateProfileAction(body));
             sendJson(res, 200, { ok: true, data });
             return;
         }

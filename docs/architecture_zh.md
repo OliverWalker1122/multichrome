@@ -36,7 +36,7 @@ MultiChrome 允许按环境粒度选择两种浏览器内核：
 
 ## 5. 标准 CDP 透传守卫与极简环境 MCP
 
-为让 Claude Code、Cursor、Antigravity 等 AI Agent 及 Playwright / Puppeteer 脚本安全复用防关联环境，MultiChrome 采用**零造轮子、100% 兼容业界标准**的轻量控制面（默认关闭，开启后仅绑定 `127.0.0.1`，默认端口 `18922`）：
+为让 Claude Code、Cursor、Antigravity 等 AI Agent 及 Playwright / Puppeteer 脚本安全复用防关联环境，MultiChrome 提供基于标准 CDP 的轻量控制面（默认关闭，开启后仅绑定 `127.0.0.1`，默认端口 `18922`）：
 
 - **轻量无状态 CDP 透传守卫（`cdpGuardRelay.js` + `cdpGuardPolicy.js`）**：对外提供标准 `/json/version`、`/json/list` 与 WebSocket 转发，可直接接入官方 `@playwright/mcp`（`--cdp-endpoint`）、`chrome-devtools-mcp`（`--browserUrl`）及 `chromium.connectOverCDP`。守卫原样直通标准页面操控指令，仅静默吸收会破坏环境一致性的外部覆盖指令（`Emulation.setUserAgentOverride`、`Network.setUserAgentOverride`、`setTimezoneOverride`、`setLocaleOverride`、`setGeolocationOverride`、`setDeviceMetricsOverride`），拦截误创建空白无痕上下文的 `Target.createBrowserContext`（引导复用 `browser.contexts()[0]` 登录态），并在绑定的 `sing-box` 代理异常断开时毫秒级同步掐断 CDP 会话。
 - **私有调试端口与防连错号防呆**：浏览器内部真实调试端口迁离 `9222` 改用私有随机端口（避免外部工具无参盲连误伤主力环境），且不在外部接口回显；仅单环境运行时自动命中，多环境同时运行时强制要求指定目标环境。

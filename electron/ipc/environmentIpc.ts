@@ -213,7 +213,7 @@ export function registerEnvironmentIpc({
         try {
             const validId = validateId(id);
             log.info(`收到启动Chrome环境请求，环境ID: ${validId}`);
-            return await proxyIntegration.runLaunch(() =>
+            return await proxyIntegration.runForProfile(validId, () =>
                 chromeManager.launchEnvironment(validId),
             );
         } catch (error) {
@@ -225,7 +225,7 @@ export function registerEnvironmentIpc({
     ipcMain.handle('close-chrome-environment', async (_, id: unknown) => {
         try {
             const validId = validateId(id);
-            return await proxyIntegration.run(() =>
+            return await proxyIntegration.runForProfile(validId, () =>
                 chromeManager.closeEnvironment(validId),
             );
         } catch (error) {

@@ -42,6 +42,7 @@ export function sanitizeDiagnosticText(input) {
  *   chromeVersion?: string;
  *   nodeVersion?: string;
  *   dbIntegrity?: string;
+ *   sharedProfileDirectories?: number;
  *   activeProfiles?: number;
  *   deletedProfiles?: number;
  *   runningProfiles?: number;
@@ -64,6 +65,7 @@ export function buildSanitizedSupportBundle({
     chromeVersion = '',
     nodeVersion = process.version,
     dbIntegrity = 'unknown',
+    sharedProfileDirectories = 0,
     activeProfiles = 0,
     deletedProfiles = 0,
     runningProfiles = 0,
@@ -110,6 +112,7 @@ export function buildSanitizedSupportBundle({
         },
         database: {
             integrity: String(dbIntegrity || 'unknown'),
+            sharedProfileDirectories: Number(sharedProfileDirectories) || 0,
             activeProfiles: Number(activeProfiles) || 0,
             deletedProfiles: Number(deletedProfiles) || 0,
             runningProfiles: Number(runningProfiles) || 0,

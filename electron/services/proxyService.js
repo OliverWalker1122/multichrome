@@ -216,6 +216,10 @@ export class ProxyService {
         };
     }
 
+    isRunning(id) {
+        return Boolean(this.runtimes.get(id)?.handle);
+    }
+
     list() {
         return this.repository.getRecords().map((record) => this.summary(record));
     }
@@ -270,7 +274,9 @@ export class ProxyService {
             runtime?.stopping ||
             this.recyclingPromises.has(id)
         ) {
-            throw new Error('请先停止此代理，再修改或删除');
+            const error = new Error('请先停止此代理，再修改或删除');
+            error.code = 'PROXY_IN_USE';
+            throw error;
         }
     }
 

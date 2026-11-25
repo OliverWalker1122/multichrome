@@ -1,3 +1,4 @@
+import { countSharedProfileDirectories } from '../drivers/profileDirectory.js';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -572,6 +573,7 @@ export function registerSystemIpc({
             chromeVersion: process.versions.chrome || '',
             nodeVersion: process.version,
             dbIntegrity: chromeManager.checkDatabaseIntegrity(),
+            sharedProfileDirectories: countSharedProfileDirectories([...envs, ...deleted]),
             activeProfiles: envs.length,
             deletedProfiles: deleted.length,
             runningProfiles: chromeManager.getRunningEnvironmentSummary().count,

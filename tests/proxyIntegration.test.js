@@ -67,6 +67,24 @@ function fixture() {
     return { calls, bindings, manager, chromeManager, integration, invoke };
 }
 
+test('batch removal retains failed and bound items and validates the full selection first', async () => {
+    const { invoke, manager, bindings } = fixture();
+    const failed = '33333333-3333-4333-8333-333333333333';
+    const removed = [];
+    bindings.push({ id: PROFILE_ID, proxyId: PROXY_ID, isRunning: false });
+    manager.remove = async id => {
+        if (id === failed) throw new Error('fixture disk failure');
+        removed.push(id);
+    };
+    await assert.rejects(invoke('proxies:batch-remove', [PROFILE_ID, 'invalid']));
+    assert.deepEqual(removed, []);
+    const result = await invoke('proxies:batch-remove', [PROFILE_ID, PROXY_ID, failed, PROFILE_ID]);
+    assert.deepEqual(removed, [PROFILE_ID]);
+    assert.deepEqual(result, {
+        removedCount: 1, skippedInUseCount: 1, failedCount: 1, remainingIds: [PROXY_ID, failed],
+    });
+});
+
 test('queued operations wait for earlier operations and preserve their own results', async () => {
     const { integration } = fixture();
     const gate = deferred();

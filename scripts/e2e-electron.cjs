@@ -71,28 +71,35 @@ function discoverRealDataPath() {
     return REAL_USER_DATA;
 }
 
-function discoverInstalledKernelPath() {
-    if (OPTS.kernel && fs.existsSync(OPTS.kernel)) {
-        return OPTS.kernel;
-    }
-    const candidateDataDirs = [discoverRealDataPath(), REAL_USER_DATA];
+function findManifestKernel(dataDirectory) {
+    const manifestPath = path.join(dataDirectory, 'kernels', 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return '';
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const kernels = Array.isArray(manifest.kernels) ? manifest.kernels : [];
+    const available = entry => typeof entry?.executablePath === 'string' &&
+        fs.statSync(entry.executablePath, { throwIfNoEntry: false })?.isFile();
+    const active = kernels.find(entry => entry?.id === manifest.activeKernelId && available(entry));
+    return (active || kernels.find(available))?.executablePath || '';
+}
 
-    for (const dir of candidateDataDirs) {
-        try {
-            const manifestPath = path.join(dir, 'kernels', 'manifest.json');
-            if (!fs.existsSync(manifestPath)) continue;
-            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-            const activeId = manifest.activeKernelId;
-            const list = Array.isArray(manifest.kernels) ? manifest.kernels : [];
-            const active =
-                list.find((k) => k && k.id === activeId && k.executablePath && fs.existsSync(k.executablePath)) ||
-                list.find((k) => k && k.executablePath && fs.existsSync(k.executablePath));
-            if (active) {
-                return active.executablePath;
-            }
-        } catch {
-            /* ignore */
+function discoverInstalledKernelPath() {
+    if (OPTS.kernel) {
+        if (!fs.statSync(OPTS.kernel, { throwIfNoEntry: false })?.isFile()) {
+            throw new Error('Configured --kernel or MULTICHROME_E2E_KERNEL executable was not found.');
         }
+        return path.resolve(OPTS.kernel);
+    }
+    const hint = path.resolve(__dirname, '..', '.tmp', 'e2e-data-dir.txt');
+    if (fs.existsSync(hint)) {
+        const directory = fs.readFileSync(hint, 'utf8').trim();
+        const executable = path.isAbsolute(directory) && findManifestKernel(directory);
+        if (!executable) throw new Error('Check .tmp/e2e-data-dir.txt: no available kernel in the configured data directory.');
+        return executable;
+    }
+    const dirs = process.env.SKIP_DOTENV === 'true' ? [REAL_USER_DATA] : [discoverRealDataPath(), REAL_USER_DATA];
+    for (const directory of new Set(dirs)) {
+        const executable = findManifestKernel(directory);
+        if (executable) return executable;
     }
     return '';
 }
@@ -851,6 +858,9 @@ async function runE2E() {
     const { ProxyManager } = await import(pathToFileURL(path.join(distElectron, 'services', 'proxyService.js')).href);
     const { ChromeManager } = await import(pathToFileURL(path.join(distElectron, 'services', 'environmentService.js')).href);
 
+    const { verifyStorageRestore } = await import('./verify-storage-restore.mjs');
+    await verifyStorageRestore(path.join(TEMP_ROOT, 'storage-fixtures'));
+
     // Initialize real production managers pointing ONLY to isolated temp paths
     const settingsManager = new SettingsManager();
     await settingsManager.saveSettings({
@@ -894,7 +904,7 @@ async function runE2E() {
         recordResult('SETUP-KERNEL', 'P0', 'fingerprint-chromium kernel availability', false, 'Required kernel not found');
         return 1;
     } else {
-        console.log('Kernel note: fingerprint-chromium not installed locally; running system-chrome fail-closed checks only.');
+        console.log('Kernel not found in the searched locations. Running system Chrome checks only. For a custom data directory, set .tmp/e2e-data-dir.txt or pass --kernel=<executable>.');
     }
 
     const proxyManager = new ProxyManager({

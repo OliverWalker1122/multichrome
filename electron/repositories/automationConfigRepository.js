@@ -19,7 +19,7 @@ export class AutomationConfigRepository {
     /**
      * @param {{
      *   store: { get: (key: string, fallback?: any) => any, set: (key: string, value: any) => void },
-     *   secretStorage?: { isEncryptionAvailable?: () => boolean, encryptString?: (plain: string) => Buffer, decryptString?: (buf: Buffer) => string } | null,
+     *   secretStorage?: { isEncryptionAvailable?: () => boolean, getSelectedStorageBackend?: () => string, encryptString?: (plain: string) => Buffer, decryptString?: (buf: Buffer) => string } | null,
      *   defaultPort?: number,
      *   getLocale?: (() => string) | null,
      * }} options
@@ -59,6 +59,7 @@ export class AutomationConfigRepository {
                 typeof this.secretStorage.isEncryptionAvailable ===
                     'function' &&
                 this.secretStorage.isEncryptionAvailable() &&
+                (process.platform !== 'linux' || this.secretStorage.getSelectedStorageBackend?.() !== 'basic_text') &&
                 typeof this.secretStorage.encryptString === 'function' &&
                 typeof this.secretStorage.decryptString === 'function',
         );
@@ -121,30 +122,10 @@ export class AutomationConfigRepository {
                 ? obj.enabled
                 : Boolean(obj.localApiEnabled || obj.mcpEnabled);
 
-        let encryptedToken =
+        const encryptedToken =
             typeof obj.encryptedToken === 'string' && obj.encryptedToken.trim()
                 ? obj.encryptedToken.trim()
                 : undefined;
-
-        if (this.secretStorage && this.canEncrypt()) {
-            const decrypted = this.decryptStoredToken(encryptedToken);
-            if (decrypted) {
-                this.token = decrypted;
-            } else {
-                const fresh = generateAutomationToken();
-                encryptedToken = this.encryptTokenForStore(fresh);
-                this.token = fresh;
-                this.store.set(AUTOMATION_STORE_KEY, {
-                    enabled,
-                    localApiEnabled: enabled,
-                    mcpEnabled: enabled,
-                    port,
-                    ...(encryptedToken ? { encryptedToken } : {}),
-                });
-            }
-        } else {
-            this.token = null;
-        }
 
         return {
             enabled,
@@ -185,15 +166,17 @@ export class AutomationConfigRepository {
             return this.token;
         }
         this.assertEncryptionReady();
-        const fresh = generateAutomationToken();
-        const encryptedToken = this.encryptTokenForStore(fresh);
-        this.token = fresh;
-        this.persistState({
-            enabled: this.state.enabled,
-            port: this.state.port,
-            encryptedToken,
-        });
-        return this.token;
+        if (this.state.encryptedToken) {
+            const restored = this.decryptStoredToken(this.state.encryptedToken);
+            if (!restored) {
+                throw new Error(isEnLocale(this.getLocale)
+                    ? 'Unable to unlock the saved access token. Unlock OS secure storage and retry.'
+                    : '无法解密已保存的访问密钥，请解锁系统密钥库后重试');
+            }
+            this.token = restored;
+            return restored;
+        }
+        return this.rotateToken();
     }
 
     getToken() {
@@ -209,12 +192,12 @@ export class AutomationConfigRepository {
         const encryptedToken = this.secretStorage
             ? this.encryptTokenForStore(fresh)
             : undefined;
-        this.token = fresh;
         this.persistState({
             enabled: this.state.enabled,
             port: this.state.port,
             encryptedToken,
         });
+        this.token = fresh;
         return fresh;
     }
 
@@ -272,6 +255,7 @@ export class AutomationConfigRepository {
         running = false,
         lastError = undefined,
         stdioBridgePath = '',
+        selectedProfileId = null,
         activeProfileId = null,
         activeProfileName = null,
         runningProfiles = [],
@@ -293,6 +277,7 @@ export class AutomationConfigRepository {
             mcpEndpoint: `${baseUrl}/mcp`,
             running: Boolean(running),
             ...(resolvedError ? { lastError: resolvedError } : {}),
+            selectedProfileId,
             activeProfileId:
                 typeof activeProfileId === 'string' && activeProfileId
                     ? activeProfileId

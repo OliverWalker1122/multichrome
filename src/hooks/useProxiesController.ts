@@ -17,10 +17,6 @@ import { useVirtualRows } from './useVirtualRows';
 
 export type ProxySortKey = 'original' | 'name' | 'status';
 
-function activeSelectedIdsIncludes(id: string, list: string[]): boolean {
-    return list.includes(id);
-}
-
 function errorMessage(error: unknown): string {
     return error instanceof Error
         ? error.message.replace(
@@ -152,12 +148,6 @@ export function useProxiesController({
         });
     }, [proxies, search, statusFilter, sortBy]);
 
-    const { selected: selectedProxy, rowProps } = useTableSelection(
-        filtered,
-        selectedProxyId,
-        onSelectProxy,
-        () => onToggleDetails(true),
-    );
     const {
         containerRef: tableWrapRef,
         visibleItems: visibleProxies,
@@ -165,11 +155,20 @@ export function useProxiesController({
         topSpacerHeight,
         bottomSpacerHeight,
         isVirtualized,
+        scrollToIndex,
     } = useVirtualRows(filtered, {
         rowHeight: 50,
         overscan: 8,
         threshold: 80,
     });
+    const { selected: selectedProxy, rowProps } = useTableSelection(
+        filtered,
+        selectedProxyId,
+        onSelectProxy,
+        () => onToggleDetails(true),
+        scrollToIndex,
+    );
+
 
     const runningCount = useMemo(
         () => proxies.filter((proxy) => proxy.status === 'running').length,
@@ -588,23 +587,24 @@ export function useProxiesController({
 
     const clearSelectedProxyIds = () => setSelectedProxyIds(new Set());
 
-    const handleBatchRemoveSelected = () => {
-        if (activeSelectedProxyIds.length === 0) return;
+    const handleBatchRemoveSelected = (ids: string[]) => {
+        if (ids.length === 0) return;
         void runAction('batch-remove', async () => {
-            const res = await proxyApi.batchRemove(activeSelectedProxyIds);
-            clearSelectedProxyIds();
-            if (
-                selectedProxyId &&
-                activeSelectedIdsIncludes(selectedProxyId, activeSelectedProxyIds)
-            ) {
+            const res = await proxyApi.batchRemove(ids);
+            const remaining = new Set(res.remainingIds || []);
+            setSelectedProxyIds(remaining);
+            if (selectedProxyId && ids.includes(selectedProxyId) && !remaining.has(selectedProxyId)) {
                 onSelectProxy(null);
             }
-            showNotification(
-                res.skippedInUseCount > 0 ? 'warning' : 'success',
-                isEn
-                    ? `Removed ${res.removedCount} proxy(ies)${res.skippedInUseCount > 0 ? ` (${res.skippedInUseCount} active or bound skipped)` : ''}`
-                    : `已删除 ${res.removedCount} 个代理${res.skippedInUseCount > 0 ? `（跳过 ${res.skippedInUseCount} 个运行中或已绑定代理）` : ''}`,
-            );
+            const counts = [isEn ? `Removed ${res.removedCount}` : `已删除 ${res.removedCount} 个代理`];
+            if (res.skippedInUseCount) {
+                counts.push(isEn ? `${res.skippedInUseCount} active or bound` : `${res.skippedInUseCount} 个正在运行或已绑定`);
+            }
+            if (res.failedCount) {
+                counts.push(isEn ? `${res.failedCount} failed` : `${res.failedCount} 个删除失败`);
+            }
+            const severity = remaining.size ? (res.removedCount ? 'warning' : 'error') : 'success';
+            showNotification(severity, counts.join(isEn ? ', ' : '，'));
         });
     };
 

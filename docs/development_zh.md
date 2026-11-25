@@ -4,7 +4,7 @@
 
 ## 环境要求
 
-- Node.js 20+
+- Node.js 22.23.4（与 CI 一致）
 - npm 9+
 - Git
 
@@ -73,6 +73,16 @@ npm run package:win    # Windows x64 NSIS 安装包
 npm run package:mac    # macOS .dmg / .zip
 npm run package:linux  # Linux .AppImage / .deb
 ```
+
+## 桌面界面规范
+
+| 场景 | 实现约定 |
+| --- | --- |
+| 材质与间距 | 复用 [Win11 主题](../src/theme/win11Theme.ts) 和[语义颜色](../src/theme/semanticColors.css)。外壳、工作区、卡片分别使用 `--glass-shell`、`--glass-workspace`、`--glass-card`。标准卡片圆角 14px、内边距 16px 18px，边框为 1px `--glass-border`，阴影用 `--glass-shadow`。卡片内最多一层 `--glass-card-inner`（圆角 8–10px），小标签用 `--glass-pill`。 |
+| 颜色与状态 | 分区图标用 24×24px、圆角 7px；图标和标签通过 `getToneStyle` 取语义色。在浅色、深色和强制颜色模式下检查可读性。成功、警告、失败和中性状态用 Fluent `Badge` 的 tint 样式，同时保留文字。 |
+| 设置与说明 | 普通设置行最小高度 34px，左侧标签、右侧控件，使用 1px `colorNeutralStroke2` 分隔。原理、路径和参数放进 [InfoTip](../src/components/common/InfoTip.tsx)，避免同一说明同时出现在副标题和提示中。高级设置和接入示例默认折叠，右侧显示摘要，展开按钮同步更新 `aria-expanded`。 |
+| 文案与操作 | 每个按钮和标题表达一个动作，例如“健康自检”或“导入本地文件”。协议名、参数和算法名放入提示或示例。避免用斜杠堆叠近义词。保留一个清晰的主要操作，次要操作用 subtle 按钮、带提示及可访问名称的图标，或更多菜单。即时生效的设置页仅在有待保存改动时显示保存动作。 |
+| 布局与输入 | 代码示例放在单层内卡片，使用 `white-space: pre-wrap` 换行。窄窗口下检查操作列、弹窗与抽屉是否完整可用。保留可见键盘焦点，页签支持方向键、Home 和 End。过渡使用 100–140ms，并尊重 `prefers-reduced-motion`。 |
 
 ## 贡献约定
 

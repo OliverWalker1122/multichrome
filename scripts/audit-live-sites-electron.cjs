@@ -20,6 +20,7 @@ const { pathToFileURL } = require('url');
 const { app, safeStorage, screen } = require('electron');
 const Store = require('electron-store');
 const WebSocket = require('ws');
+const inspectPixelScan = require('./inspect-pixelscan.cjs');
 
 const projectRoot = path.resolve(__dirname, '..');
 const distElectron = path.join(projectRoot, 'dist', 'electron');
@@ -123,6 +124,10 @@ function parseArgs(argv) {
 }
 
 const OPTS = parseArgs(process.argv.slice(2));
+// Keep audit launch details out of the desktop user's application log.
+const auditLog = require('electron-log');
+auditLog.transports.file.level = false;
+auditLog.transports.console.level = false;
 const realUserData = path.join(app.getPath('appData'), 'multichrome');
 app.setPath('userData', realUserData);
 
@@ -242,7 +247,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
         });
         if (res.status !== 200 || res.json?.error) {
             throw new Error(
-                `MCP ${method} failed: ${res.json?.error?.message || res.text}`,
+                `MCP ${method} failed (HTTP ${res.status}, RPC ${Number(res.json?.error?.code) || 'unknown'})`,
             );
         }
         return res.json.result;
@@ -498,6 +503,7 @@ async function visitAndInspect(cdp, url, waitMs, extractJs, pollUntilReadyMs = 0
                 !pollUntilReadyMs ||
                 lastVal.ready ||
                 lastVal.blocked ||
+                (lastVal.error && lastVal.error !== 'empty result') ||
                 Date.now() >= deadline
             ) {
                 return lastVal;
@@ -589,18 +595,8 @@ const SITE_SPECS = {
         label: 'PixelScan',
         url: 'https://pixelscan.net/fingerprint-check',
         waitMs: 12000,
-        pollMs: 0,
-        extractJs: `(() => {
-            const text = (document.body?.innerText || '').trim();
-            if (/verify you are human|just a moment|turnstile|captcha/i.test(text)) {
-                return { blocked: 'CAPTCHA/Challenge' };
-            }
-            const lines = text.split('\\n').map(s => s.trim()).filter(Boolean);
-            return {
-                title: document.title,
-                snippet: lines.slice(0, 40).join(' | '),
-            };
-        })()`,
+        pollMs: 60000,
+        extractJs: `(${inspectPixelScan.toString()})(document)`,
     },
 };
 
@@ -658,7 +654,7 @@ function summarizeSiteResult(siteKey, res) {
         return `noLeak=${noLeak}, ${localIp.replace(/\t/g, '=')}, ${publicIp.replace(/\t/g, '=')}`;
     }
     if (siteKey === 'pixelscan') {
-        return res.title ? `title=${res.title}` : 'loaded';
+        return res.ready && res.verdict ? `fingerprint=${res.verdict}` : 'INCONCLUSIVE (no explicit verdict)';
     }
     return 'ok';
 }
@@ -763,7 +759,12 @@ async function runAuditGroup({
                         wsUrl = devTools.wsUrl;
                         report.browserVersion = devTools.browserVersion;
                     }
-                    cdp = new CDPClient(wsUrl);
+                    cdp = new CDPClient(
+                        wsUrl,
+                        mcpHarness
+                            ? { Authorization: `Bearer ${mcpHarness.token}` }
+                            : undefined,
+                    );
                     await cdp.connect();
                     await sleep(1500);
                     for (const siteKey of OPTS.sites) {
@@ -1013,8 +1014,26 @@ app.whenReady().then(async () => {
         );
 
         const settingsManager = new SettingsManager();
-        const realDataPath =
+        const configuredDataPath =
             settingsManager.getSettings().dataPath || app.getPath('userData');
+        const hasKernelManifest = (dir) =>
+            Boolean(
+                dir &&
+                    fs.existsSync(path.join(dir, 'kernels', 'manifest.json')),
+            );
+        let realDataPath = configuredDataPath;
+        if (!hasKernelManifest(realDataPath)) {
+            const hintPath = path.join(projectRoot, '.tmp', 'e2e-data-dir.txt');
+            if (fs.existsSync(hintPath)) {
+                const hintedDir = fs.readFileSync(hintPath, 'utf8').trim();
+                if (path.isAbsolute(hintedDir) && hasKernelManifest(hintedDir)) {
+                    realDataPath = hintedDir;
+                }
+            }
+            if (!hasKernelManifest(realDataPath) && hasKernelManifest(realUserData)) {
+                realDataPath = realUserData;
+            }
+        }
         const kernelManager = new KernelManager({
             getDataPath: () => realDataPath,
         });
@@ -1118,12 +1137,13 @@ app.whenReady().then(async () => {
                 tempAuditRoot = fs.mkdtempSync(
                     path.join(os.tmpdir(), 'multichrome-live-audit-'),
                 );
-                const tempSettingsManager = Object.create(settingsManager);
-                tempSettingsManager.getSettings = () => ({
-                    ...settingsManager.getSettings(),
+                const tempSettingsManager = new SettingsManager({ directory: tempAuditRoot });
+                const saved = await tempSettingsManager.saveSettings({
                     dataPath: tempAuditRoot,
+                    startupUrl: 'about:blank',
                     requireHealthCheckOnLaunch: false,
                 });
+                if (!saved) throw new Error('Could not initialize temporary audit settings');
 
                 tempChromeManager = new ChromeManager(
                     proxyManager,

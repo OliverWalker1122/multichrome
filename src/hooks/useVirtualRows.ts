@@ -17,6 +17,7 @@ export interface UseVirtualRowsResult<
     topSpacerHeight: number;
     bottomSpacerHeight: number;
     isVirtualized: boolean;
+    scrollToIndex: (index: number) => void;
 }
 
 const DEFAULT_ROW_HEIGHT = 48;
@@ -24,7 +25,7 @@ const DEFAULT_OVERSCAN = 8;
 const DEFAULT_THRESHOLD = 80;
 const FALLBACK_VIEWPORT_HEIGHT = 600;
 
-export function useVirtualRows<T, El extends HTMLElement = HTMLDivElement>(
+export function useVirtualRows<T extends { id: string }, El extends HTMLElement = HTMLDivElement>(
     items: T[],
     options: UseVirtualRowsOptions = {},
 ): UseVirtualRowsResult<T, El> {
@@ -94,10 +95,55 @@ export function useVirtualRows<T, El extends HTMLElement = HTMLDivElement>(
         };
     }, [isVirtualized, items.length]);
 
+    const [heights, setHeights] = useState(() => new Map<string, number>());
+    const offsets = useMemo(() => {
+        const result = [0];
+        if (isVirtualized) for (const item of items) {
+            result.push(result[result.length - 1] + (heights.get(item.id) || rowHeight));
+        }
+        return result;
+    }, [items, isVirtualized, rowHeight, heights]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!isVirtualized || !container || typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(entries => {
+            const sizes = entries.map(entry => {
+                const row = entry.target as HTMLElement;
+                return [row.dataset.virtualId, row.getBoundingClientRect().height] as const;
+            });
+            setHeights(previous => {
+                let next = previous;
+                for (const [key, height] of sizes) {
+                    if (key && height > 0 && previous.get(key) !== height) {
+                        if (next === previous) next = new Map(previous);
+                        next.set(key, height);
+                    }
+                }
+                return next;
+            });
+        });
+        const observe = () => {
+            observer.disconnect();
+            container.querySelectorAll('[data-virtual-id]').forEach(row => observer.observe(row));
+        };
+        observe();
+        const mutations = new MutationObserver(observe);
+        mutations.observe(container, { childList: true, subtree: true });
+        return () => { mutations.disconnect(); observer.disconnect(); };
+    }, [isVirtualized]);
+
     return useMemo(() => {
+        const scrollToIndex = (index: number) => {
+            if (isVirtualized && containerRef.current) {
+                containerRef.current.scrollTop = offsets[index] || 0;
+                setScrollTop(containerRef.current.scrollTop);
+            }
+        };
         if (!isVirtualized) {
             return {
                 containerRef,
+                scrollToIndex,
                 visibleItems: items,
                 startIndex: 0,
                 topSpacerHeight: 0,
@@ -107,23 +153,26 @@ export function useVirtualRows<T, El extends HTMLElement = HTMLDivElement>(
         }
 
         const totalCount = items.length;
-        const visibleCount =
-            Math.ceil(viewportHeight / rowHeight) + overscan * 2;
-        const maxStart = Math.max(0, totalCount - visibleCount);
-        const rawStart = Math.floor(scrollTop / rowHeight) - overscan;
-        const startIndex = Math.max(0, Math.min(maxStart, rawStart));
-        const endIndex = Math.min(totalCount, startIndex + visibleCount);
+        const indexAt = (position: number) => {
+            let lo = 0, hi = totalCount;
+            while (lo < hi) {
+                const mid = Math.floor((lo + hi) / 2);
+                if (offsets[mid + 1] <= position) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo;
+        };
+        const startIndex = Math.max(0, indexAt(scrollTop) - overscan);
+        const endIndex = Math.min(totalCount, indexAt(scrollTop + viewportHeight) + 1 + overscan);
 
         return {
             containerRef,
+            scrollToIndex,
             visibleItems: items.slice(startIndex, endIndex),
             startIndex,
-            topSpacerHeight: startIndex * rowHeight,
-            bottomSpacerHeight: Math.max(
-                0,
-                (totalCount - endIndex) * rowHeight,
-            ),
+            topSpacerHeight: offsets[startIndex],
+            bottomSpacerHeight: offsets[totalCount] - offsets[endIndex],
             isVirtualized: true,
         };
-    }, [isVirtualized, items, overscan, rowHeight, scrollTop, viewportHeight]);
+    }, [isVirtualized, items, offsets, overscan, scrollTop, viewportHeight]);
 }

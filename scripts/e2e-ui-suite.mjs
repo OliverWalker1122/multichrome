@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import { verifyMcpClients } from './verify-mcp-clients.mjs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
@@ -1339,8 +1340,8 @@ async function main() {
                             tokDisp === '••••••••••••' &&
                             code.includes('••••••••••••/mcp') &&
                             !code.includes('mc_live_') &&
-                            code.includes('@playwright/mcp@latest') &&
-                            code.includes('--cdp-endpoint')
+                            !code.includes('@playwright/mcp') &&
+                            Boolean(JSON.parse(code).mcpServers.multichrome)
                         );
                     })()`),
                 3000,
@@ -1411,7 +1412,13 @@ async function main() {
                 });
 
                 // Click UI Reset Token button -> old token MUST become 401 and new token becomes active!
-                await cdp.eval(`document.querySelector('[data-testid="automation-rotate-token"]')?.click()`);
+                await cdp.eval(`document.querySelector('[data-testid="automation-token-menu"]')?.click()`);
+                await waitUntil(() => cdp.eval(`(() => {
+                    const item = document.querySelector('[data-testid="automation-rotate-token"]');
+                    item?.click();
+                    return Boolean(item);
+                })()`), 3000);
+                await cdp.eval(`document.querySelector('[role="alertdialog"] button:last-child')?.click()`);
                 await sleep(250);
                 const activeToken = await cdp.eval(`window.electronAPI.automation.getToken()`);
                 const oldTokenAfterReset = await httpRequest({
@@ -1559,6 +1566,8 @@ async function main() {
                     const startedA = await callMcpTool('start_profile', {
                         name: '测试环境Alpha',
                     });
+                    await verifyMcpClients({ port: automationPort, token: activeToken, profileId: envA.id,
+                        projectRoot, tempRoot, bridgePath: path.join(projectRoot, 'dist/electron/transport/mcpStdioBridge.js') });
                     const internalPortA = await cdp.eval(`(async () => {
                         const logs = await window.electronAPI.appLogs.getLogs();
                         for (let i = logs.length - 1; i >= 0; i--) {
@@ -2421,7 +2430,7 @@ async function main() {
                     5000,
                 );
                 // Verify running row's full Actions cell ([关闭][定位][⋯]) is NOT clipped at the right edge after restoring default size!
-                const runningRowActionsUnclipped = await cdp.eval(`(() => {
+                const runningRowActionsUnclipped = await waitUntil(() => cdp.eval(`(() => {
                     const table = document.querySelector('table[aria-label="环境列表"]');
                     const wrap = table?.parentElement;
                     const row = Array.from(document.querySelectorAll('table[aria-label="环境列表"] tbody tr')).find(r => (r.innerText || '').includes('MultiWin 02'));
@@ -2433,7 +2442,10 @@ async function main() {
                     const locR = locateBtn.getBoundingClientRect();
                     const menR = menuBtn.getBoundingClientRect();
                     return locR.right <= wrapRect.right + 0.5 && menR.right <= wrapRect.right + 0.5;
-                })()`);
+                })()`), 5000);
+                if (!dockedNarrowOk || !restoredWideOk || !runningRowActionsUnclipped) {
+                    console.log('[Window layout]', { dockedNarrowOk, restoredWideOk, runningRowActionsUnclipped });
+                }
                 splitAndResetSizeOk = Boolean(
                     dockedNarrowOk && restoredWideOk && runningRowActionsUnclipped,
                 );
@@ -2939,8 +2951,19 @@ async function main() {
                     () => cdp.eval(`(document.querySelector('[data-details-panel]')?.innerText || '').includes('#vip') && (document.querySelector('[data-details-panel]')?.innerText || '').includes('保存更改')`),
                     3000,
                 );
+                const refreshId = await cdp.eval(`(async () => {
+                    const api = window.electronAPI.chromeEnvironments;
+                    const env = await api.create('Draft refresh fixture', 'Draft fixture', '', { browserEngine: 'system-chrome', startupUrl: 'about:blank' });
+                    await api.launch(env.id);
+                    return env.id;
+                })()`);
+                const refreshedWithDraft = await waitUntil(() => cdp.eval(`Boolean(
+                    Array.from(document.querySelectorAll('tr[data-virtual-id]')).some(row => row.innerText.includes('Draft refresh fixture')) &&
+                    document.querySelector('[data-details-panel] textarea')?.value === 'E2E-16 details saved note'
+                )`), 5000);
+                await cdp.eval(`window.electronAPI.chromeEnvironments.close(${JSON.stringify(refreshId)})`);
                 await cdp.eval(`window.__e2e.clickExact('保存更改', '[data-details-panel] button')`);
-                envDetailsTagSaveOk = await waitUntil(
+                envDetailsTagSaveOk = refreshedWithDraft && await waitUntil(
                     () => cdp.eval(`window.electronAPI.chromeEnvironments.getAll().then(list => {
                         const beta = list.find(e => e.name === '测试环境Beta');
                         return Boolean(beta && Array.isArray(beta.tags) && beta.tags.includes('vip') && beta.tags.includes('us') && beta.notes === 'E2E-16 details saved note');
@@ -3038,7 +3061,7 @@ async function main() {
                 );
                 // Wait for TrashPage's loadDeleted() + setBusyId(null) cycle to complete before clicking permanent delete
                 await waitUntil(
-                    () => cdp.eval(`!window.__e2e.bodyText().includes('E2E_Trash_Target') && Array.from(document.querySelectorAll('main button')).some(b => (b.innerText || '').includes('清理过期') && !b.disabled)`),
+                    () => cdp.eval(`!Array.from(document.querySelectorAll('main tbody tr')).some(row => row.innerText.includes('E2E_Trash_Target')) && Array.from(document.querySelectorAll('main button')).some(b => (b.innerText || '').includes('清理过期') && !b.disabled)`),
                     5000,
                 );
 
@@ -3055,7 +3078,11 @@ async function main() {
                 if (permDlgShown) {
                     await cdp.eval(`window.__e2e.clickExact('确认永久删除', '[role="dialog"] button')`);
                     trashPermDeleteOk = await waitUntil(
-                        () => cdp.eval(`!document.querySelector('[role="dialog"]') && !window.__e2e.bodyText().includes('MultiWin 01')`),
+                        () => cdp.eval(`(async () => {
+                            if (document.querySelector('[role="dialog"]') || Array.from(document.querySelectorAll('main tbody tr')).some(row => row.innerText.includes('MultiWin 01'))) return false;
+                            const deleted = await window.electronAPI.trash.getDeletedEnvironments();
+                            return !deleted.some(env => env.name === 'MultiWin 01');
+                        })()`),
                         5000,
                     );
                 }
@@ -3193,6 +3220,7 @@ async function main() {
                     row?.querySelector('input[type="checkbox"]')?.click();
                 })()`);
                 await waitUntil(() => cdp.eval(`window.__e2e.clickByText('批量删除', 'main button')`), 3000);
+                await waitUntil(() => cdp.eval(`window.__e2e.clickByText('删除', '[role="alertdialog"] button')`), 3000);
                 const batchDeletedOk = await waitUntil(
                     () => cdp.eval(`!window.__e2e.bodyText().includes('UI_Full_Proxy_Edited')`),
                     6000,
@@ -3347,6 +3375,36 @@ async function main() {
             );
 
         // ---------------------------------------------------------------
+        // Verify focus across unmounted rows using two distinct row densities.
+        for (let batch = 0; batch < 4; batch++) {
+            const payload = { namePrefix: 'Virtual', groupName: 'Virtual fixture', count: 25,
+                startNumber: batch * 25 + 1, browserEngine: 'system-chrome',
+                notes: batch % 2 ? 'Longer fixture row' : '', tags: batch % 2 ? ['one', 'two'] : [] };
+            await cdp.eval(`window.electronAPI.chromeEnvironments.batchCreate(${JSON.stringify(payload)}).then(() => true)`);
+        }
+        await reloadUI();
+        const groupOpened = await waitUntil(() => cdp.eval(`(() => {
+            const button = document.querySelector('aside button[title="Virtual fixture"]');
+            if (button) button.click();
+            return Boolean(button);
+        })()`), 5000);
+        const rows = 'table tbody tr[data-virtual-id]';
+        const first = await cdp.eval(`(() => {
+            const row = document.querySelector(${JSON.stringify(rows)});
+            row?.focus();
+            row?.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+            return row?.dataset.virtualId;
+        })()`);
+        const endFocused = await waitUntil(() => cdp.eval(`(() => {
+            const mounted = document.querySelectorAll(${JSON.stringify(rows)});
+            const last = mounted[mounted.length - 1];
+            return mounted.length < 100 && last && last === document.activeElement &&
+                last.dataset.virtualId !== ${JSON.stringify(first)} && !last.nextElementSibling;
+        })()`), 5000);
+        await cdp.eval(`document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))`);
+        const homeFocused = await waitUntil(() => cdp.eval(`document.activeElement?.dataset.virtualId === ${JSON.stringify(first)}`), 5000);
+        record('E2E-20', '百行混合密度环境列表的键盘焦点', Boolean(groupOpened && endFocused && homeFocused));
+
         // E2E-10: Zero uncaught page exceptions
         // ---------------------------------------------------------------
         record(
@@ -3444,23 +3502,14 @@ async function main() {
     }
 
     const failed = results.filter((r) => !r.passed);
-    const coveredWorkspaces = [
-        'TitleBar + AppBrandIcon + Running Pill + Theme/Locale',
-        'NavigationSidebar (Collapse/Expand, Groups, Badges)',
-        'StatusBar + LogDockPanel + ApplicationLogsPanel + InfoTip',
-        'ZeroStateOnboardingCard + EnvironmentsPage + EnvironmentsToolbar + EnvironmentTableRow',
-        'CreateEnvironmentModal (Single & Bulk) + EnvironmentDetailsPanel + TagEditor + Storage/Fingerprint Cards',
-        'CookieTransferDialog + EnvironmentHealthDialog (Single & Batch) + LaunchGuardDialog + Group/Delete Dialogs',
-        'TrashPage (List, Restore, Permanent Delete, Clean Up Expired)',
-        'ProxiesPage + ProxyEditorDrawer (Line/Form/JSON + Rotation URL) + BatchImportProxiesDialog',
-        'ProxyDetailsPanel + ProxyExitInfo + ProxyConfigDrawer (Redact/Reveal) + ProxyActionDialogs',
-        'SettingsPage (General/Backup + Browser/Templates + Privacy/Spoofing + Automation/MCP/Token + Components + About/Diagnostics)',
+    const expected = [
+        ...Array.from({ length: 21 }, (_, i) => 'E2E-' + String(i).padStart(2, '0')),
+        'E2E-02a', 'E2E-02b', 'E2E-02c', 'E2E-02d', 'E2E-04a', 'E2E-06a',
     ];
-    console.log('\n==================================================');
-    console.log(`E2E UI Suite Summary: ${results.length - failed.length}/${results.length} passed`);
-    console.log(
-        `UI Feature & Workspace Coverage: ${coveredWorkspaces.length}/${coveredWorkspaces.length} (100% pages, tabs, drawers & dialogs exercised)`,
-    );
+    const passed = new Set(results.filter(r => r.passed).map(r => r.id));
+    const missing = expected.filter(id => !results.some(r => r.id === id));
+    for (const id of missing) failed.push({ id, title: 'Missing assertion', passed: false });
+    console.log('E2E UI Suite Summary: ' + expected.filter(id => passed.has(id)).length + '/' + expected.length + ' passed');
     if (consoleErrors.length > 0) {
         console.log('Console errors observed:', consoleErrors);
     }

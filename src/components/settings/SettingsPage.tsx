@@ -1,3 +1,5 @@
+import { useDraftField } from '../../hooks/useDraftField';
+import { moveTabFocus } from '../../utils/tabKeyboard';
 import React, { useEffect, useState } from 'react';
 import {
     Button,
@@ -80,39 +82,39 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     const [activeTab, setActiveTab] = useState<SettingsTab>(
         initialTab || 'general',
     );
-    const [dataPath, setDataPath] = useState(currentSettings.dataPath || '');
-    const [proxyEnabled, setProxyEnabled] = useState(
+    const [dataPath, setDataPath] = useDraftField(currentSettings.dataPath || '');
+    const [proxyEnabled, setProxyEnabled] = useDraftField(
         Boolean(currentSettings.globalProxy?.enabled),
     );
-    const [proxyAddress, setProxyAddress] = useState(
+    const [proxyAddress, setProxyAddress] = useDraftField(
         currentSettings.globalProxy?.address || '',
     );
-    const [startupUrl, setStartupUrl] = useState(
+    const [startupUrl, setStartupUrl] = useDraftField(
         currentSettings.startupUrl || '',
     );
-    const [theme, setTheme] = useState<ThemeMode>(
+    const [theme, setTheme] = useDraftField<ThemeMode>(
         currentSettings.theme || 'system',
     );
-    const [memorySaverMode, setMemorySaverMode] = useState(
+    const [memorySaverMode, setMemorySaverMode] = useDraftField(
         Boolean(currentSettings.memorySaverMode),
     );
-    const [bookmarkTemplates, setBookmarkTemplates] = useState<
+    const [bookmarkTemplates, setBookmarkTemplates] = useDraftField<
         BookmarkTemplate[]
-    >(() => currentSettings.bookmarkTemplates || []);
-    const [extensionTemplates, setExtensionTemplates] = useState<
+    >(currentSettings.bookmarkTemplates || []);
+    const [extensionTemplates, setExtensionTemplates] = useDraftField<
         ExtensionTemplate[]
-    >(() => currentSettings.extensionTemplates || []);
+    >(currentSettings.extensionTemplates || []);
     const [
         allowExtensionsOnFingerprintKernel,
         setAllowExtensionsOnFingerprintKernel,
-    ] = useState(Boolean(currentSettings.allowExtensionsOnFingerprintKernel));
+    ] = useDraftField(Boolean(currentSettings.allowExtensionsOnFingerprintKernel));
     const [requireHealthCheckOnLaunch, setRequireHealthCheckOnLaunch] =
-        useState(Boolean(currentSettings.requireHealthCheckOnLaunch));
-    const [groupStartupUrls, setGroupStartupUrls] = useState<
+        useDraftField(Boolean(currentSettings.requireHealthCheckOnLaunch));
+    const [groupStartupUrls, setGroupStartupUrls] = useDraftField<
         Record<string, string>
-    >(() => currentSettings.groupStartupUrls || {});
-    const [fingerprint, setFingerprint] = useState<DefaultFingerprintSettings>(
-        () => normalizeFpState(currentSettings.fingerprint),
+    >(currentSettings.groupStartupUrls || {});
+    const [fingerprint, setFingerprint] = useDraftField<DefaultFingerprintSettings>(
+        normalizeFpState(currentSettings.fingerprint),
     );
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -122,25 +124,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             setActiveTab(initialTab);
         }
     }, [initialTab, tabRequestTick]);
-
-    useEffect(() => {
-        setDataPath(currentSettings.dataPath || '');
-        setProxyEnabled(Boolean(currentSettings.globalProxy?.enabled));
-        setProxyAddress(currentSettings.globalProxy?.address || '');
-        setStartupUrl(currentSettings.startupUrl || '');
-        setTheme(currentSettings.theme || 'system');
-        setMemorySaverMode(Boolean(currentSettings.memorySaverMode));
-        setBookmarkTemplates(currentSettings.bookmarkTemplates || []);
-        setExtensionTemplates(currentSettings.extensionTemplates || []);
-        setAllowExtensionsOnFingerprintKernel(
-            Boolean(currentSettings.allowExtensionsOnFingerprintKernel),
-        );
-        setRequireHealthCheckOnLaunch(
-            Boolean(currentSettings.requireHealthCheckOnLaunch),
-        );
-        setGroupStartupUrls(currentSettings.groupStartupUrls || {});
-        setFingerprint(normalizeFpState(currentSettings.fingerprint));
-    }, [currentSettings]);
 
     const baselineFp = normalizeFpState(currentSettings.fingerprint);
     const isDirty =
@@ -335,7 +318,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
 
                 <div
                     className={styles.pillTabsBar}
-                    role="tablist"
+                    role="tablist" onKeyDown={moveTabFocus}
                     aria-label={t('设置分类', 'Settings sections')}
                 >
                     {tabs.map((tab) => {
@@ -345,7 +328,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 key={tab.id}
                                 type="button"
                                 role="tab"
-                                aria-selected={active}
+                                aria-selected={active} tabIndex={active ? 0 : -1}
                                 data-testid={`settings-tab-${tab.id}`}
                                 className={mergeClasses(
                                     styles.pillTab,

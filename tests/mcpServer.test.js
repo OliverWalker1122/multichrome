@@ -91,6 +91,39 @@ function createBackendFixture() {
     });
 }
 
+test('stdio keeps the negotiated version and answers ping while an ordered profile write waits', { timeout: 3000 }, async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let finishStart;
+    const paused = new Promise(resolve => { finishStart = resolve; });
+    const calls = [];
+    const replies = [];
+    output.setEncoding('utf8');
+    output.on('data', line => {
+        const id = JSON.parse(line).id;
+        replies.push(id);
+        if (id === 3) finishStart();
+    });
+    const done = runStdioBridge({
+        input, output, token: '', apiUrl: 'http://127.0.0.1:18922',
+        async fetchImpl(_url, options) {
+            const request = JSON.parse(options.body);
+            calls.push({ id: request.id, version: new Headers(options.headers).get('MCP-Protocol-Version') });
+            if (request.id === 2) await paused;
+            const result = request.method === 'initialize' ? { protocolVersion: '2025-11-25' } : {};
+            return Response.json({ jsonrpc: '2.0', id: request.id, result });
+        },
+    });
+    for (const [id, method, params] of [
+        [1, 'initialize', {}], [2, 'tools/call', { name: 'start_profile' }],
+        [3, 'ping', {}], [4, 'tools/call', { name: 'stop_profile' }],
+    ]) input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    input.end();
+    await done;
+    assert.deepEqual(replies, [1, 3, 2, 4]);
+    assert.ok(calls.filter(call => call.id !== 1).every(call => call.version === '2025-11-25'));
+});
+
 test('MCP handler exposes strictly the 4 profile orchestration tools and supports profileId or name', async () => {
     assert.deepEqual(
         MCP_TOOLS.map((t) => t.name),

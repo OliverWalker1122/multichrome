@@ -31,7 +31,9 @@ export function useTableSelection<T extends { id: string }>(
     selectedId: string | null,
     onSelect: (id: string | null) => void,
     onOpen: () => void,
+    scrollToIndex: (index: number) => void,
 ) {
+    const pendingFocus = useRef<string | null>(null);
     const rows = useRef(new Map<string, HTMLTableRowElement>());
     const selected =
         items.find((item) => item.id === selectedId) || items[0] || null;
@@ -70,13 +72,27 @@ export function useTableSelection<T extends { id: string }>(
         if (!item) return;
         onSelect(item.id);
         const row = rows.current.get(item.id);
-        row?.focus({ preventScroll: true });
+        if (!row) {
+            pendingFocus.current = item.id;
+            scrollToIndex(next);
+            return;
+        }
+        pendingFocus.current = null;
+        row.focus({ preventScroll: true });
         row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     };
 
     const rowProps = (item: T, index: number) => ({
+        'data-virtual-id': item.id,
         ref: (element: HTMLTableRowElement | null) => {
-            if (element) rows.current.set(item.id, element);
+            if (element) {
+                rows.current.set(item.id, element);
+                if (pendingFocus.current === item.id) {
+                    pendingFocus.current = null;
+                    element.focus({ preventScroll: true });
+                    element.scrollIntoView({ block: 'nearest' });
+                }
+            }
             else rows.current.delete(item.id);
         },
         tabIndex: item.id === actualId ? 0 : -1,
