@@ -73,6 +73,9 @@ test('复杂VLESS配置、JSONC及出口组被保留，不让用户覆盖托管�
     assert.equal(full.inbounds.length, 1);
     assert.equal(full.inbounds[0].listen, '127.0.0.1');
     assert.equal(full.inbounds[0].listen_port, 39001);
+    assert.equal(full.outbounds[0].connect_timeout, '15s');
+    assert.equal(full.outbounds[0].tcp_keep_alive, '30s');
+    assert.equal(full.outbounds[0].tcp_keep_alive_interval, '15s');
     assert.equal(full.route.final, 'proxy');
     assert.equal(full.dns.servers[0].type, 'local');
     assert.ok(full.route.default_domain_resolver);
@@ -88,11 +91,19 @@ test('复杂VLESS配置、JSONC及出口组被保留，不让用户覆盖托管�
                 tag: 'http-node',
                 server: 'example.invalid',
                 server_port: 80,
+                connect_timeout: '25s',
+                disable_tcp_keep_alive: true,
             },
         ],
         route: { final: 'main' },
     });
     assert.equal(group.outbounds[0].outbounds[0], 'http-node');
+    const compiledGroup = buildSingboxConfig(group, 39002);
+    assert.equal(compiledGroup.outbounds[0].connect_timeout, undefined);
+    assert.equal(compiledGroup.outbounds[0].tcp_keep_alive, undefined);
+    assert.equal(compiledGroup.outbounds[1].connect_timeout, '25s');
+    assert.equal(compiledGroup.outbounds[1].tcp_keep_alive, undefined);
+    assert.equal(compiledGroup.outbounds[1].tcp_keep_alive_interval, undefined);
 });
 
 test('出口引用、直接出口、循环及损坏JSON全部拒绝，错误不回显输入', () => {

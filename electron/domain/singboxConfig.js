@@ -300,6 +300,38 @@ export function normalizeProxyConfig(input) {
     };
 }
 
+const NON_DIALER_OUTBOUND_TYPES = new Set([
+    'selector',
+    'urltest',
+    'block',
+    'dns',
+    'direct',
+]);
+
+function withSafeDialDefaults(outbound) {
+    if (
+        !isObject(outbound) ||
+        NON_DIALER_OUTBOUND_TYPES.has(outbound.type) ||
+        typeof outbound.server !== 'string' ||
+        !outbound.server.trim()
+    ) {
+        return outbound;
+    }
+    const next = { ...outbound };
+    if (next.connect_timeout === undefined) {
+        next.connect_timeout = '15s';
+    }
+    if (next.disable_tcp_keep_alive !== true) {
+        if (next.tcp_keep_alive === undefined) {
+            next.tcp_keep_alive = '30s';
+        }
+        if (next.tcp_keep_alive_interval === undefined) {
+            next.tcp_keep_alive_interval = '15s';
+        }
+    }
+    return next;
+}
+
 export function buildSingboxConfig(input, port) {
     if (!Number.isInteger(port) || port < 0 || port > 65535)
         throw new Error('本地代理端口无效');
@@ -326,7 +358,7 @@ export function buildSingboxConfig(input, port) {
                 listen_port: port,
             },
         ],
-        outbounds: spec.outbounds,
+        outbounds: spec.outbounds.map(withSafeDialDefaults),
         ...(spec.endpoints ? { endpoints: spec.endpoints } : {}),
         route: { ...spec.route, default_domain_resolver: defaultResolver },
     };

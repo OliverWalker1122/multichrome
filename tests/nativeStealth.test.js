@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { decideStartupUrlAction } from '../electron/domain/startupUrlPolicy.js';
+import { buildFingerprintChromiumArgs } from '../electron/domain/fingerprintProfile.js';
 
 const require = createRequire(import.meta.url);
 
@@ -165,4 +166,26 @@ test('EnvironmentService.inspectEnvironmentHealth never excludes the inspected e
     const fnBody = src.slice(fnStart, fnStart + 2200);
     assert.match(fnBody, /ensureManagedProxyReady\(\s*env\.proxyId\s*,?\s*\)/);
     assert.equal(/ensureManagedProxyReady\(\s*env\.proxyId\s*,\s*id\s*\)/.test(fnBody), false);
+});
+
+test('buildFingerprintChromiumArgs disables DeviceBoundSessions to prevent Chromium 148 DBSC request deferral deadlocks behind proxies', () => {
+    const args = buildFingerprintChromiumArgs(
+        {
+            seed: 123456,
+            platform: 'windows',
+            brand: 'Chrome',
+            hardwareConcurrency: 8,
+            windowSize: { width: 1600, height: 900 },
+        },
+        { timezone: 'America/La_Paz' },
+    );
+    const disableFeaturesArg = args.find((arg) =>
+        arg.startsWith('--disable-features='),
+    );
+    assert.ok(disableFeaturesArg);
+    const features = disableFeaturesArg
+        .slice('--disable-features='.length)
+        .split(',');
+    assert.ok(features.includes('DeviceBoundSessions'));
+    assert.ok(features.includes('PersistDeviceBoundSessions'));
 });
