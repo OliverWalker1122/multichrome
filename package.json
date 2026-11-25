@@ -1,6 +1,6 @@
 {
     "name": "multichrome",
-    "version": "1.6.1",
+    "version": "1.6.2",
     "type": "module",
     "description": "Local-first multi-profile browser manager with isolated proxies and native anti-fingerprinting",
     "main": "dist/electron/main.js",

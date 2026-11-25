@@ -26,7 +26,7 @@ Briefly describe the issue encountered.
 ## Environment
 
 - **OS**: [e.g. Windows 11 24H2 / macOS 15 arm64 / Ubuntu 24.04]
-- **MultiChrome Version**: [e.g. v1.6.1]
+- **MultiChrome Version**: [e.g. v1.6.2]
 - **Browser Engine**: [`fingerprint-chromium` Privacy Kernel / `system-chrome` Standard Chrome]
 - **Proxy Mode (if applicable)**: [Direct / Managed `sing-box` (VLESS / VMess / Trojan / SS / Hy2 / TUIC / SOCKS5 / HTTP) / Manual Proxy]
 

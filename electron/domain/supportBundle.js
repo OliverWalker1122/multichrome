@@ -56,7 +56,7 @@ export function sanitizeDiagnosticText(input) {
  * }} [options]
  */
 export function buildSanitizedSupportBundle({
-    appVersion = '1.6.1',
+    appVersion = '1.6.2',
     locale = 'en-US',
     platform = process.platform,
     arch = process.arch,

@@ -2,6 +2,21 @@
 
 All notable changes to MultiChrome are documented in this file.
 
+## [1.6.2] - 2026-11-26
+
+### Added
+- **Expandable Component Details & Config Folder Shortcut**: Added expandable component path, manifest, and status details in `Settings -> Components`, plus a quick `Open Config Folder` action in `Settings -> General`.
+
+### Changed
+- **Client-Agnostic Quick Connect Panel**: Streamlined `Settings -> Automation & MCP -> Quick Connect` into three side-by-side tabs (`CDP Script`, `DevTools MCP`, `Playwright MCP`) that output universal `mcpServers` JSON (bundling HTTP profile management with standard CDP page control) instead of client-specific CLI commands.
+
+### Fixed
+- **Chromium 148 DBSC & Proxy Tunnel Stability**: Preserved native `DeviceBoundSessions` (DBSC) while adding a zero-MITM `CONNECT`/DBSC stall watchdog, `sing-box` dialer and keep-alive timeouts, and non-poisoning loopback EOF / upstream `403` log handling so persistent sessions stay responsive without deadlocks or spurious upstream-error teardowns.
+- **Health Check Proxy Isolation & Auto-Attach Filtering**: Excluded the target profile when evaluating active proxy usage during health checks, filtered `service_worker` targets from CDP auto-attach to prevent unnecessary pauses, and removed the inner scrollbar in `EnvironmentHealthDialog` so all check items display directly.
+- **Zero Layout Shift on Profile Start & Stop**: Fixed the environment table action column width, kept the page header invariant by placing inline live memory telemetry and running-window actions on the toolbar row, bounded running-row memory line height, and compacted the Details panel Locate button to eliminate UI jumps when launching and closing profiles.
+
+---
+
 ## [1.6.1] - 2026-11-25
 
 ### Fixed

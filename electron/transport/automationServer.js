@@ -164,7 +164,7 @@ export class AutomationServer {
      */
     constructor({
         backend,
-        serverVersion = '1.6.1',
+        serverVersion = '1.6.2',
         logger = console,
         maxBodyBytes = MAX_AUTOMATION_BODY_BYTES,
         getRequiredToken = () => null,

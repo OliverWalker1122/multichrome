@@ -38,7 +38,7 @@ All eight site and engine combinations returned explicit verdicts, with PixelSca
 ## 3. CI & Automated Releases
 
 - **Continuous Integration ([ci.yml](../.github/workflows/ci.yml))**: Runs `npm run check`, `npm run lint`, `npm run prepare:singbox`, `npm test`, and `npm run build` on every push to `main` and every pull request, and updates test status badges.
-- **Release Pipeline ([release.yml](../.github/workflows/release.yml))**: Pushing a `v*` tag matching `package.json` (`git tag -a v1.6.1 -m "MultiChrome v1.6.1" && git push origin v1.6.1`) runs pre-release checks, builds Windows (`.exe`), macOS (`.dmg` / `.zip`), and Linux (`.AppImage` / `.deb`) installers in parallel, generates `SHA256SUMS.txt` + SLSA build provenance attestations, and publishes to GitHub Releases.
+- **Release Pipeline ([release.yml](../.github/workflows/release.yml))**: Pushing a `v*` tag matching `package.json` (`git tag -a v1.6.2 -m "MultiChrome v1.6.2" && git push origin v1.6.2`) runs pre-release checks, builds Windows (`.exe`), macOS (`.dmg` / `.zip`), and Linux (`.AppImage` / `.deb`) installers in parallel, generates `SHA256SUMS.txt` + SLSA build provenance attestations, and publishes to GitHub Releases.
 
 ## Local client verification
 

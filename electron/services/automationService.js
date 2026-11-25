@@ -98,7 +98,7 @@ export function createAutomationBackend({
     chromeManager,
     proxyManager = null,
     proxyIntegration = null,
-    appVersion = '1.6.1',
+    appVersion = '1.6.2',
     fetchWsEndpoint = fetchDevToolsWsEndpoint,
 }) {
     if (!chromeManager || typeof chromeManager !== 'object') {

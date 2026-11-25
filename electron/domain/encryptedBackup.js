@@ -30,7 +30,7 @@ export function sanitizePortableSettings(settings) {
 export function encryptBackupBundle(
     bundle,
     password,
-    { appVersion = '1.6.1', nowIso = new Date().toISOString() } = {},
+    { appVersion = '1.6.2', nowIso = new Date().toISOString() } = {},
 ) {
     validateBackupPassword(password);
     if (!bundle || typeof bundle !== 'object') {
@@ -40,7 +40,7 @@ export function encryptBackupBundle(
     const normalizedPayload = {
         schemaVersion: BACKUP_VERSION,
         exportedAt: nowIso,
-        appVersion: String(appVersion || '1.6.1'),
+        appVersion: String(appVersion || '1.6.2'),
         settings: sanitizePortableSettings(bundle.settings),
         proxies: Array.isArray(bundle.proxies) ? bundle.proxies : [],
         environments: Array.isArray(bundle.environments) ? bundle.environments : [],
@@ -62,7 +62,7 @@ export function encryptBackupBundle(
             magic: BACKUP_MAGIC,
             version: BACKUP_VERSION,
             createdAt: nowIso,
-            appVersion: String(appVersion || '1.6.1'),
+            appVersion: String(appVersion || '1.6.2'),
             kdf: {
                 name: 'scrypt',
                 ...SCRYPT_PARAMS,
