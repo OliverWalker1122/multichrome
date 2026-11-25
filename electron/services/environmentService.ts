@@ -952,18 +952,27 @@ export class EnvironmentService {
 
     public async permanentlyDeleteEnvironment(id: string): Promise<boolean> {
         try {
-            const env = this.repository.hardDeleteDeleted(id);
-            if (!env) {
+            const target = this.repository.findAnyById(id);
+            if (!target || !target.deletedAt) {
                 log.error(`尝试永久删除不存在或未删除的环境: ${id}`);
                 return false;
             }
-            if (fs.existsSync(env.dataDir)) {
-                await fs.promises.rm(env.dataDir, {
+            if (fs.existsSync(target.dataDir)) {
+                await this.launchService.ensureProfileDirectoryUnlocked?.(
+                    id,
+                    target.dataDir,
+                    target.name,
+                );
+                await fs.promises.rm(target.dataDir, {
                     recursive: true,
                     force: true,
-                    maxRetries: 6,
-                    retryDelay: 150,
+                    maxRetries: 10,
+                    retryDelay: 200,
                 });
+            }
+            const env = this.repository.hardDeleteDeleted(id);
+            if (!env) {
+                return false;
             }
             log.info(`永久删除Chrome环境: ${env.name} (${id})`);
             return true;
@@ -983,11 +992,16 @@ export class EnvironmentService {
             let cleanedCount = 0;
             for (const env of envs) {
                 if (fs.existsSync(env.dataDir)) {
+                    await this.launchService.ensureProfileDirectoryUnlocked?.(
+                        env.id,
+                        env.dataDir,
+                        env.name,
+                    );
                     await fs.promises.rm(env.dataDir, {
                         recursive: true,
                         force: true,
-                        maxRetries: 6,
-                        retryDelay: 150,
+                        maxRetries: 10,
+                        retryDelay: 200,
                     });
                 }
                 cleanedCount += 1;

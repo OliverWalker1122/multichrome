@@ -27,6 +27,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
+const appVersionTag = `v${JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).version}`;
 const require = createRequire(import.meta.url);
 const electronBinary = require('electron');
 
@@ -2823,7 +2824,7 @@ async function main() {
                 );
                 sidebarCollapseOk = Boolean(collapsedOk && reExpandedOk);
 
-                // 2) StatusBar metadata (selection label, sing-box version, v1.6.0, TitleBar brand icon SVG)
+                // 2) StatusBar metadata (selection label, sing-box version, app version, TitleBar brand icon SVG)
                 statusBarMetaOk = await cdp.eval(`(() => {
                     const footer = document.querySelector('footer[aria-label="状态栏"]');
                     const ft = footer?.innerText || '';
@@ -2832,7 +2833,7 @@ async function main() {
                         footer &&
                             ft.includes('代理日志') &&
                             ft.includes('后台日志') &&
-                            ft.includes('v1.6.0') &&
+                            ft.includes(${JSON.stringify(appVersionTag)}) &&
                             hasBrandSvg,
                     );
                 })()`);
@@ -3313,12 +3314,12 @@ async function main() {
                     4000,
                 );
 
-                // 4) About tab: MultiChrome hero, version v1.6.0, GitHub Star, Export Diagnostics, Check Updates
+                // 4) About tab: MultiChrome hero, app version, GitHub Star, Export Diagnostics, Check Updates
                 await cdp.eval(`document.querySelector('[data-testid="settings-tab-about"]').click()`);
                 aboutTabOk = await waitUntil(
                     () => cdp.eval(`(() => {
                         const t = window.__e2e.bodyText();
-                        return t.includes('MultiChrome') && t.includes('v1.6.0') && t.includes('导出诊断报告') && t.includes('检查更新') && t.includes('GitHub Star');
+                        return t.includes('MultiChrome') && t.includes(${JSON.stringify(appVersionTag)}) && t.includes('导出诊断报告') && t.includes('检查更新') && t.includes('GitHub Star');
                     })()`),
                     4000,
                 );

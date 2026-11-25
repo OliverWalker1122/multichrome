@@ -14,7 +14,10 @@ import { BrowserProcessScanner } from '../drivers/browserProcessScanner.js';
 import { findSystemChromeExecutable } from '../drivers/chromeDiscovery.js';
 import { loadExtensionsViaCdpPipe } from '../drivers/extensionPipeLoader.js';
 import { writeNativeStealthPreferences } from '../drivers/nativePreferences.js';
-import { isProfileRunningLocally } from '../drivers/profileLock.js';
+import {
+    isLockfileHeldSync,
+    isProfileRunningLocally,
+} from '../drivers/profileLock.js';
 import {
     hasSavedChromeSession,
     resolveExtensionTemplatePaths,
@@ -1427,6 +1430,17 @@ export class BrowserLaunchService {
                     envIdShort,
                     envName,
                 );
+                if (dataDir) {
+                    const releaseDeadline = Date.now() + 1500;
+                    while (
+                        Date.now() < releaseDeadline &&
+                        isLockfileHeldSync(dataDir)
+                    ) {
+                        await new Promise((resolve) =>
+                            setTimeout(resolve, 100),
+                        );
+                    }
+                }
             }
 
             if (envProcess.proxyId) {
@@ -1438,6 +1452,32 @@ export class BrowserLaunchService {
         } catch (error) {
             log.error('关闭环境失败:', error);
             throw error;
+        }
+    }
+
+    public async ensureProfileDirectoryUnlocked(
+        id: string,
+        dataDir: string,
+        envName = '未知',
+    ): Promise<void> {
+        if (!dataDir || !isLockfileHeldSync(dataDir)) {
+            return;
+        }
+        const shortDeadline = Date.now() + 400;
+        while (Date.now() < shortDeadline && isLockfileHeldSync(dataDir)) {
+            await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        if (!isLockfileHeldSync(dataDir)) {
+            return;
+        }
+        const envIdShort = id.substring(0, 8);
+        await this.processScanner.forceKillEnvironmentProcesses(
+            envIdShort,
+            envName,
+        );
+        const releaseDeadline = Date.now() + 2500;
+        while (Date.now() < releaseDeadline && isLockfileHeldSync(dataDir)) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
     }
 

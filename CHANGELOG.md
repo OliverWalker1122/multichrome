@@ -2,6 +2,15 @@
 
 All notable changes to MultiChrome are documented in this file.
 
+## [1.6.1] - 2026-11-25
+
+### Fixed
+- **Update Check Fallback Under GitHub API Rate Limits**: Automatically fall back from `api.github.com/repos/.../releases/latest` to the official `github.com/.../releases/latest` redirect plus `SHA256SUMS.txt` when anonymous API requests hit `HTTP 403`/`429` rate limits, keeping both in-app update checks and verified installer downloads working without extra endpoints or credentials.
+- **Windows Installer SHA-256 Verification Matching**: Normalized spaces vs. dots (`MultiChrome Setup <ver>.exe` vs. GitHub's uploaded `MultiChrome.Setup.<ver>.exe`) when resolving digests in `SHA256SUMS.txt`.
+- **Windows Permanent-Delete Lockfile Release**: Waited for Chrome `lockfile` release after force-killing and ensured lingering profile processes are cleared before deleting trashed profile directories and SQLite rows, preventing `EBUSY` deletion failures.
+
+---
+
 ## [1.6.0] - 2026-11-25
 
 ### Added
