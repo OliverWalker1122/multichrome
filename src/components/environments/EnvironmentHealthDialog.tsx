@@ -107,16 +107,14 @@ const useStyles = makeStyles({
     list: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
+        gap: '6px',
         marginTop: '8px',
-        maxHeight: '280px',
-        overflowY: 'auto',
     },
     row: {
         display: 'flex',
         alignItems: 'flex-start',
         gap: '10px',
-        padding: '10px 12px',
+        padding: '8px 12px',
         borderRadius: '8px',
         border: '1px solid var(--glass-border)',
         backgroundColor: 'var(--glass-card-inner)',
@@ -342,7 +340,13 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                 if (!data.open && !launching) onClose();
             }}
         >
-            <DialogSurface style={{ maxWidth: '580px', width: '92vw' }}>
+            <DialogSurface
+                style={{
+                    maxWidth: '620px',
+                    width: '92vw',
+                    maxHeight: 'calc(100vh - 32px)',
+                }}
+            >
                 <DialogBody>
                     <DialogTitle>
                         {isBatch
