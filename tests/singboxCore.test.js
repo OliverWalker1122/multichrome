@@ -184,6 +184,11 @@ test(
         t.after(() => process.stop());
         assert.equal((await request(port)).body, 'through-singbox');
         assert.equal(received, 1);
+        assert.equal(
+            logs.some((item) => item.level === 'error'),
+            false,
+            `healthy startup/request must not emit false error logs: ${JSON.stringify(logs)}`,
+        );
         for (const socket of sockets) socket.destroy();
         await new Promise((resolve) => upstream.close(resolve));
         const failed = await request(port).catch(() => ({ code: 0 }));
@@ -349,6 +354,37 @@ test('safeLog 剥离 ANSI 颜色码并准确诊断 REALITY/TLS 错误且忽略�
     const benignKeepAlive =
         '+0800 2026-11-24 01:46:52 \u001b[31mERROR\u001b[0m [3130443072 1.42s] inbound/http[multichrome-in]: process connection from 127.0.0.1:58341: read http request: read tcp 127.0.0.1:58339->127.0.0.1:58341: use of closed network connection';
     assert.equal(safeLog(benignKeepAlive), null);
+
+    // Startup readiness probe & browser idle loopback disconnects must never poison proxy health
+    const startupProbeEof =
+        '+0800 2026-11-25 23:15:21 \u001b[31mERROR\u001b[0m [2111119535 0ms] inbound/http[multichrome-in]: process connection from 127.0.0.1:59399: read http request: EOF';
+    assert.equal(safeLog(startupProbeEof), null);
+
+    const localReset =
+        '+0800 2026-11-25 23:15:22 \u001b[31mERROR\u001b[0m [2111119536 0ms] inbound/http[multichrome-in]: process connection from 127.0.0.1:59400: read http request: wsarecv: An existing connection was forcibly closed by the remote host.';
+    assert.equal(safeLog(localReset), null);
+
+    // Genuine outbound EOF must still be reported as an error so stale tunnels recycle
+    const outboundEof =
+        '+0800 2026-11-25 23:15:23 \u001b[31mERROR\u001b[0m [2111119537 400ms] connection: open connection to example.com:443 using outbound/http[proxy]: EOF';
+    const outboundEofEntry = safeLog(outboundEof);
+    assert.equal(outboundEofEntry?.level, 'error');
+    assert.match(outboundEofEntry?.message || '', /代理连接中断或上游不可达/);
+
+    // Per-destination upstream HTTP 403 policy rejection is a warning, not a broken tunnel error
+    const target403 =
+        '+0800 2026-11-25 23:13:02 \u001b[31mERROR\u001b[0m [3372473758 405ms] connection: open connection to tracker.example.invalid:443 using outbound/http[proxy]: unexpected status: 403 Forbidden';
+    const target403Entry = safeLog(target403);
+    assert.equal(target403Entry?.level, 'warn');
+    assert.equal(target403Entry?.message, '上游代理拒绝了部分目标连接（HTTP 403）');
+    assert.equal(target403Entry?.message.includes('tracker.example.invalid'), false);
+
+    // Upstream proxy 407 authentication failure must remain an error
+    const auth407 =
+        '+0800 2026-11-25 23:13:03 \u001b[31mERROR\u001b[0m [3372473759 200ms] connection: open connection to example.com:443 using outbound/http[proxy]: unexpected status: 407 Proxy Authentication Required';
+    const auth407Entry = safeLog(auth407);
+    assert.equal(auth407Entry?.level, 'error');
+    assert.match(auth407Entry?.message || '', /上游代理认证失败/);
 
     const coloredTarget =
         '+0800 2026-11-24 01:46:51 \u001b[36mINFO\u001b[0m [12345 0ms] outbound/vless[proxy]: outbound connection to example.com:443';

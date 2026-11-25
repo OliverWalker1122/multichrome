@@ -449,10 +449,10 @@ export class EnvironmentService {
                 ) || null;
             if (managedProxy) {
                 try {
+                    // 健康自检可能在环境已运行时触发：绝不排除当前环境 ID，避免误判代理空闲而重建端口、切断运行中浏览器网络
                     proxyAddress =
                         await this.launchService.ensureManagedProxyReady(
                             env.proxyId,
-                            id,
                         );
                 } catch (err) {
                     log.warn(

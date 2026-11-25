@@ -109,6 +109,8 @@ const EXACT_BACKEND_MESSAGES: Record<string, string> = {
         'Upstream TLS handshake failed. Check certificate, SNI, or protocol settings.',
     '上游代理认证失败，请检查认证配置':
         'Upstream proxy authentication failed. Check credentials.',
+    '上游代理拒绝了部分目标连接（HTTP 403）':
+        'Upstream proxy rejected some target connections (HTTP 403)',
     '本地代理端口被占用': 'Local proxy port is already in use',
     '代理连接超时': 'Proxy connection timed out',
     '代理连接中断或上游不可达':

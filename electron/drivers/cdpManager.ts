@@ -144,6 +144,14 @@ export class CDPManager {
         );
     }
 
+    /**
+     * 仅在需要首帧前注入时区/语言（系统 Chrome）时启用 waitForDebuggerOnStart；
+     * C++ 指纹内核仅覆盖 Geolocation 时无需暂停目标，避免运行中途挂起 Gmail 等重度应用的 iframe/SW。
+     */
+    private shouldPauseOnAutoAttach(envId: string): boolean {
+        return this.envTimezones.has(envId) || this.envLocales.has(envId);
+    }
+
     private trackInjectionTask(envId: string, task: Promise<void>): void {
         let set = this.envInjectionTasks.get(envId);
         if (!set) {
@@ -325,25 +333,62 @@ export class CDPManager {
         }
 
         connection.autoAttachEnabled = true;
+        const waitForDebuggerOnStart = this.shouldPauseOnAutoAttach(envId);
+        const autoAttachParams: Record<string, unknown> = {
+            autoAttach: true,
+            waitForDebuggerOnStart,
+            flatten: true,
+            // 显式排除 service_worker / browser / tab，彻底避免暂停 Gmail 等重度 SW 应用的 ServiceWorker
+            filter: [
+                { type: 'browser', exclude: true },
+                { type: 'tab', exclude: true },
+                { type: 'service_worker', exclude: true },
+                {},
+            ],
+        };
         const promise = this.sendCommand(
             envId,
             ws,
             'Target.setAutoAttach',
-            {
-                autoAttach: true,
-                waitForDebuggerOnStart: true,
-                flatten: true,
-            },
+            autoAttachParams,
             undefined,
             2000,
-        ).then((resp) => {
+        ).then(async (resp) => {
             if (resp && 'error' in resp && resp.error) {
-                if (this.connections.get(envId)?.ws === ws) {
-                    connection.autoAttachEnabled = false;
+                // 兼容不支持 filter 参数的旧版 Chromium：回退不带 filter 再试一次
+                const fallbackResp = await this.sendCommand(
+                    envId,
+                    ws,
+                    'Target.setAutoAttach',
+                    {
+                        autoAttach: true,
+                        waitForDebuggerOnStart,
+                        flatten: true,
+                    },
+                    undefined,
+                    2000,
+                );
+                if (
+                    fallbackResp &&
+                    'error' in fallbackResp &&
+                    fallbackResp.error
+                ) {
+                    if (this.connections.get(envId)?.ws === ws) {
+                        connection.autoAttachEnabled = false;
+                    }
+                    log.warn(
+                        `[CDP] Target.setAutoAttach 返回错误:`,
+                        fallbackResp.error,
+                    );
+                } else {
+                    log.info(
+                        `[CDP] 已启用 Target.setAutoAttach (compat): ${envId.substring(0, 8)}`,
+                    );
                 }
-                log.warn(`[CDP] Target.setAutoAttach 返回错误:`, resp.error);
             } else {
-                log.info(`[CDP] 已启用 Target.setAutoAttach: ${envId.substring(0, 8)}`);
+                log.info(
+                    `[CDP] 已启用 Target.setAutoAttach: ${envId.substring(0, 8)}`,
+                );
             }
         });
 

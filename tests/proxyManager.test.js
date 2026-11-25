@@ -592,6 +592,14 @@ test('ensureFresh recycles on upstream-error and system-resume; exit probe clear
     // Let the background start exitProbe settle.
     await manager.refreshExitInfo(saved.id);
 
+    // Warn-level logs (e.g. per-destination HTTP 403 refusal) must NOT poison lastError or staleReason.
+    calls.handlers[0].onLog({
+        level: 'warn',
+        message: '上游代理拒绝了部分目标连接（HTTP 403）',
+    });
+    assert.equal(manager.getStaleReason(saved.id), null);
+    assert.equal(manager.list()[0].lastError, undefined);
+
     // Upstream log error marks stale; a subsequent healthy exit check clears it.
     calls.handlers[0].onLog({ level: 'error', message: 'dial timeout' });
     assert.equal(manager.getStaleReason(saved.id), 'upstream-error');

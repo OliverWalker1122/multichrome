@@ -52,7 +52,16 @@ export function safeLog(line) {
     const clean = stripAnsi(line);
     if (!clean) return null;
     if (/\b(FATAL|ERROR|WARN)\b/i.test(clean)) {
-        // Local browser/client closing an idle HTTP keep-alive socket to 127.0.0.1 is benign.
+        // Local browser/client or startup readiness probe closing a loopback HTTP socket
+        // before/between requests is benign and must never poison proxy health/stale state.
+        if (
+            /read http request:.*(?:use of closed network connection|unexpected EOF|\bEOF\b|connection reset|forcibly closed|broken pipe)/i.test(
+                clean,
+            ) &&
+            /inbound\/http\[multichrome-in\]/i.test(clean)
+        ) {
+            return null;
+        }
         if (/read http request:.*use of closed network connection/i.test(clean)) {
             return null;
         }
@@ -66,6 +75,11 @@ export function safeLog(line) {
             return {
                 level: 'error',
                 message: '上游代理认证失败，请检查认证配置',
+            };
+        if (/unexpected status:\s*403\b|403 Forbidden/i.test(clean))
+            return {
+                level: 'warn',
+                message: '上游代理拒绝了部分目标连接（HTTP 403）',
             };
         if (/address already in use|bind:/i.test(clean))
             return { level: 'error', message: '本地代理端口被占用' };
