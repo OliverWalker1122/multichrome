@@ -76,6 +76,26 @@ for (const authenticated of [false, true]) {
     });
 }
 
+test('默认纯 IP 探测仅访问两个目标，首选服务失败时仍能取到出口', async (t) => {
+    const hosts = [];
+    const server = http.createServer((request, response) => {
+        hosts.push(request.headers.host);
+        if (hosts.length === 1) {
+            response.writeHead(503);
+            response.end();
+        } else {
+            response.end('203.0.113.42');
+        }
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    const result = await probeProxyExitInfo(
+        `http://127.0.0.1:${server.address().port}`,
+    );
+    assert.equal(result?.ip, '203.0.113.42');
+    assert.deepEqual(hosts.sort(), ['api.ipify.org', 'ipv4.icanhazip.com']);
+});
+
 test('probeProxyExitInfo (needTimezone) 优先仅并发 geo 节点，成功时不触发 IP-only 兜底请求', async (t) => {
     const seenHosts = [];
     const sockets = new Set();

@@ -6,14 +6,6 @@ import {
     parseGeoProbeResponse,
 } from '../domain/proxyGeo.js';
 
-export const PROXY_IP_PROBE_TARGETS = [
-    { host: 'api.ipify.org', path: '/' },
-    { host: 'ipinfo.io', path: '/ip' },
-    { host: 'ipv4.icanhazip.com', path: '/' },
-    { host: 'ifconfig.me', path: '/ip' },
-    { host: 'checkip.amazonaws.com', path: '/' },
-];
-
 class BufferedSocketReader {
     constructor(socket) {
         this.socket = socket;
@@ -693,33 +685,6 @@ export async function fetchHttpViaSocksProxy(
     }
 }
 
-function raceFirstSuccess(promises) {
-    return new Promise((resolve, reject) => {
-        let remaining = promises.length;
-        if (remaining === 0) {
-            reject(new Error('no probe targets'));
-            return;
-        }
-        let settled = false;
-        for (const p of promises) {
-            p.then(
-                (value) => {
-                    if (!settled) {
-                        settled = true;
-                        resolve(value);
-                    }
-                },
-                () => {
-                    remaining -= 1;
-                    if (remaining === 0 && !settled) {
-                        reject(new Error('all probe targets failed'));
-                    }
-                },
-            );
-        }
-    });
-}
-
 /**
  * @param {string} proxyAddress
  * @param {{
@@ -760,9 +725,7 @@ export async function probeProxyExitInfo(
             cached.expiresAt > Date.now() &&
             (!needTimezone || cached.info.timezone)
         ) {
-            logger?.info?.(
-                `[代理预解析] 命中短时缓存: ip=${cached.info.ip}, tz=${cached.info.timezone || 'none'}`,
-            );
+            logger?.info?.('已复用代理出口探测缓存');
             return cached.info;
         }
     }
@@ -796,10 +759,9 @@ export async function probeProxyExitInfo(
     try {
         let result;
         if (needTimezone) {
-            // Race only the 3 geo endpoints first (instead of blasting 8 sockets at once),
-            // reducing connection burst & RST churn on residential/chained proxies.
+            // IP-only services are consulted only if geo providers yield no usable IP.
             let fallbackIpInfo = null;
-            const geoWithTzPromise = raceFirstSuccess(
+            const geoWithTzPromise = Promise.any(
                 geoTargets.map(async (target) => {
                     const info = await probeGeoTarget(
                         target,
@@ -821,7 +783,7 @@ export async function probeProxyExitInfo(
                     result = fallbackIpInfo;
                 } else {
                     fallbackController = new AbortController();
-                    const ipFallback = await raceFirstSuccess(
+                    const ipFallback = await Promise.any(
                         ipTargets.map((target) =>
                             probeIpTarget(target, fallbackController.signal),
                         ),
@@ -833,7 +795,7 @@ export async function probeProxyExitInfo(
                 }
             }
         } else {
-            result = await raceFirstSuccess(
+            result = await Promise.any(
                 ipTargets.map((target) =>
                     probeIpTarget(target, primaryController.signal),
                 ),

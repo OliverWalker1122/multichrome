@@ -48,6 +48,9 @@ export function tr(zh: string, en: string, locale: AppLocale = getStoredLocale()
 }
 
 const EXACT_BACKEND_MESSAGES: Record<string, string> = {
+    '代理未及时回应 CONNECT 请求 (connect_handshake_timeout)': 'The proxy did not respond to CONNECT in time (connect_handshake_timeout)',
+    '代理隧道未及时收到 TLS 握手回复 (tls_handshake_timeout)': 'The proxy tunnel timed out waiting for the TLS handshake reply (tls_handshake_timeout)',
+    '已复用代理出口探测缓存': 'Reused the cached proxy exit result',
     // ProxyManager
     'sing-box 启动失败，请检查核心、配置和本地端口':
         'sing-box failed to start. Check the core binary, config, and local ports.',

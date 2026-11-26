@@ -1,78 +1,24 @@
-/**
- * Pure domain policy for local loopback HTTP CONNECT proxy tunnel watchdogs.
- *
- * Chromium 148's W3C Device Bound Session Credentials (DBSC) `URLFetcher`
- * does not enforce a standalone refresh request timeout yet (added later in
- * upstream Chromium). When a residential proxy keeps its client-side TCP
- * connection alive while stalling the remote TLS/HTTP response for a bound
- * cookie rotation (`accounts.google.com/RotateBoundCookies`), Chromium 148
- * permanently defers all in-scope `*.google.com` credentialed requests.
- *
- * Terminating stalled CONNECT/TLS handshakes and stalled DBSC auth-refresh
- * tunnels at the local loopback relay surfaces a transient `net_error` to
- * Chromium (`SessionError::kNetError`), which preserves the native DBSC
- * session AND immediately calls `UnblockDeferredRequests()`.
- */
-
-export const DBSC_AUTH_REFRESH_HOSTS = Object.freeze([
-    'accounts.google.com',
-    'accounts.youtube.com',
-]);
-
+// These deadlines cover outstanding requests only. Established tunnels use
+// the browser and upstream proxy's native connection lifecycle.
 export const DEFAULT_TUNNEL_WATCHDOG_CONFIG = Object.freeze({
     connectHandshakeTimeoutMs: 20_000,
     tlsHandshakeTimeoutMs: 20_000,
-    dbscResponseTimeoutMs: 25_000,
-    dbscIdleTimeoutMs: 60_000,
-    minResponseTriggerBytes: 64,
 });
 
-const DBSC_AUTH_REFRESH_HOST_SET = new Set(DBSC_AUTH_REFRESH_HOSTS);
-
-/**
- * Normalize a proxy tunnel watchdog configuration object with safe defaults.
- * @param {boolean | Partial<typeof DEFAULT_TUNNEL_WATCHDOG_CONFIG> | undefined} raw
- * @returns {{
- *   connectHandshakeTimeoutMs: number;
- *   tlsHandshakeTimeoutMs: number;
- *   dbscResponseTimeoutMs: number;
- *   dbscIdleTimeoutMs: number;
- *   minResponseTriggerBytes: number;
- * } | null}
- */
+/** @param {boolean | Partial<typeof DEFAULT_TUNNEL_WATCHDOG_CONFIG> | undefined} raw */
 export function normalizeTunnelWatchdogConfig(raw) {
-    if (!raw) return null;
-    if (raw === true) {
-        return { ...DEFAULT_TUNNEL_WATCHDOG_CONFIG };
-    }
-    if (typeof raw !== 'object') return null;
-
-    const pickNonNegativeInt = (value, fallback) =>
-        Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
-
+    if (raw === true) return DEFAULT_TUNNEL_WATCHDOG_CONFIG;
+    if (!raw || typeof raw !== 'object') return null;
+    const timeout = (ms, fallback) =>
+        Number.isFinite(ms) && ms >= 0 ? Math.floor(ms) : fallback;
     return {
-        connectHandshakeTimeoutMs: pickNonNegativeInt(
+        connectHandshakeTimeoutMs: timeout(
             raw.connectHandshakeTimeoutMs,
             DEFAULT_TUNNEL_WATCHDOG_CONFIG.connectHandshakeTimeoutMs,
         ),
-        tlsHandshakeTimeoutMs: pickNonNegativeInt(
+        tlsHandshakeTimeoutMs: timeout(
             raw.tlsHandshakeTimeoutMs,
             DEFAULT_TUNNEL_WATCHDOG_CONFIG.tlsHandshakeTimeoutMs,
-        ),
-        dbscResponseTimeoutMs: pickNonNegativeInt(
-            raw.dbscResponseTimeoutMs,
-            DEFAULT_TUNNEL_WATCHDOG_CONFIG.dbscResponseTimeoutMs,
-        ),
-        dbscIdleTimeoutMs: pickNonNegativeInt(
-            raw.dbscIdleTimeoutMs,
-            DEFAULT_TUNNEL_WATCHDOG_CONFIG.dbscIdleTimeoutMs,
-        ),
-        minResponseTriggerBytes: Math.max(
-            1,
-            pickNonNegativeInt(
-                raw.minResponseTriggerBytes,
-                DEFAULT_TUNNEL_WATCHDOG_CONFIG.minResponseTriggerBytes,
-            ),
         ),
     };
 }
@@ -155,16 +101,4 @@ export function parseHttpProxyStatusCode(headerBlock) {
     const match = /^HTTP\/1\.[01]\s+(\d{3})\b/i.exec(statusLine.trim());
     if (!match) return null;
     return Number(match[1]);
-}
-
-/**
- * Determine whether a CONNECT target host is a dedicated DBSC auth-refresh
- * host that should receive post-TLS response-stall and idle-socket guards.
- * @param {string | undefined} host
- * @returns {boolean}
- */
-export function isDbscAuthRefreshHost(host) {
-    if (typeof host !== 'string' || !host.trim()) return false;
-    const normalized = host.trim().toLowerCase().replace(/\.+$/, '');
-    return DBSC_AUTH_REFRESH_HOST_SET.has(normalized);
 }

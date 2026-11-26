@@ -29,10 +29,7 @@ export const GEO_PROBE_TARGETS = [
 
 export const IP_ONLY_PROBE_TARGETS = [
     { host: 'api.ipify.org', path: '/', kind: 'ip' },
-    { host: 'ipinfo.io', path: '/ip', kind: 'ip' },
     { host: 'ipv4.icanhazip.com', path: '/', kind: 'ip' },
-    { host: 'ifconfig.me', path: '/ip', kind: 'ip' },
-    { host: 'checkip.amazonaws.com', path: '/', kind: 'ip' },
 ];
 
 export const DEFAULT_AUTO_LANGUAGE = 'en-US';

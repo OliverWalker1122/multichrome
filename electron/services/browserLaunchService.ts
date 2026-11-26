@@ -730,11 +730,6 @@ export class BrowserLaunchService {
                         );
                         if (rewritten) {
                             chromeProxyAddress = rewritten.gateProxyAddress;
-                            log.info(
-                                needStartupHold
-                                    ? `[${env.name}] 已启用 Fail-Closed 启动流量闸门与隧道防卡死看门狗 (127.0.0.1:${startupGate.port} -> ${rewritten.upstreamHost}:${rewritten.upstreamPort})`
-                                    : `[${env.name}] 已启用代理隧道防卡死看门狗 (127.0.0.1:${startupGate.port} -> ${rewritten.upstreamHost}:${rewritten.upstreamPort})`,
-                            );
                         } else {
                             await startupGate.close();
                             startupGate = undefined;

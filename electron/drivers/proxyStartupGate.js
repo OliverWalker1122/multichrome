@@ -2,7 +2,6 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 import {
-    isDbscAuthRefreshHost,
     normalizeTunnelWatchdogConfig,
     parseHttpConnectTarget,
     parseHttpProxyStatusCode,
@@ -159,263 +158,107 @@ export function cleanupLegacyFingerprintExtension(dataDir, prefs, options = {}) 
 }
 
 /**
- * Attach a passive, zero-MITM HTTP CONNECT stall watchdog to a piped socket
- * pair. Observes framing bytes without mutating or intercepting TLS traffic:
- * - All HTTP CONNECT tunnels: guards against stalled proxy CONNECT responses
- *   and stalled TLS ClientHello -> ServerHello handshakes, then detaches so
- *   steady-state traffic incurs zero ongoing callback overhead.
- * - Dedicated DBSC auth-refresh hosts (`accounts.google.com`,
- *   `accounts.youtube.com`): additionally guards against stalled active
- *   requests (equivalent to upstream Chromium's DBSC `URLFetcher` timeout) and
- *   recycles long-idle connections so 10-minute cookie rotations never hit
- *   zombie residential NAT tunnels.
- *
- * @param {net.Socket} clientSocket
- * @param {net.Socket} upstream
- * @param {{
- *   connectHandshakeTimeoutMs: number;
- *   tlsHandshakeTimeoutMs: number;
- *   dbscResponseTimeoutMs: number;
- *   dbscIdleTimeoutMs: number;
- *   minResponseTriggerBytes: number;
- * }} config
- * @param {(reason: string, host: string) => void} onTerminated
- * @param {GateLogger | undefined} logger
+ * Observe only the CONNECT exchange and the initial TLS record header. Once the
+ * server sends tunnel data, the sockets revert to ordinary pipe semantics.
  */
-function attachHttpConnectTunnelWatchdog(
-    clientSocket,
-    upstream,
-    config,
-    onTerminated,
-    logger,
-) {
-    let phase = 'client_head';
-    let clientHeadBuf = '';
-    let upstreamHeadBuf = '';
-    let isConnectTunnel = false;
-    let isWatchedDbscHost = false;
-    let targetHost = '';
-    let unansweredClientBytes = 0;
-    let awaitingResponse = false;
-    let cleanedUp = false;
+function attachHttpConnectTunnelWatchdog(clientSocket, upstream, config, onTerminated, logger) {
+    let phase = 'request';
+    let header = '';
+    let helloPrefix = Buffer.alloc(0);
+    let sentHello = false;
+    let timer;
 
-    /** @type {NodeJS.Timeout | null} */
-    let handshakeTimer = null;
-    /** @type {NodeJS.Timeout | null} */
-    let tlsTimer = null;
-    /** @type {NodeJS.Timeout | null} */
-    let responseTimer = null;
-    /** @type {NodeJS.Timeout | null} */
-    let idleTimer = null;
-
-    const clearTimer = (ref) => {
-        if (ref) clearTimeout(ref);
-        return null;
-    };
-
-    const cleanup = () => {
-        if (cleanedUp) return;
-        cleanedUp = true;
-        handshakeTimer = clearTimer(handshakeTimer);
-        tlsTimer = clearTimer(tlsTimer);
-        responseTimer = clearTimer(responseTimer);
-        idleTimer = clearTimer(idleTimer);
-        clientHeadBuf = '';
-        upstreamHeadBuf = '';
+    function cleanup() {
+        clearTimeout(timer);
+        header = '';
         clientSocket.off('data', onClientData);
         upstream.off('data', onUpstreamData);
         clientSocket.off('close', cleanup);
         upstream.off('close', cleanup);
-    };
-
-    const detachToPassthrough = () => {
-        phase = 'detached';
-        cleanup();
-    };
-
-    const terminate = (reason) => {
-        if (cleanedUp) return;
-        cleanup();
-        onTerminated(reason, targetHost);
-        if (reason !== 'dbsc_idle_recycle') {
-            logger?.warn?.(
-                `[代理隧道看门狗] 检测到卡死连接 (${reason}${targetHost ? `, host=${targetHost}` : ''})，已主动断链触发重连`,
-            );
-        }
-        if (!upstream.destroyed) upstream.destroy();
-        if (!clientSocket.destroyed) clientSocket.destroy();
-    };
-
-    const armHandshakeTimer = () => {
-        handshakeTimer = clearTimer(handshakeTimer);
-        if (config.connectHandshakeTimeoutMs > 0) {
-            handshakeTimer = setTimeout(
-                () => terminate('connect_handshake_timeout'),
-                config.connectHandshakeTimeoutMs,
-            );
-            handshakeTimer.unref?.();
-        }
-    };
-
-    const armTlsTimer = () => {
-        tlsTimer = clearTimer(tlsTimer);
-        if (config.tlsHandshakeTimeoutMs > 0) {
-            tlsTimer = setTimeout(
-                () => terminate('tls_handshake_timeout'),
-                config.tlsHandshakeTimeoutMs,
-            );
-            tlsTimer.unref?.();
-        }
-    };
-
-    const armIdleTimer = () => {
-        idleTimer = clearTimer(idleTimer);
-        if (
-            isWatchedDbscHost &&
-            !awaitingResponse &&
-            config.dbscIdleTimeoutMs > 0
-        ) {
-            idleTimer = setTimeout(
-                () => terminate('dbsc_idle_recycle'),
-                config.dbscIdleTimeoutMs,
-            );
-            idleTimer.unref?.();
-        }
-    };
-
-    const armResponseTimerIfNeeded = () => {
-        if (awaitingResponse || !isWatchedDbscHost) return;
-        awaitingResponse = true;
-        idleTimer = clearTimer(idleTimer);
-        if (config.dbscResponseTimeoutMs > 0) {
-            responseTimer = setTimeout(
-                () => terminate('dbsc_response_timeout'),
-                config.dbscResponseTimeoutMs,
-            );
-            responseTimer.unref?.();
-        }
-    };
-
-    /** @param {Buffer} chunk */
-    function onClientData(chunk) {
-        if (cleanedUp || !chunk || chunk.length === 0) return;
-
-        if (phase === 'client_head') {
-            if (clientHeadBuf.length === 0) {
-                const firstByte = chunk[0];
-                if (firstByte < 0x41 || firstByte > 0x5a) {
-                    detachToPassthrough();
-                    return;
-                }
-            }
-            clientHeadBuf += chunk.toString('latin1');
-            if (clientHeadBuf.length > 8192) {
-                detachToPassthrough();
-                return;
-            }
-            const headerEnd = clientHeadBuf.indexOf('\r\n\r\n');
-            if (headerEnd < 0) {
-                if (!handshakeTimer) armHandshakeTimer();
-                return;
-            }
-
-            const head = clientHeadBuf.slice(0, headerEnd);
-            clientHeadBuf = '';
-            const connectTarget = parseHttpConnectTarget(head);
-            if (connectTarget) {
-                isConnectTunnel = true;
-                targetHost = connectTarget.host;
-                isWatchedDbscHost = isDbscAuthRefreshHost(connectTarget.host);
-            } else {
-                isConnectTunnel = false;
-            }
-            phase = 'proxy_response';
-            armHandshakeTimer();
-            return;
-        }
-
-        if (phase === 'tls_handshake') {
-            if (!tlsTimer) {
-                armTlsTimer();
-            }
-            return;
-        }
-
-        if (phase === 'tunnel' && isWatchedDbscHost) {
-            unansweredClientBytes += chunk.length;
-            if (unansweredClientBytes >= config.minResponseTriggerBytes) {
-                armResponseTimerIfNeeded();
-            }
-        }
     }
 
-    /** @param {Buffer} chunk */
+    function arm(reason, timeoutMs) {
+        clearTimeout(timer);
+        if (!timeoutMs) return;
+        timer = setTimeout(() => {
+            cleanup();
+            onTerminated(reason);
+            upstream.destroy();
+            clientSocket.destroy();
+            logger?.warn?.(reason === 'connect_handshake_timeout'
+                ? '代理未及时回应 CONNECT 请求 (connect_handshake_timeout)'
+                : '代理隧道未及时收到 TLS 握手回复 (tls_handshake_timeout)');
+        }, timeoutMs);
+        timer.unref();
+    }
+
+    // The header delimiter can span TCP reads. Never buffer the TLS payload
+    // or retain HTTP headers after the decision.
+    function readHead(chunk) {
+        const previousLength = header.length;
+        header += chunk.subarray(0, 8192 - previousLength).toString('latin1');
+        const end = header.indexOf('\r\n\r\n');
+        if (end < 0) {
+            if (header.length >= 8192) cleanup();
+            return null;
+        }
+        const head = header.slice(0, end);
+        header = '';
+        return { head, tail: chunk.subarray(end + 4 - previousLength) };
+    }
+
+    function observeHello(chunk) {
+        if (sentHello || !chunk.length) return;
+        // TLS record type (handshake), major version, and ClientHello message type.
+        helloPrefix = Buffer.concat([helloPrefix, chunk.subarray(0, 6 - helloPrefix.length)]);
+        if (helloPrefix[0] !== 0x16 || (helloPrefix.length > 1 && helloPrefix[1] !== 3)) {
+            cleanup();
+            return;
+        }
+        if (helloPrefix.length < 6) return;
+        if (helloPrefix[5] !== 1) {
+            cleanup();
+            return;
+        }
+        sentHello = true;
+        if (phase === 'tls') arm('tls_handshake_timeout', config.tlsHandshakeTimeoutMs);
+    }
+
+    function onClientData(chunk) {
+        if (phase !== 'request') {
+            observeHello(chunk);
+            return;
+        }
+        if (!header.length && chunk[0] !== 0x43) {
+            cleanup();
+            return;
+        }
+        const request = readHead(chunk);
+        if (!request) return;
+        if (!parseHttpConnectTarget(request.head)) {
+            cleanup();
+            return;
+        }
+        phase = 'response';
+        arm('connect_handshake_timeout', config.connectHandshakeTimeoutMs);
+        observeHello(request.tail);
+    }
+
     function onUpstreamData(chunk) {
-        if (cleanedUp || !chunk || chunk.length === 0) return;
-
-        if (phase === 'client_head') {
-            detachToPassthrough();
+        if (phase !== 'response') {
+            cleanup();
             return;
         }
-
-        if (phase === 'proxy_response') {
-            if (!isConnectTunnel) {
-                detachToPassthrough();
-                return;
-            }
-            upstreamHeadBuf += chunk.toString('latin1');
-            if (upstreamHeadBuf.length > 8192) {
-                detachToPassthrough();
-                return;
-            }
-            const headerEnd = upstreamHeadBuf.indexOf('\r\n\r\n');
-            if (headerEnd < 0) return;
-
-            const statusCode = parseHttpProxyStatusCode(
-                upstreamHeadBuf.slice(0, headerEnd),
-            );
-            const trailingBytes = upstreamHeadBuf.length - (headerEnd + 4);
-            upstreamHeadBuf = '';
-            handshakeTimer = clearTimer(handshakeTimer);
-
-            if (statusCode !== 200) {
-                detachToPassthrough();
-                return;
-            }
-
-            phase = 'tls_handshake';
-            if (trailingBytes > 0) {
-                if (isWatchedDbscHost) {
-                    phase = 'tunnel';
-                    armIdleTimer();
-                } else {
-                    detachToPassthrough();
-                }
-            } else {
-                armTlsTimer();
-            }
+        const response = readHead(chunk);
+        if (!response) return;
+        clearTimeout(timer);
+        const code = parseHttpProxyStatusCode(response.head);
+        if (code === null || code < 200 || code >= 300 || response.tail.length) {
+            cleanup();
             return;
         }
-
-        if (phase === 'tls_handshake') {
-            tlsTimer = clearTimer(tlsTimer);
-            if (!isWatchedDbscHost) {
-                detachToPassthrough();
-                return;
-            }
-            phase = 'tunnel';
-            unansweredClientBytes = 0;
-            awaitingResponse = false;
-            armIdleTimer();
-            return;
-        }
-
-        if (phase === 'tunnel' && isWatchedDbscHost) {
-            unansweredClientBytes = 0;
-            awaitingResponse = false;
-            responseTimer = clearTimer(responseTimer);
-            armIdleTimer();
-        }
+        phase = 'tls';
+        if (sentHello) arm('tls_handshake_timeout', config.tlsHandshakeTimeoutMs);
     }
 
     clientSocket.on('data', onClientData);

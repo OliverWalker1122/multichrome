@@ -11,7 +11,6 @@ import {
     rewriteProxyAddressForGate,
 } from '../electron/drivers/proxyStartupGate.js';
 import {
-    isDbscAuthRefreshHost,
     normalizeTunnelWatchdogConfig,
     parseHttpConnectTarget,
     parseHttpProxyStatusCode,
@@ -280,7 +279,7 @@ function startCustomTcpServer(onConnection) {
     });
 }
 
-test('proxyTunnelPolicy parses CONNECT targets, proxy status codes, and DBSC auth refresh hosts', () => {
+test('proxyTunnelPolicy parses CONNECT targets, proxy status codes and HTTP relay options', () => {
     assert.deepEqual(
         parseHttpConnectTarget(
             'CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443',
@@ -303,17 +302,88 @@ test('proxyTunnelPolicy parses CONNECT targets, proxy status codes, and DBSC aut
         parseHttpProxyStatusCode('HTTP/1.1 407 Proxy Authentication Required'),
         407,
     );
-    assert.equal(isDbscAuthRefreshHost('accounts.google.com'), true);
-    assert.equal(isDbscAuthRefreshHost('ACCOUNTS.YOUTUBE.COM.'), true);
-    assert.equal(isDbscAuthRefreshHost('mail.google.com'), false);
-    assert.equal(isDbscAuthRefreshHost('claude.ai'), false);
     assert.equal(shouldEnableHttpConnectWatchdog('http://127.0.0.1:43210'), true);
     assert.equal(shouldEnableHttpConnectWatchdog('proxy.example.com:8080'), true);
     assert.equal(shouldEnableHttpConnectWatchdog('https://proxy.example.com:443'), false);
     assert.equal(shouldEnableHttpConnectWatchdog('socks5://127.0.0.1:1080'), false);
     assert.equal(normalizeTunnelWatchdogConfig(false), null);
-    assert.equal(normalizeTunnelWatchdogConfig(true)?.dbscResponseTimeoutMs, 25_000);
+    assert.equal(normalizeTunnelWatchdogConfig(true)?.tlsHandshakeTimeoutMs, 20_000);
 });
+
+const clientHelloPrefix = Buffer.from([0x16, 0x03, 0x01, 0x00, 0x20, 0x01]);
+
+test(
+    'idle CONNECT tunnels stay usable until the browser actually starts TLS',
+    { timeout: 5000 },
+    async (t) => {
+        const upstream = await startCustomTcpServer((socket) => {
+            let established = false;
+            socket.on('data', (chunk) => {
+                if (established) socket.write(chunk);
+                else if (chunk.includes('\r\n\r\n')) {
+                    established = true;
+                    socket.write('HTTP/1.1 200 OK\r\n\r\n');
+                }
+            });
+        });
+        t.after(() => upstream.close());
+        const gate = await createProxyStartupGate({
+            upstreamHost: '127.0.0.1',
+            upstreamPort: upstream.port,
+            holdOnStart: false,
+            tunnelWatchdog: {
+                connectHandshakeTimeoutMs: 80,
+                tlsHandshakeTimeoutMs: 80,
+            },
+        });
+        t.after(() => gate.close());
+        const client = net.connect(gate.port, '127.0.0.1');
+        t.after(() => client.destroy());
+        await new Promise((resolve) => client.once('connect', resolve));
+        const reply = new Promise((resolve) => client.once('data', resolve));
+        client.write('CONNECT idle.example:443 HTTP/1.1\r\n\r\n');
+        await reply;
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        assert.equal(gate.getStats().watchdogTerminatedCount, 0);
+        const echo = new Promise((resolve) => client.once('data', resolve));
+        client.write(clientHelloPrefix);
+        assert.deepEqual(await echo, clientHelloPrefix);
+    },
+);
+
+test(
+    'ordinary slow HTTP requests and incomplete client headers are outside the CONNECT timeout',
+    { timeout: 5000 },
+    async (t) => {
+        const upstream = await startCustomTcpServer((socket) => {
+            socket.on('data', (chunk) => {
+                if (chunk.includes('\r\n\r\n'))
+                    setTimeout(() => {
+                        if (!socket.destroyed)
+                            socket.end('HTTP/1.1 204 No Content\r\n\r\n');
+                    }, 150);
+            });
+        });
+        t.after(() => upstream.close());
+        const gate = await createProxyStartupGate({
+            upstreamHost: '127.0.0.1',
+            upstreamPort: upstream.port,
+            holdOnStart: false,
+            tunnelWatchdog: { connectHandshakeTimeoutMs: 65 },
+        });
+        t.after(() => gate.close());
+        const client = net.connect(gate.port, '127.0.0.1');
+        t.after(() => client.destroy());
+        await new Promise((resolve) => client.once('connect', resolve));
+        client.write('GET ');
+        await new Promise((resolve) => setTimeout(resolve, 140));
+        assert.equal(gate.getStats().watchdogTerminatedCount, 0);
+        const reply = new Promise((resolve) => client.once('data', resolve));
+        client.write('http://slow.example/ HTTP/1.1\r\n\r\n');
+        assert.match((await reply).toString(), /204/);
+        assert.equal(gate.getStats().watchdogTerminatedCount, 0);
+    },
+);
 
 test('tunnelWatchdog terminates stalled CONNECT and TLS handshakes when upstream gateway stays TCP-alive', async (t) => {
     // 1. Upstream accepts TCP and swallows CONNECT forever (never replies 200)
@@ -328,8 +398,6 @@ test('tunnelWatchdog terminates stalled CONNECT and TLS handshakes when upstream
         tunnelWatchdog: {
             connectHandshakeTimeoutMs: 100,
             tlsHandshakeTimeoutMs: 100,
-            dbscResponseTimeoutMs: 150,
-            dbscIdleTimeoutMs: 500,
         },
     });
     t.after(() => gate1.close());
@@ -342,7 +410,9 @@ test('tunnelWatchdog terminates stalled CONNECT and TLS handshakes when upstream
         c1.once('close', () => r(true));
         c1.on('error', () => {});
     });
-    c1.write('CONNECT mail.google.com:443 HTTP/1.1\r\nHost: mail.google.com:443\r\n\r\n');
+    c1.write(
+        'CONNECT mail.google.com:443 HTTP/1.1\r\nHost: mail.google.com:443\r\n\r\n',
+    );
     assert.equal(await c1Closed, true);
     assert.equal(gate1.getStats().watchdogReasons.connect_handshake_timeout, 1);
 
@@ -366,8 +436,6 @@ test('tunnelWatchdog terminates stalled CONNECT and TLS handshakes when upstream
         tunnelWatchdog: {
             connectHandshakeTimeoutMs: 500,
             tlsHandshakeTimeoutMs: 100,
-            dbscResponseTimeoutMs: 500,
-            dbscIdleTimeoutMs: 1000,
         },
     });
     t.after(() => gate2.close());
@@ -379,117 +447,111 @@ test('tunnelWatchdog terminates stalled CONNECT and TLS handshakes when upstream
         c2.once('close', () => r(true));
         c2.on('error', () => {});
     });
-    const got200 = new Promise((r) => c2.once('data', (d) => r(d.toString('latin1'))));
-    c2.write('CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443\r\n\r\n');
+    const got200 = new Promise((r) =>
+        c2.once('data', (d) => r(d.toString('latin1'))),
+    );
+    c2.write(
+        'CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443\r\n\r\n',
+    );
     assert.match(await got200, /^HTTP\/1\.1 200 /);
-    c2.write(Buffer.from([0x16, 0x03, 0x01, 0x00, 0x20, ...Array(32).fill(0xaa)]));
+    c2.write(Buffer.concat([clientHelloPrefix, Buffer.alloc(31)]));
     assert.equal(await c2Closed, true);
     assert.equal(gate2.getStats().watchdogReasons.tls_handshake_timeout, 1);
 });
 
-test('tunnelWatchdog unblocks stalled DBSC auth-refresh requests and recycles idle DBSC tunnels without affecting non-DBSC long-polling hosts', async (t) => {
-    let stage = 'connect';
-    const upstream = await startCustomTcpServer((sock) => {
-        let localStage = 'connect';
-        let reqCount = 0;
-        sock.on('data', (chunk) => {
-            const text = chunk.toString('latin1');
-            if (localStage === 'connect' && text.includes('\r\n\r\n')) {
-                localStage = 'tls';
-                sock.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-                return;
-            }
-            if (localStage === 'tls') {
-                localStage = 'tunnel';
-                sock.write(Buffer.from('SERVER_HELLO_OK'));
-                return;
-            }
-            reqCount += 1;
-            if (stage === 'stall_second_dbsc_req') {
-                if (reqCount === 1) {
-                    sock.write(Buffer.from('FIRST_ROTATE_OK'));
-                }
-                // 2nd request stalls forever while socket stays TCP-alive
-                return;
-            }
-            if (stage === 'slow_non_dbsc_long_poll') {
-                setTimeout(() => {
-                    if (!sock.destroyed) sock.write(Buffer.from('LONG_POLL_EVENT'));
-                }, 260);
-            }
+test(
+    'established CONNECT tunnels stay open across slow responses and idle periods on every host',
+    { timeout: 5000 },
+    async (t) => {
+        const upstream = await startCustomTcpServer((socket) => {
+            let phase = 0;
+            socket.on('data', () => {
+                if (phase++ === 0) socket.write('HTTP/1.1 200 OK\r\n\r\n');
+                else if (phase === 2) socket.write('first server bytes');
+                else
+                    setTimeout(() => {
+                        if (!socket.destroyed) socket.write('late response');
+                    }, 150);
+            });
         });
-    });
-    t.after(() => upstream.close());
+        t.after(() => upstream.close());
+        const gate = await createProxyStartupGate({
+            upstreamHost: '127.0.0.1',
+            upstreamPort: upstream.port,
+            holdOnStart: false,
+            tunnelWatchdog: {
+                connectHandshakeTimeoutMs: 65,
+                tlsHandshakeTimeoutMs: 65,
+            },
+        });
+        t.after(() => gate.close());
+        const next = (socket) =>
+            new Promise((resolve) => socket.once('data', resolve));
+        for (const host of [
+            'accounts.google.com',
+            'accounts.youtube.com',
+            'ordinary.example',
+        ]) {
+            const client = net.connect(gate.port, '127.0.0.1');
+            t.after(() => client.destroy());
+            const ready = next(client);
+            client.write(`CONNECT ${host}:443 HTTP/1.1\r\n\r\n`);
+            await ready;
+            const first = next(client);
+            client.write(clientHelloPrefix);
+            await first;
+            await new Promise((resolve) => setTimeout(resolve, 120));
+            const late = next(client);
+            client.write(Buffer.alloc(256));
+            assert.equal((await late).toString(), 'late response');
+            client.end();
+        }
+        assert.equal(gate.getStats().watchdogTerminatedCount, 0);
+    },
+);
 
-    const gate = await createProxyStartupGate({
-        upstreamHost: '127.0.0.1',
-        upstreamPort: upstream.port,
-        holdOnStart: false,
-        maxHoldMs: 0,
-        tunnelWatchdog: {
-            connectHandshakeTimeoutMs: 500,
-            tlsHandshakeTimeoutMs: 500,
-            dbscResponseTimeoutMs: 120,
-            dbscIdleTimeoutMs: 180,
-            minResponseTriggerBytes: 64,
-        },
-    });
-    t.after(() => gate.close());
-
-    // Case 1: accounts.google.com 1st request succeeds, tiny H2 control ACK (<64B) does NOT trigger response timeout,
-    // then 2nd request (>=64B) stalls -> terminated by dbsc_response_timeout
-    stage = 'stall_second_dbsc_req';
-    const dbscClient = net.connect(gate.port, '127.0.0.1');
-    t.after(() => dbscClient.destroy());
-    await new Promise((r) => dbscClient.once('connect', r));
-    const dbscClosed = new Promise((r) => {
-        dbscClient.once('close', () => r(true));
-        dbscClient.on('error', () => {});
-    });
-
-    const nextChunk = (sock) => new Promise((r) => sock.once('data', (d) => r(d.toString('latin1'))));
-    dbscClient.write('CONNECT accounts.google.com:443 HTTP/1.1\r\nHost: accounts.google.com:443\r\n\r\n');
-    assert.match(await nextChunk(dbscClient), /^HTTP\/1\.1 200 /);
-    dbscClient.write(Buffer.from('CLIENT_HELLO'));
-    assert.equal(await nextChunk(dbscClient), 'SERVER_HELLO_OK');
-    dbscClient.write(Buffer.alloc(128, 0x41));
-    assert.equal(await nextChunk(dbscClient), 'FIRST_ROTATE_OK');
-    // Small H2 WINDOW_UPDATE (32B < 64B) followed quickly by real stalled POST /RotateBoundCookies (256B)
-    dbscClient.write(Buffer.alloc(32, 0x01));
-    await new Promise((r) => setTimeout(r, 30));
-    dbscClient.write(Buffer.alloc(256, 0x42));
-    assert.equal(await dbscClosed, true);
-    assert.equal(gate.getStats().watchdogReasons.dbsc_response_timeout, 1);
-
-    // Case 2: idle accounts.youtube.com tunnel is cleanly recycled after dbscIdleTimeoutMs
-    stage = 'idle_only';
-    const idleClient = net.connect(gate.port, '127.0.0.1');
-    t.after(() => idleClient.destroy());
-    await new Promise((r) => idleClient.once('connect', r));
-    const idleClosed = new Promise((r) => {
-        idleClient.once('close', () => r(true));
-        idleClient.on('error', () => {});
-    });
-    idleClient.write('CONNECT accounts.youtube.com:443 HTTP/1.1\r\nHost: accounts.youtube.com:443\r\n\r\n');
-    assert.match(await nextChunk(idleClient), /^HTTP\/1\.1 200 /);
-    idleClient.write(Buffer.from('CLIENT_HELLO'));
-    assert.equal(await nextChunk(idleClient), 'SERVER_HELLO_OK');
-    assert.equal(await idleClosed, true);
-    assert.equal(gate.getStats().watchdogReasons.dbsc_idle_recycle, 1);
-
-    // Case 3: non-DBSC host (mail.google.com) waiting > dbscResponseTimeoutMs & > dbscIdleTimeoutMs stays alive!
-    stage = 'slow_non_dbsc_long_poll';
-    const mailClient = net.connect(gate.port, '127.0.0.1');
-    t.after(() => mailClient.destroy());
-    await new Promise((r) => mailClient.once('connect', r));
-    mailClient.write('CONNECT mail.google.com:443 HTTP/1.1\r\nHost: mail.google.com:443\r\n\r\n');
-    assert.match(await nextChunk(mailClient), /^HTTP\/1\.1 200 /);
-    mailClient.write(Buffer.from('CLIENT_HELLO'));
-    assert.equal(await nextChunk(mailClient), 'SERVER_HELLO_OK');
-    mailClient.write(Buffer.alloc(256, 0x43));
-    assert.equal(await nextChunk(mailClient), 'LONG_POLL_EVENT');
-    assert.equal(gate.getStats().watchdogTerminatedCount, 2);
-});
+test(
+    'a pipelined fragmented ClientHello still times out without exposing its destination',
+    { timeout: 5000 },
+    async (t) => {
+        const upstream = await startCustomTcpServer((socket) => {
+            socket.once('data', () =>
+                setTimeout(() => {
+                    socket.write('HTTP/1.1 200 OK\r\n\r\n');
+                }, 25),
+            );
+        });
+        t.after(() => upstream.close());
+        const warnings = [];
+        const gate = await createProxyStartupGate({
+            upstreamHost: '127.0.0.1',
+            upstreamPort: upstream.port,
+            holdOnStart: false,
+            tunnelWatchdog: {
+                connectHandshakeTimeoutMs: 500,
+                tlsHandshakeTimeoutMs: 65,
+            },
+            logger: { warn: (message) => warnings.push(message) },
+        });
+        t.after(() => gate.close());
+        const client = net.connect(gate.port, '127.0.0.1');
+        t.after(() => client.destroy());
+        client.on('error', () => {});
+        const closed = new Promise((resolve) => client.once('close', resolve));
+        client.resume();
+        client.write(
+            Buffer.concat([
+                Buffer.from('CONNECT private.example:443 HTTP/1.1\r\n\r\n'),
+                clientHelloPrefix.subarray(0, 2),
+            ]),
+        );
+        setTimeout(() => client.write(clientHelloPrefix.subarray(2)), 10);
+        await closed;
+        assert.equal(gate.getStats().watchdogReasons.tls_handshake_timeout, 1);
+        assert.equal(warnings.length, 1);
+        assert.doesNotMatch(warnings[0], /private\.example/);
+    },
+);
 
 test('tunnelWatchdog transparently passes through non-HTTP binary protocols like SOCKS5', async (t) => {
     const upstream = await startEchoTcpServer();
@@ -503,8 +565,6 @@ test('tunnelWatchdog transparently passes through non-HTTP binary protocols like
         tunnelWatchdog: {
             connectHandshakeTimeoutMs: 80,
             tlsHandshakeTimeoutMs: 80,
-            dbscResponseTimeoutMs: 80,
-            dbscIdleTimeoutMs: 80,
         },
     });
     t.after(() => gate.close());
