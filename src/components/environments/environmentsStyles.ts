@@ -3,7 +3,6 @@ import {
     selectedTableRow,
     stickyTableHeader,
     stoppedStatus,
-    tableActionButton,
     tableViewport,
     workspaceTitle,
 } from '../../theme/workspaceStyles';
@@ -229,33 +228,6 @@ export const useEnvironmentsStyles = makeStyles({
         justifyContent: 'flex-start',
         gap: '4px',
         whiteSpace: 'nowrap',
-    },
-    runButton: tableActionButton,
-    runButtonLaunch: {
-        '&:not(:disabled) svg': { color: tokens.colorBrandForeground1 },
-        '&:hover:not(:disabled)': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
-            color: tokens.colorBrandForeground1,
-            border: `1px solid ${tokens.colorBrandForeground1}`,
-        },
-        '&:active:not(:disabled)': {
-            backgroundColor: tokens.colorNeutralBackground1Pressed,
-            color: tokens.colorBrandForeground2,
-            border: `1px solid ${tokens.colorBrandForeground2}`,
-        },
-    },
-    runButtonStop: {
-        '&:not(:disabled) svg': { color: tokens.colorPaletteRedForeground1 },
-        '&:hover:not(:disabled)': {
-            backgroundColor: tokens.colorNeutralBackground1Hover,
-            color: tokens.colorPaletteRedForeground1,
-            border: `1px solid ${tokens.colorPaletteRedForeground1}`,
-        },
-        '&:active:not(:disabled)': {
-            backgroundColor: tokens.colorNeutralBackground1Pressed,
-            color: tokens.colorPaletteRedForeground1,
-            border: `1px solid ${tokens.colorPaletteRedForeground1}`,
-        },
     },
     actionsHeader: {
         paddingLeft: '8px',

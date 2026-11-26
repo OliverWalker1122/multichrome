@@ -1,6 +1,8 @@
 import React from 'react';
 import { Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
+    ChevronLeftRegular,
+    ChevronRightRegular,
     LocalLanguageRegular,
     PanelLeftContractRegular,
     PanelLeftExpandRegular,
@@ -16,6 +18,10 @@ interface TitleBarProps {
     themeMode: ThemeMode;
     isDark: boolean;
     onToggleTheme: () => void;
+    canGoBack: boolean;
+    canGoForward: boolean;
+    onBack: () => void;
+    onForward: () => void;
     collapsed: boolean;
     onToggleCollapsed: () => void;
     runningCount: number;
@@ -98,6 +104,14 @@ const useStyles = makeStyles({
             outlineOffset: '-1px',
         },
     },
+    history: { display: 'flex', alignItems: 'center', gap: '2px' },
+    historyButton: {
+        ':disabled': {
+            color: tokens.colorNeutralForegroundDisabled,
+            backgroundColor: 'transparent',
+            cursor: 'default',
+        },
+    },
     sidebarToggle: { fontSize: '18px' },
     compactAction: {
         width: 'auto',
@@ -135,6 +149,10 @@ const TitleBar: React.FC<TitleBarProps> = ({
     onToggleTheme,
     collapsed,
     onToggleCollapsed,
+    canGoBack,
+    canGoForward,
+    onBack,
+    onForward,
     runningCount,
     singboxReady,
     onOpenSettings,
@@ -177,6 +195,17 @@ const TitleBar: React.FC<TitleBarProps> = ({
                         {collapsed ? <PanelLeftExpandRegular /> : <PanelLeftContractRegular />}
                     </button>
                 </Tooltip>
+                <div className={mergeClasses(styles.history, 'win11-no-drag')}
+                    role="group" aria-label={t('导航历史', 'Navigation history')}>
+                    <button type="button" className={mergeClasses(styles.iconBtn, styles.historyButton)}
+                        title={t('后退', 'Back')} aria-label={t('后退', 'Back')} disabled={!canGoBack} onClick={onBack}>
+                        <ChevronLeftRegular />
+                    </button>
+                    <button type="button" className={mergeClasses(styles.iconBtn, styles.historyButton)}
+                        title={t('前进', 'Forward')} aria-label={t('前进', 'Forward')} disabled={!canGoForward} onClick={onForward}>
+                        <ChevronRightRegular />
+                    </button>
+                </div>
                 {!isLinux && (
                     <div className={styles.brand}>
                         <AppBrandIcon size={20} />

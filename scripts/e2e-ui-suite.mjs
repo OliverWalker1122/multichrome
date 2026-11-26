@@ -295,6 +295,91 @@ async function toggleTimeZoneColumn(cdp) {
     await waitUntil(() => cdp.eval(`window.__e2e.clickExact('时区', '[role="menuitemcheckbox"]')`));
 }
 
+async function verifyRunningActions(cdp) {
+    const click = selector => cdp.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+    const card = '[aria-label="Favorite environment cards"] article';
+    const star = 'table button[aria-label="Favorite MultiWin 02"]';
+    try {
+        await click('header button[aria-label*="English"]');
+        await waitUntil(() => cdp.eval("document.documentElement.lang === 'en-US'"));
+        await click(star);
+        const sizesOk = await waitUntil(() => cdp.eval(`(() => {
+            const item = document.querySelector('${card}');
+            const row = document.querySelector('${star}')?.closest('tr');
+            if (!item || !row) return false;
+            return [item, row].every(container => {
+                const buttons = [...container.querySelectorAll('button')].filter(b => ['Stop', 'Locate'].includes(b.textContent.trim()));
+                return buttons.map(b => b.textContent.trim()).join(',') === 'Stop,Locate'
+                    && buttons.every(b => {
+                        const { width, height } = b.getBoundingClientRect();
+                        return width === 80 && height === 28 && b.scrollWidth <= b.clientWidth + 1;
+                    });
+            });
+        })()`));
+        await cdp.send('Page.bringToFront');
+        await settleUiPaint(cdp);
+        const nativeFocus = process.platform === 'win32' && isNativeWindowFocusAvailable();
+        const before = nativeFocus && getForegroundWindowPid();
+        await cdp.eval(`document.querySelector('${star}').closest('tr').click()`);
+        await sleep(300);
+        const selected = await cdp.eval(`document.querySelector('${star}').closest('tr').getAttribute('aria-selected') === 'true'`);
+        const sameFocus = !before || getForegroundWindowPid() === before;
+        if (sizesOk && selected && sameFocus && process.argv.includes('--screenshots')) {
+            await cdp.eval(`document.querySelectorAll('button[aria-label="Dismiss notification"]').forEach(button => button.click())`);
+            await captureUiFixture(cdp, 'running-environment-actions');
+        }
+        await cdp.eval(`document.querySelector('${star}').closest('tr').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+        const details = await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[data-details-panel]'))
+            && !document.querySelector('[data-details-panel] button[aria-label*="Locate"]')`));
+        await click('[data-details-panel] button[aria-label="Close details panel"]');
+        record('UX-11', '单击只选中、双击打开详情、运行卡片与列表操作同尺寸', sizesOk && selected && sameFocus && details,
+            `size=${sizesOk}, selected=${selected}, focus=${sameFocus}, details=${details}`);
+    } finally {
+        await click('table button[aria-label="Favorite MultiWin 02"][aria-pressed="true"]');
+        await click('header button[aria-label*="Chinese"]');
+        await waitUntil(() => cdp.eval("document.documentElement.lang === 'zh-CN'"));
+    }
+}
+
+async function verifyNavigationHistory(cdp) {
+    const click = selector => cdp.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+    const back = 'header button[aria-label="后退"]';
+    const forward = 'header button[aria-label="前进"]';
+    const at = text => waitUntil(() => cdp.eval(`document.querySelector('main h1')?.textContent === ${JSON.stringify(text)}`));
+    const fresh = await cdp.eval(`document.querySelector('${back}').disabled && document.querySelector('${forward}').disabled`);
+    await click('aside button[title="测试组A"]');
+    await at('测试组A');
+    await click('nav button[aria-label="代理"]');
+    await at('代理');
+    await click(back);
+    const returned = await at('测试组A');
+    await click(forward);
+    const replayed = await at('代理');
+    await click(back);
+    await at('测试组A');
+    await click('nav button[aria-label="回收站"]');
+    const branched = await at('回收站') && await cdp.eval(`document.querySelector('${forward}').disabled`);
+    await click(back);
+    await click(back);
+    const initial = await at('全部环境') && await cdp.eval(`document.querySelector('${back}').disabled`);
+    await click('nav button[aria-label="设置"]');
+    await at('设置');
+    await cdp.eval(`(() => {
+        const input = document.querySelector('#settings-content input:not([readonly])');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, 'unsaved-test-draft');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await click(back);
+    const guarded = await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[role="alertdialog"]'))`));
+    await cdp.eval(`window.__e2e.clickExact('继续编辑', '[role="alertdialog"] button')`);
+    const kept = await at('设置');
+    await click(back);
+    await waitUntil(() => cdp.eval(`window.__e2e.clickExact('放弃修改', '[role="alertdialog"] button')`));
+    const left = await at('全部环境');
+    record('UX-10', '前进后退、分支和未保存设置保护', fresh && returned && replayed && branched && initial && guarded && kept && left);
+}
+
 async function verifyWorkspacePreferences(cdp, reloadUI) {
     const check = async (expression, label) => {
         if (!await waitUntil(() => cdp.eval(expression))) throw new Error(label);
@@ -321,6 +406,15 @@ async function verifyWorkspacePreferences(cdp, reloadUI) {
         const secondStar = 'table button[aria-label="星标环境 测试环境Beta"]';
         await click(secondStar);
         await check(`document.querySelectorAll('${cards} article').length === 2`, '两张常用卡片');
+        await check(`[...document.querySelectorAll('${cards} article')].every(card => {
+            const privacy = card.textContent.includes('防关联');
+            return card.textContent.includes('测试环境Beta') === privacy;
+        })`, '卡片内核标识');
+        await check(`[...document.querySelectorAll('${cards} article, main tbody tr')].every(container => {
+            const button = [...container.querySelectorAll('button')].find(b => b.textContent.trim() === '启动');
+            const rect = button?.getBoundingClientRect();
+            return rect?.width === 80 && rect.height === 28;
+        })`, '卡片与列表启动按钮同尺寸');
         const shellColors = new Set();
         for (const palette of ['blue', 'sage', 'neutral']) {
             await click('nav button[aria-label="设置"]');
@@ -919,11 +1013,12 @@ async function main() {
             window.electronAPI.chromeEnvironments.create('测试环境Alpha', '测试组A', '用于UI端到端验证', { browserEngine: 'system-chrome' })
         `);
         const envB = await cdp.eval(`
-            window.electronAPI.chromeEnvironments.create('测试环境Beta', '测试组A', '', { browserEngine: 'system-chrome' })
+            window.electronAPI.chromeEnvironments.create('测试环境Beta', '测试组A', '', { browserEngine: 'fingerprint-chromium' })
         `);
         // Sync UI after direct IPC environment creation
         await reloadUI();
         await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`));
+        await verifyNavigationHistory(cdp);
         await verifyWorkspacePreferences(cdp, reloadUI);
         await verifyWindowMaterials(cdp, reloadUI);
 
@@ -2638,6 +2733,7 @@ async function main() {
             );
 
             // 3) Verify Single '窗口布局' Dropdown (no accidental direct tile), Split-Grid Dock + Reset App Window Size, Uniform Stack, Cascade & Pure-CDP Locate Window!
+            if (simultaneousLaunch3Ok) await verifyRunningActions(cdp);
             const singleLayoutDropdownOk = await waitUntil(() =>
                 cdp.eval(`(() => {
                     const layoutBtn = document.querySelector('button[aria-label="排列浏览器窗口"]');
@@ -3883,7 +3979,7 @@ async function main() {
 
     const failed = results.filter((r) => !r.passed);
     const expected = [
-        'UX-01', 'UX-02', 'UX-03', 'UX-04', 'UX-05', 'UX-06', 'UX-07', 'UX-08', 'UX-09',
+        'UX-01', 'UX-02', 'UX-03', 'UX-04', 'UX-05', 'UX-06', 'UX-07', 'UX-08', 'UX-09', 'UX-10', 'UX-11',
         ...Array.from({ length: 21 }, (_, i) => 'E2E-' + String(i).padStart(2, '0')),
         'E2E-02a', 'E2E-02b', 'E2E-02c', 'E2E-02d', 'E2E-04a', 'E2E-06a',
     ];

@@ -43,6 +43,17 @@ interface NavigationTarget {
     group?: string;
     favorites?: boolean;
     environmentId?: string;
+    tab?: SettingsTab;
+}
+
+interface NavigationRequest {
+    target: NavigationTarget;
+    index?: number;
+}
+
+function sameDestination(a: NavigationTarget, b: NavigationTarget) {
+    return a.section === b.section && a.group === b.group && Boolean(a.favorites) === Boolean(b.favorites)
+        && a.environmentId === b.environmentId && a.tab === b.tab;
 }
 
 const useStyles = makeStyles({
@@ -98,10 +109,14 @@ const AppShell: React.FC = () => {
     const { showNotification } = useNotification();
     const { isEn, t } = useI18n();
 
-    const [activeSection, setActiveSection] =
-        useState<NavSection>('environments');
+    const [history, setHistory] = useState({
+        entries: [{ section: 'environments', group: '用户分组' }] as NavigationTarget[],
+        index: 0,
+    });
+    const currentPage = history.entries[history.index];
+    const activeSection = currentPage.section;
     const [settingsDirty, setSettingsDirty] = useState(false);
-    const [pendingNavigation, setPendingNavigation] = useState<NavigationTarget | null>(null);
+    const [pendingNavigation, setPendingNavigation] = useState<NavigationRequest | null>(null);
     const [favoritesOnly, setFavoritesOnly] = useState(false);
     const [shortcutRevision, setShortcutRevision] = useState(0);
     const [favoriteIds, setFavoriteIds] = useSavedTableValue<string[]>(
@@ -114,25 +129,46 @@ const AppShell: React.FC = () => {
         current.includes(id) ? current.filter(item => item !== id) : [...current, id],
     );
 
-    const applyNavigation = (target: NavigationTarget) => {
-        if (target.group !== undefined) {
-            actions.setCurrentGroup(target.group);
+    const applyNavigation = ({ target, index }: NavigationRequest) => {
+        setHistory(previous => {
+            if (index !== undefined) return { ...previous, index };
+            if (sameDestination(previous.entries[previous.index], target)) return previous;
+            const entries = [...previous.entries.slice(0, previous.index + 1), target];
+            return { entries, index: entries.length - 1 };
+        });
+        if (target.section === 'environments') {
+            const group = target.group ?? '用户分组';
+            const exists = group === '用户分组' || state.emptyGroups.includes(group)
+                || state.environments.some(env => env.groupName === group);
+            actions.setCurrentGroup(exists ? group : '用户分组');
             setFavoritesOnly(Boolean(target.favorites));
+            const shortcut = target.environmentId ? favorites.find(env => env.id === target.environmentId) : undefined;
+            setEnvDetailsOpen(Boolean(shortcut));
+            if (shortcut) {
+                setSelectedEnvId(shortcut.id);
+                setShortcutRevision(current => current + 1);
+            }
         }
-        if (target.environmentId) {
-            setSelectedEnvId(target.environmentId);
-            setEnvDetailsOpen(true);
-            setShortcutRevision(current => current + 1);
-        }
-        setActiveSection(target.section);
     };
-    const navigate = (section: NavSection, group?: string, favorites?: boolean, environmentId?: string) => {
-        const target = { section, group, favorites, environmentId };
-        if (activeSection === 'settings' && section !== 'settings' && settingsDirty) {
-            setPendingNavigation(target);
+    const requestNavigation = (target: NavigationTarget, index?: number) => {
+        const request = { target, index };
+        if (activeSection === 'settings' && target.section !== 'settings' && settingsDirty) {
+            setPendingNavigation(request);
         } else {
-            applyNavigation(target);
+            applyNavigation(request);
         }
+    };
+    const navigate = (section: NavSection) => {
+        if (section === activeSection) return;
+        if (section === 'environments') {
+            requestNavigation({ section, group: state.currentGroup, favorites: favoritesOnly });
+        } else {
+            requestNavigation(section === 'settings' ? { section, tab: 'general' } : { section });
+        }
+    };
+    const goToHistory = (index: number) => {
+        const target = history.entries[index];
+        if (target) requestNavigation(target, index);
     };
 
     const finishLeavingSettings = () => {
@@ -155,10 +191,6 @@ const AppShell: React.FC = () => {
     const [selectedProxyId, setSelectedProxyId] = useState<string | null>(null);
     const [envDetailsOpen, setEnvDetailsOpen] = useState(false);
     const [proxyDetailsOpen, setProxyDetailsOpen] = useState(false);
-    const [settingsTabRequest, setSettingsTabRequest] = useState<{
-        tab: SettingsTab;
-        tick: number;
-    }>({ tab: 'general', tick: 0 });
 
     const lifecycle = useAppShellLifecycle({
         activeSection,
@@ -300,6 +332,11 @@ const AppShell: React.FC = () => {
         newName: string,
     ) => {
         const result = await actions.renameGroup(oldName, newName);
+        setHistory(previous => ({
+            ...previous,
+            entries: previous.entries.map(entry => entry.group === result.oldName
+                ? { ...entry, group: result.newName } : entry),
+        }));
         setRenameGroupTarget(null);
         showNotification(
             'success',
@@ -449,7 +486,11 @@ const AppShell: React.FC = () => {
                 onToggleCollapsed={() => setSidebarOverride({ compact, collapsed: !navCollapsed })}
                 runningCount={totalRunningEnvs}
                 singboxReady={Boolean(lifecycle.coreInfo?.available)}
-                onOpenSettings={() => setActiveSection('settings')}
+                canGoBack={history.index > 0}
+                canGoForward={history.index + 1 < history.entries.length}
+                onBack={() => goToHistory(history.index - 1)}
+                onForward={() => goToHistory(history.index + 1)}
+                onOpenSettings={() => navigate('settings')}
             />
 
             <div className={styles.body}>
@@ -459,7 +500,7 @@ const AppShell: React.FC = () => {
                     collapsed={navCollapsed}
                     favorites={favorites}
                     favoritesOnly={favoritesOnly}
-                    onSelectFavorites={(id) => navigate('environments', '用户分组', true, id)}
+                    onSelectFavorites={environmentId => requestNavigation({ section: 'environments', group: '用户分组', favorites: true, environmentId })}
                     environmentCount={state.environments.length}
                     proxyCount={lifecycle.managedProxies.length}
                     trashCount={lifecycle.trashCount}
@@ -467,7 +508,7 @@ const AppShell: React.FC = () => {
                     groupCounts={groupCounts}
                     currentGroup={state.currentGroup}
                     emptyGroups={state.emptyGroups}
-                    onSelectGroup={(group) => navigate('environments', group)}
+                    onSelectGroup={group => requestNavigation({ section: 'environments', group })}
                     onRequestRenameGroup={(group) =>
                         setRenameGroupTarget(group)
                     }
@@ -525,15 +566,9 @@ const AppShell: React.FC = () => {
                                 onInspectProxyLogs={
                                     lifecycle.handleInspectProxyLogs
                                 }
-                                onNavigateComponents={() => {
-                                    setSettingsTabRequest((prev) => ({
-                                        tab: 'components',
-                                        tick: prev.tick + 1,
-                                    }));
-                                    setActiveSection('settings');
-                                }}
+                                onNavigateComponents={() => requestNavigation({ section: 'settings', tab: 'components' })}
                                 onNavigateProxies={() =>
-                                    setActiveSection('proxies')
+                                    navigate('proxies')
                                 }
                                 onRequestRenameGroup={(group) =>
                                     setRenameGroupTarget(group)
@@ -597,8 +632,8 @@ const AppShell: React.FC = () => {
                                     lifecycle.setKernelStatus(nextStatus);
                                     lifecycle.triggerProxyRefresh();
                                 }}
-                                initialTab={settingsTabRequest.tab}
-                                tabRequestTick={settingsTabRequest.tick}
+                                activeTab={currentPage.tab ?? 'general'}
+                                onTabChange={tab => requestNavigation({ section: 'settings', tab })}
                                 onDataRestored={() => {
                                     void settingsActions.loadSettings();
                                     void actions.refreshEnvironments();

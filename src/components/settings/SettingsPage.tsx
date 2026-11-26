@@ -1,6 +1,6 @@
 import { useDraftField } from '../../hooks/useDraftField';
 import { moveTabFocus } from '../../utils/tabKeyboard';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import {
     Button,
     Dialog,
@@ -65,8 +65,8 @@ export interface SettingsPageProps {
     groups?: string[];
     kernelStatus: KernelStatus | null;
     onKernelStatusChange: (status: KernelStatus) => void;
-    initialTab?: SettingsTab;
-    tabRequestTick?: number;
+    activeTab: SettingsTab;
+    onTabChange: (tab: SettingsTab) => void;
     onDataRestored?: () => void;
 }
 
@@ -84,8 +84,8 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     groups = [],
     kernelStatus,
     onKernelStatusChange,
-    initialTab,
-    tabRequestTick,
+    activeTab,
+    onTabChange,
     onDataRestored,
 }) => {
     const styles = useSettingsStyles();
@@ -93,9 +93,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     const { showNotification } = useNotification();
     const hostPlatform = systemApi.getPlatform() || 'win32';
 
-    const [activeTab, setActiveTab] = useState<SettingsTab>(
-        initialTab || 'general',
-    );
     const [dataPath, setDataPath] = useDraftField(currentSettings.dataPath || '');
     const [proxyEnabled, setProxyEnabled] = useDraftField(
         Boolean(currentSettings.globalProxy?.enabled),
@@ -132,12 +129,6 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     );
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
-
-    useEffect(() => {
-        if (initialTab) {
-            setActiveTab(initialTab);
-        }
-    }, [initialTab, tabRequestTick]);
 
     const baselineFp = normalizeFpState(currentSettings.fingerprint);
     const isDirty =
@@ -210,12 +201,12 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     const handleSave = async () => {
         if (saving) return false;
         if (!dataPath.trim()) {
-            setActiveTab('general');
+            onTabChange('general');
             setError(t('数据目录不能为空', 'Data directory cannot be empty'));
             return false;
         }
         if (proxyEnabled && !proxyAddress.trim()) {
-            setActiveTab('privacy');
+            onTabChange('privacy');
             setError(
                 t(
                     '已开启全局备用代理，请填写代理地址或关闭开关',
@@ -357,7 +348,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                     styles.pillTab,
                                     active && styles.pillTabActive,
                                 )}
-                                onClick={() => setActiveTab(tab.id)}
+                                onClick={() => onTabChange(tab.id)}
                             >
                                 {tab.icon}
                                 <span>{tab.label}</span>

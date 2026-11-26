@@ -19,7 +19,6 @@ import {
     PlayRegular,
     ShieldCheckmarkRegular,
     StopRegular,
-    TargetRegular,
 } from '@fluentui/react-icons';
 import type { ChromeEnvironment, RunningResourceStats } from '../../types';
 import {
@@ -35,7 +34,6 @@ export interface EnvironmentsActionDialogsProps {
     contextMenu: EnvContextMenuState | null;
     onCloseContextMenu: () => void;
     onRunToggle: (env: ChromeEnvironment) => void;
-    onFocusWindow?: (id: string) => void;
     onOpenDetails: (env: ChromeEnvironment) => void;
     onInspectHealth: (id: string) => void;
     onClone?: (id: string) => Promise<void>;
@@ -60,7 +58,6 @@ const EnvironmentsActionDialogs: React.FC<EnvironmentsActionDialogsProps> = ({
     contextMenu,
     onCloseContextMenu,
     onRunToggle,
-    onFocusWindow,
     onOpenDetails,
     onInspectHealth,
     onClone,
@@ -86,21 +83,6 @@ const EnvironmentsActionDialogs: React.FC<EnvironmentsActionDialogsProps> = ({
             {contextMenu && (
                 <RowContextMenu x={contextMenu.x} y={contextMenu.y} className={styles.contextMenu}
                     label={t('环境操作', 'Profile actions')} onClose={onCloseContextMenu}>
-                    {contextMenu.env.isRunning && onFocusWindow && (
-                        <button
-                            type="button"
-                            role="menuitem"
-                            className={styles.contextMenuItem}
-                            onClick={() => {
-                                const targetId = contextMenu.env.id;
-                                onCloseContextMenu();
-                                onFocusWindow(targetId);
-                            }}
-                        >
-                            <TargetRegular />
-                            {t('定位窗口', 'Locate Window')}
-                        </button>
-                    )}
                     <button
                         type="button"
                         role="menuitem"

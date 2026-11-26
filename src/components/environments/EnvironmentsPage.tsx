@@ -150,7 +150,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
     };
     const STATUS_COL_WIDTH = 84;
     const LAST_USED_COL_WIDTH = 92;
-    const ACTION_COL_WIDTH = 148;
+    const actionColumnWidth = 220;
 
     const listWidth =
         workspaceWidth -
@@ -163,7 +163,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         STATUS_COL_WIDTH +
         ws.proxyWidth +
         LAST_USED_COL_WIDTH +
-        ACTION_COL_WIDTH +
+        actionColumnWidth +
         (currentGroup === '用户分组' ? ws.groupWidth : 0);
     const narrowWindow = listWidth < Math.max(810, baseColumnsWidth + 24);
     const activeOptionalCols = narrowWindow ? [] : ws.optionalColumns;
@@ -174,6 +174,17 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         (sum, key) => sum + (optionalColWidths[key] || 120),
         0,
     );
+    // Keep actions stationary on launch. Give flexible columns room down to their resize minimums.
+    const tableWidth = Math.max(0, listWidth - 64); // workspace insets, border and scrollbar
+    const preferredWidth = baseColumnsWidth + optionalColsWidth;
+    const overflow = Math.max(0, preferredWidth - tableWidth);
+    const nameShrink = Math.min(overflow, ws.nameWidth - 160);
+    const proxyShrink = Math.min(overflow - nameShrink, ws.proxyWidth - 150);
+    const groupShrink = showGroupCol ? Math.min(overflow - nameShrink - proxyShrink, ws.groupWidth - 88) : 0;
+    const nameColumnWidth = ws.nameWidth - nameShrink;
+    const proxyColumnWidth = ws.proxyWidth - proxyShrink;
+    const groupColumnWidth = ws.groupWidth - groupShrink;
+    const minimumTableWidth = preferredWidth - nameShrink - proxyShrink - groupShrink;
     const visibleColumnCount =
         4 +
         (showGroupCol ? 1 : 0) +
@@ -398,8 +409,9 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 {favoriteCards.length > 0 && (
                     <FavoriteCards environments={favoriteCards} proxies={ws.proxyMap} busyId={ws.busyId}
                         onToggle={onToggleFavorite}
-                        onLaunch={ws.handleRunToggle}
-                        onLocate={id => ws.handleFocusWindow(id, { highlightOnly: false })} />
+                        onSelect={onSelectEnv}
+                        onRunToggle={ws.handleRunToggle}
+                        onLocate={ws.handleFocusWindow} />
                 )}
 
                 {loading && environments.length === 0 ? (
@@ -473,15 +485,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             aria-label={t('环境列表', 'Environments table')}
                             style={{
                                 minWidth: narrowWindow
-                                    ? 424
-                                    : 44 +
-                                      ws.nameWidth +
-                                      STATUS_COL_WIDTH +
-                                      (showGroupCol ? ws.groupWidth : 0) +
-                                      (showProxyCol ? ws.proxyWidth : 0) +
-                                      optionalColsWidth +
-                                      (showLastUsedCol ? LAST_USED_COL_WIDTH : 0) +
-                                      ACTION_COL_WIDTH,
+                                    ? 44 + 130 + STATUS_COL_WIDTH + actionColumnWidth
+                                    : minimumTableWidth,
                             }}
                         >
                             <thead className={styles.thead}>
@@ -515,9 +520,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     <th
                                         className={styles.th}
                                         style={{
-                                            width: narrowWindow
-                                                ? undefined
-                                                : ws.nameWidth,
+                                            width: narrowWindow ? undefined : nameColumnWidth,
                                         }}
                                     >
                                         {t('名称', 'Name')}
@@ -539,7 +542,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     {showGroupCol && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: ws.groupWidth }}
+                                            style={{ width: groupColumnWidth }}
                                         >
                                             {t('分组', 'Group')}
                                             <ColumnResizeHandle label={t('分组', 'Group')} width={ws.groupWidth} min={88} onChange={ws.setGroupWidth} />
@@ -548,7 +551,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                     {showProxyCol && (
                                         <th
                                             className={styles.th}
-                                            style={{ width: ws.proxyWidth }}
+                                            style={{ width: proxyColumnWidth }}
                                         >
                                             {t('代理', 'Proxy')}
                                             <ColumnResizeHandle
@@ -622,7 +625,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                             styles.th,
                                             styles.actionsHeader,
                                         )}
-                                        style={{ width: ACTION_COL_WIDTH }}
+                                        style={{ width: actionColumnWidth }}
                                     >
                                         {t('操作', 'Actions')}
                                     </th>
@@ -696,29 +699,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 onToggleChecked={() =>
                                                     ws.toggleSelectId(env.id)
                                                 }
-                                                onSelect={() => {
-                                                    onSelectEnv(env.id);
-                                                    if (env.isRunning) {
-                                                        ws.handleFocusWindow(
-                                                            env.id,
-                                                            {
-                                                                highlightOnly:
-                                                                    detailsOpen,
-                                                            },
-                                                        );
-                                                    }
-                                                }}
-                                                onFocusWindow={
-                                                    env.isRunning
-                                                        ? () =>
-                                                              ws.handleFocusWindow(
-                                                                  env.id,
-                                                                  {
-                                                                      highlightOnly: false,
-                                                                  },
-                                                              )
-                                                        : undefined
-                                                }
+                                                onSelect={() => onSelectEnv(env.id)}
+                                                onLocate={() => ws.handleFocusWindow(env.id)}
                                                 onOpenDetails={() =>
                                                     onToggleDetails(true)
                                                 }
@@ -798,7 +780,6 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     onStop={async (id) => {
                         await onClose(id);
                     }}
-                    onFocusWindow={(id) => ws.handleFocusWindow(id)}
                     onClone={onClone}
                     onInspectHealth={(env) => ws.setHealthTargetId(env.id)}
                     onDelete={(env) => ws.setDeleteTarget(env)}
@@ -822,7 +803,6 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 contextMenu={ws.contextMenu}
                 onCloseContextMenu={() => ws.setContextMenu(null)}
                 onRunToggle={(env) => void ws.handleRunToggle(env)}
-                onFocusWindow={(id) => ws.handleFocusWindow(id)}
                 onOpenDetails={(env) => {
                     onSelectEnv(env.id);
                     onToggleDetails(true);
