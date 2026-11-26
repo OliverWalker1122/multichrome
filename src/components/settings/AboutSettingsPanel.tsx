@@ -249,7 +249,7 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                     {t('当前版本', 'Version')}
                 </span>
                 <span className={styles.infoVal}>
-                    v{appVersion || '1.6.2'}
+                    v{appVersion || '1.7.0'}
                 </span>
 
                 <span className={styles.infoKey}>

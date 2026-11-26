@@ -225,7 +225,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
     });
     const server = new AutomationServer({
         backend: automationBackend,
-        serverVersion: '1.6.2',
+        serverVersion: '1.7.0',
         getRequiredToken: () => mcpToken,
     });
     await server.start({ port: 0 });
@@ -266,7 +266,7 @@ async function createLoopbackMcpHarness(chromeManager, proxyManager) {
     const initRes = await callMcp('initialize', {
         protocolVersion: '2025-06-18',
         capabilities: {},
-        clientInfo: { name: 'audit-live-mcp', version: '1.6.2' },
+        clientInfo: { name: 'audit-live-mcp', version: '1.7.0' },
     });
     const toolsRes = await callMcp('tools/list', {});
 

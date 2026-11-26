@@ -77,7 +77,7 @@ MultiChrome 提供四层验证体系，内置原生 Node V8 代码覆盖率统�
 
 ## 文档
 
-- [更新日志](CHANGELOG.md) — 版本发布历史与新增特性（`v1.6.2`）
+- [更新日志](CHANGELOG.md) — 版本发布历史与新增特性（`v1.7.0`）
 - [架构与核心机制](docs/architecture_zh.md) ([English](docs/architecture.md)) — 双引擎设计、Fail-Closed 代理策略、供应链校验与自底向上分层结构
 - [测试体系与平台核验](docs/verification_zh.md) ([English](docs/verification.md)) — 四层测试说明、外部检测平台实测记录与自动发布流程
 - [开发与构建指南](docs/development_zh.md) ([English](docs/development.md)) — 本地开发、测试命令与三端打包说明

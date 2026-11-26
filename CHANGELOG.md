@@ -2,6 +2,23 @@
 
 All notable changes to MultiChrome are documented in this file.
 
+## [1.7.0] - 2026-11-27
+
+### Added
+
+- Star frequently used environments and open them from the Favorites view or workspace cards.
+- Use Back and Forward to revisit workspace views, and choose a workspace color palette in Settings.
+
+### Changed
+
+- Select an environment with a single click. Use the dedicated Locate action to bring its running browser to the front.
+
+### Fixed
+
+- Apply proxy tunnel timeouts during CONNECT and TLS handshakes so idle, established tunnels stay open. Removed redundant proxy probes during startup.
+
+---
+
 ## [1.6.2] - 2026-11-26
 
 ### Added

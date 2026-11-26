@@ -9,7 +9,7 @@ import {
 export const SUPPORTED_MCP_PROTOCOL_VERSIONS = LEGACY_MCP_VERSIONS;
 export const DEFAULT_MCP_PROTOCOL_VERSION = '2025-06-18';
 export const DEFAULT_MCP_SERVER_NAME = 'multichrome-mcp';
-export const DEFAULT_MCP_SERVER_VERSION = '1.6.2';
+export const DEFAULT_MCP_SERVER_VERSION = '1.7.0';
 
 export const MCP_RESOURCES = [
     {
