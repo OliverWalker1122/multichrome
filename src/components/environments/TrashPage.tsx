@@ -46,7 +46,7 @@ const useStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '12px',
-        padding: '22px 24px 16px',
+        padding: '22px var(--mc-workspace-inset) 16px',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
@@ -102,7 +102,8 @@ const useStyles = makeStyles({
         '&:last-child': { paddingRight: '18px' },
     },
     name: {
-        fontSize: '15px',
+        fontSize: tokens.fontSizeBase300,
+        lineHeight: tokens.lineHeightBase300,
         fontWeight: tokens.fontWeightSemibold,
     },
     muted: {
@@ -175,6 +176,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
 
     const [items, setItems] = useState<ChromeEnvironment[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [deleteTarget, setDeleteTarget] = useState<ChromeEnvironment | null>(
         null,
@@ -183,6 +185,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
 
     const loadDeleted = useCallback(async () => {
         if (!trashApi.isAvailable()) {
+            setLoadFailed(true);
             setLoading(false);
             return;
         }
@@ -190,8 +193,10 @@ const TrashPage: React.FC<TrashPageProps> = ({
             setLoading(true);
             const envs = await trashApi.getDeletedEnvironments();
             setItems(envs);
+            setLoadFailed(false);
             onCountChange?.(envs.length);
         } catch (err) {
+            setLoadFailed(true);
             handleError(err, t('加载回收站', 'Load Trash'));
         } finally {
             setLoading(false);
@@ -303,6 +308,12 @@ const TrashPage: React.FC<TrashPageProps> = ({
                 </div>
             </div>
 
+            {loadFailed && (
+                <div role="alert" className={styles.headerActions}>
+                    {t('回收站读取失败。', 'Could not load the trash.')}
+                    <Button disabled={loading} onClick={() => void loadDeleted()}>{t('重试', 'Retry')}</Button>
+                </div>
+            )}
             {loading && items.length === 0 ? (
                 <div className={styles.emptyState}>
                     <Spinner
@@ -310,7 +321,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                         label={t('正在读取回收站…', 'Loading Trash…')}
                     />
                 </div>
-            ) : items.length === 0 ? (
+            ) : loadFailed && items.length === 0 ? null : items.length === 0 ? (
                 <div className={styles.emptyState}>
                     <DeleteRegular
                         className={styles.emptyIcon}
@@ -453,7 +464,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                                     size="small"
                                                     appearance="subtle"
                                                     icon={<ArrowReplyRegular />}
-                                                    disabled={busyId === env.id}
+                                                    disabled={!!busyId}
                                                     onClick={() =>
                                                         void handleRestore(env)
                                                     }
@@ -466,7 +477,7 @@ const TrashPage: React.FC<TrashPageProps> = ({
                                                     className={
                                                         styles.deleteButton
                                                     }
-                                                    disabled={busyId === env.id}
+                                                    disabled={!!busyId}
                                                     onClick={() =>
                                                         setDeleteTarget(env)
                                                     }

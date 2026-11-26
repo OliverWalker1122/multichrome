@@ -80,6 +80,7 @@ const EnvironmentAdvancedFields: React.FC<EnvironmentAdvancedFieldsProps> = ({
                         )
                     }
                     iconPosition="after"
+                    aria-expanded={showAdvanced}
                     onClick={onToggleAdvanced}
                 >
                     {showAdvanced

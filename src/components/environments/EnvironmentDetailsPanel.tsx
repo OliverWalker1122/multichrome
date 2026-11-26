@@ -133,6 +133,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
     const [storageStats, setStorageStats] =
         useState<EnvironmentStorageStats | null>(null);
     const [loadingStorage, setLoadingStorage] = useState(false);
+    const [storageRetry, setStorageRetry] = useState(0);
     const [clearingCache, setClearingCache] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [showFpDetails, setShowFpDetails] = useState(false);
@@ -162,7 +163,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [environment.id, environment.isRunning]);
+    }, [environment.id, environment.isRunning, storageRetry]);
 
     const handleClearCache = async () => {
         if (
@@ -684,6 +685,7 @@ const EnvironmentDetailsPanel: React.FC<EnvironmentDetailsPanelProps> = ({
                     styles={styles}
                     environment={environment}
                     loadingStorage={loadingStorage}
+                    onRetryStorage={() => setStorageRetry((count) => count + 1)}
                     storageStats={storageStats}
                     clearingCache={clearingCache}
                     onCopyId={() =>

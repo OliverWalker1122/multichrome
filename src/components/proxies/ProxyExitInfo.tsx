@@ -59,7 +59,7 @@ const ProxyExitInfo: React.FC<{
             : `${info.ip} · ${location}${latencyText}${checkedStr}，通过此代理检测`;
         return (
             <Tooltip content={tooltip} relationship="description">
-                <span className={styles.text}>
+                <span className={styles.text} tabIndex={0}>
                     <span className={styles.ip} data-selectable="true">
                         {info.ip}
                     </span>
@@ -84,6 +84,7 @@ const ProxyExitInfo: React.FC<{
                 relationship="description"
             >
                 <span
+                    tabIndex={info?.status === 'error' ? 0 : undefined}
                     className={
                         info?.status === 'error' ? styles.error : styles.hint
                     }

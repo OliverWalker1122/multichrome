@@ -251,6 +251,105 @@ async function waitUntil(fn, timeoutMs = 8000, intervalMs = 150) {
     return last;
 }
 
+async function settleUiPaint(cdp) {
+    if (await cdp.eval('document.hidden')) await cdp.send('Page.bringToFront');
+    await cdp.eval(`(async () => {
+        await document.fonts.ready;
+        const paint = () => new Promise(resolve => requestAnimationFrame(resolve));
+        await paint();
+        await paint();
+        const transitions = document.getAnimations().filter(animation =>
+            animation.playState === 'running' && animation.effect?.getComputedTiming().endTime <= 800);
+        await Promise.race([
+            Promise.allSettled(transitions.map(animation => animation.finished)),
+            new Promise(resolve => setTimeout(resolve, 850)),
+        ]);
+        await paint();
+    })()`);
+}
+
+async function captureUiFixture(cdp, name) {
+    if (!process.argv.includes('--screenshots')) return;
+    await settleUiPaint(cdp);
+    const backdrop = await cdp.eval("document.documentElement.dataset.theme === 'dark' ? 48 : 235");
+    await cdp.send('Emulation.setDefaultBackgroundColorOverride', {
+        color: { r: backdrop, g: backdrop, b: backdrop, a: 1 },
+    });
+    try {
+        const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+        const dir = path.join(projectRoot, '.tmp', 'ui-screenshots');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, name + '.png'), Buffer.from(data, 'base64'));
+    } finally {
+        await cdp.send('Emulation.setDefaultBackgroundColorOverride');
+    }
+}
+
+async function verifyPageControls(cdp) {
+    const issues = [];
+    const roles = new Set(['button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'spinbutton', 'combobox', 'tab']);
+    const inspect = async (page) => {
+        await cdp.eval('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        const { nodes } = await cdp.send('Accessibility.getFullAXTree');
+        for (const node of nodes) {
+            if (node.ignored || !roles.has(node.role?.value) || node.name?.value?.trim()) continue;
+            const { node: dom } = await cdp.send('DOM.describeNode', { backendNodeId: node.backendDOMNodeId });
+            const attrs = dom.attributes || [];
+            const tag = ['data-testid', 'id', 'type'].map((name) => {
+                const i = attrs.indexOf(name);
+                return i >= 0 ? attrs[i + 1] : '';
+            }).filter(Boolean).join(' ');
+            issues.push(`${page}: ${node.role.value} ${tag}`);
+        }
+    };
+    const inspectDialog = async (label, modes = []) => {
+        await cdp.eval(`window.__e2e.clickExact('${label}', 'main button')`);
+        if (!(await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[role="dialog"]'))`)))) {
+            issues.push(`${label}: did not open`);
+            return;
+        }
+        await inspect(label);
+        for (const mode of modes) {
+            await cdp.eval(`window.__e2e.clickExact('${mode}', '[role="dialog"] [role="tab"]')`);
+            await inspect(`${label} ${mode}`);
+        }
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        if (!(await waitUntil(() => cdp.eval(`!document.querySelector('[role="dialog"]')`)))) {
+            issues.push(`${label}: did not close`);
+        }
+    };
+    const navigate = async (label) => {
+        await cdp.eval(`document.querySelector('aside button[aria-label^="${label}"]')?.click()`);
+        return waitUntil(() => cdp.eval(`document.querySelector('main h1')?.textContent?.trim() === '${label}'`));
+    };
+    for (const page of ['环境', '代理', '回收站', '设置']) {
+        if (!(await navigate(page))) { issues.push(`${page}: navigation`); continue; }
+        if (page !== '设置') {
+            await inspect(page);
+            if (page === '环境') await inspectDialog('新建环境');
+            if (page === '代理') {
+                await inspectDialog('添加代理', ['手动表单', 'JSON']);
+                await inspectDialog('批量导入');
+            }
+            continue;
+        }
+        for (const tab of ['general', 'browser', 'privacy', 'automation', 'components', 'about']) {
+            await cdp.eval(`document.querySelector('[data-testid="settings-tab-${tab}"]')?.click()`);
+            const selected = await waitUntil(() => cdp.eval(`document.querySelector('[data-testid="settings-tab-${tab}"]')?.getAttribute('aria-selected') === 'true'`));
+            if (!selected) { issues.push(`${tab}: navigation`); continue; }
+            await inspect(tab);
+            if (['privacy', 'automation', 'components'].includes(tab)) {
+                await cdp.eval(`document.querySelectorAll('#settings-content button[aria-expanded="false"]:not([aria-haspopup])').forEach(button => button.click())`);
+                await inspect(`${tab} expanded`);
+            }
+            if (tab === 'general') await inspectDialog('导出备份');
+        }
+    }
+    await navigate('环境');
+    record('UX-06', '所有一级页面与六个设置分类的交互控件均有可访问名称', issues.length === 0, issues.join(' | '));
+}
+
 async function verifyWindowMaterials(cdp, reloadUI) {
     const originalTheme = await cdp.eval("window.electronAPI.settings.getSettings().then(s => s.theme || 'system')");
     const startsDark = await cdp.eval("document.documentElement.dataset.theme === 'dark'");
@@ -260,6 +359,7 @@ async function verifyWindowMaterials(cdp, reloadUI) {
     })`);
     const screenshots = process.argv.includes('--screenshots');
     const shellLightness = {};
+    const visualMeasurements = [];
     const failures = [];
     const waitForPaint = async () => {
         if (await cdp.eval('document.hidden')) await cdp.send('Page.bringToFront');
@@ -288,6 +388,32 @@ async function verifyWindowMaterials(cdp, reloadUI) {
             if (!await waitUntil(() => cdp.eval(`document.documentElement.dataset.theme === '${theme}'`))) {
                 throw new Error(`标题栏无法切换至 ${theme}`);
             }
+            await settleUiPaint(cdp);
+            const measurements = await cdp.eval(`(() => {
+                const table = document.querySelector('table[aria-label="环境列表"]');
+                const create = [...document.querySelectorAll('main button')].find(button => button.textContent.trim() === '新建环境');
+                const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+                const luminance = color => {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(0, 0, 1, 1);
+                    const linear = [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3).map(byte => {
+                        const v = byte / 255;
+                        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+                    });
+                    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+                };
+                const contrast = (text, surface) => {
+                    const a = luminance(getComputedStyle(text).color);
+                    const b = luminance(getComputedStyle(surface).backgroundColor);
+                    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+                };
+                return {
+                    create: contrast(create, create),
+                    header: contrast(table.tHead.rows[0].cells[1], table.tHead),
+                    unusedHeight: table.parentElement.clientHeight - table.offsetHeight,
+                };
+            })()`);
+            visualMeasurements.push({ theme, ...measurements });
             if (screenshots) {
                 const fixtureVisible = await cdp.eval(`(() => {
                     const names = [...document.querySelectorAll('table[aria-label="环境列表"] tbody tr')]
@@ -296,15 +422,34 @@ async function verifyWindowMaterials(cdp, reloadUI) {
                         && !document.querySelector('[data-details-panel], [role="dialog"]');
                 })()`);
                 if (!fixtureVisible) throw new Error('截图时未显示预期的两个测试环境');
-                // Use a solid backdrop underneath the renderer to keep the host desktop out of captures.
-                await cdp.eval(`document.querySelector('tr [title="测试环境Alpha"]').closest('tr').click();
-                    document.body.style.backgroundColor = '${theme === 'light' ? '#e0e0e0' : '#303030'}';
-                    document.fonts.ready.then(() => true)`);
-                await waitForPaint();
-                const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
-                const dir = path.join(projectRoot, '.tmp', 'ui-screenshots');
-                fs.mkdirSync(dir, { recursive: true });
-                fs.writeFileSync(path.join(dir, `home-${theme}.png`), Buffer.from(data, 'base64'));
+                await cdp.eval(`document.querySelector('tr [title="测试环境Alpha"]').closest('tr').click()`);
+                await captureUiFixture(cdp, `home-${theme}`);
+            }
+            if (theme === 'light') {
+                await cdp.send('Emulation.setDeviceMetricsOverride', {
+                    width: 740, height: 640, deviceScaleFactor: 1, mobile: false,
+                });
+                try {
+                    const fits = await waitUntil(() => cdp.eval(`(() => {
+                        const table = document.querySelector('table[aria-label="环境列表"]');
+                        const frame = table.parentElement;
+                        const header = document.querySelector('main h1').getBoundingClientRect();
+                        const search = document.querySelector('input[aria-label="搜索环境"]');
+                        const create = [...document.querySelectorAll('main button')].find(b => b.textContent.trim() === '新建环境');
+                        const controls = [search, create, table.tBodies[0].rows[0].querySelector('td:last-child button')];
+                        return window.innerWidth === 740 && frame.scrollWidth <= frame.clientWidth + 1
+                            && Math.abs(header.left - frame.getBoundingClientRect().left) <= 1
+                            && controls.every(el => {
+                                const rect = el?.getBoundingClientRect();
+                                return rect?.width > 0 && rect.left >= 0 && rect.right <= window.innerWidth;
+                            });
+                    })()`));
+                    record('UX-08', '最小桌面宽度下标题与列表对齐，搜索、新建与行操作完整可见', fits);
+                    if (fits) await captureUiFixture(cdp, 'home-compact');
+                } finally {
+                    await cdp.send('Emulation.clearDeviceMetricsOverride');
+                    await waitForPaint();
+                }
             }
             await cdp.eval(`document.querySelector('table[aria-label="环境列表"] tbody tr')
                 .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
@@ -384,6 +529,9 @@ async function verifyWindowMaterials(cdp, reloadUI) {
         await reloadUI();
     }
     record('E2E-02d', '浅深主题玻璃材质、降低透明度与强制颜色回退', failures.length === 0, failures.join(' | '));
+    record('UX-07', '浅深色主按钮和表头文字对比度、短列表收边',
+        visualMeasurements.length === 2 && visualMeasurements.every(m => m.create >= 4.5 && m.header >= 4.5 && Math.abs(m.unusedHeight) <= 2),
+        JSON.stringify(visualMeasurements));
 }
 
 function startLocalTestServer() {
@@ -673,12 +821,14 @@ async function main() {
         })()`);
 
         // ---------------------------------------------------------------
+        await verifyPageControls(cdp);
         // E2E-01: Verify zero crypto/wallet copy across main UI & Create modal
         // ---------------------------------------------------------------
         await cdp.eval(`window.__e2e.clickExact('新建环境')`);
         await sleep(300);
         const modalText = await cdp.eval(`window.__e2e.bodyText()`);
         const hasCryptoCopy = /钱包地址|大额钱包|交易所/.test(modalText);
+        record('UX-01', '创建环境明确显示当前直连路径', modalText.includes('将直接连接网络'));
         await cdp.eval(`window.__e2e.clickExact('取消')`);
         await sleep(200);
         record(
@@ -788,7 +938,16 @@ async function main() {
             menuText.includes('克隆环境') &&
             menuText.includes('安全自检') &&
             menuText.includes('打开数据目录');
-        // Dismiss context menu
+        const menuKeyboard = await cdp.eval(`(() => {
+            const menu = document.querySelector('[role="menu"]');
+            if (!menu || !menu.contains(document.activeElement)) return false;
+            const keys = Array.from(menu.querySelectorAll('button:enabled'));
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+            const lastFocused = document.activeElement === keys.at(-1);
+            document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            return lastFocused && document.activeElement?.tagName === 'TR';
+        })()`);
+        record('UX-05', '右键菜单支持键盘导航并将焦点还给原行', menuKeyboard);
         await cdp.eval(`document.body.click()`);
         await sleep(150);
 
@@ -959,6 +1118,26 @@ async function main() {
         await cdp.eval(`window.__e2e.clickExact('关闭', '[role="dialog"] button')`);
         await sleep(250);
 
+        const listedTargets = await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('检测筛选结果 2 项')`));
+        await cdp.eval(`document.querySelector('main tbody input[type="checkbox"]')?.click()`);
+        const checkedTargets = await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('检测所选 1 项') && window.__e2e.bodyText().includes('将启动 1 项')`));
+        if (checkedTargets) await captureUiFixture(cdp, 'proxy-selection');
+        await cdp.eval(`document.querySelector('main tbody input[type="checkbox"]')?.click()`);
+        record('UX-02', '代理测活按勾选范围显示目标数与待启动数', listedTargets && checkedTargets);
+
+        await cdp.eval(`window.__e2e.clickExact('添加代理', 'main button')`);
+        await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[role="dialog"] [role="tablist"]'))`));
+        await cdp.eval(`window.__e2e.clickExact('手动表单', '[role="dialog"] [role="tab"]')`);
+        await cdp.eval(`(() => {
+            const port = document.querySelector('[role="dialog"] input[type="number"]');
+            if (port) window.__e2e.setReactValue(port, '19080');
+        })()`);
+        await cdp.eval(`window.__e2e.clickExact('JSON', '[role="dialog"] [role="tab"]')`);
+        await cdp.eval(`window.__e2e.clickExact('手动表单', '[role="dialog"] [role="tab"]')`);
+        const modeDraftKept = await cdp.eval(`document.querySelector('[role="dialog"] input[type="number"]')?.value === '19080'`);
+        record('UX-03', '代理编辑切换配置方式后保留原输入', modeDraftKept);
+        await cdp.eval(`window.__e2e.clickExact('取消', '[role="dialog"] button')`);
+
         const proxies = await cdp.eval(`window.electronAPI.proxies.list()`);
         const proxy1 = proxies.find((p) => p.name === '美西测试-1');
         let duplicateBadgeProxyOk = false;
@@ -1078,8 +1257,16 @@ async function main() {
             })()
         `);
         await sleep(200);
-        await cdp.eval(`window.__e2e.clickExact('保存设置')`);
-        await sleep(500);
+        await cdp.eval(`document.querySelector('aside button[aria-label="代理"]')?.click()`);
+        const settingsGuardShown = await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[role="alertdialog"]'))`));
+        if (settingsGuardShown) await captureUiFixture(cdp, 'unsaved-settings');
+        await cdp.eval(`window.__e2e.clickExact('继续编辑', '[role="alertdialog"] button')`);
+        const keptEditing = await waitUntil(() => cdp.eval(`Boolean(document.querySelector('#app-settings-form')) && !document.querySelector('[role="alertdialog"]')`));
+        if (keptEditing) await captureUiFixture(cdp, 'settings-browser');
+        await cdp.eval(`document.querySelector('aside button[aria-label="代理"]')?.click()`);
+        await waitUntil(() => cdp.eval(`window.__e2e.clickExact('保存并离开', '[role="alertdialog"] button')`));
+        const leftAfterSave = await waitUntil(() => cdp.eval(`!document.querySelector('#app-settings-form') && Boolean(document.querySelector('input[aria-label="搜索代理"]'))`));
+        record('UX-04', '设置草稿可继续编辑，也可保存并到达原目标', settingsGuardShown && keptEditing && leftAfterSave);
         const savedSettings = await cdp.eval(`window.electronAPI.settings.getSettings()`);
         const settingsPersisted =
             savedSettings?.memorySaverMode === true &&
@@ -3434,7 +3621,7 @@ async function main() {
                 aboutTabOk = await waitUntil(
                     () => cdp.eval(`(() => {
                         const t = window.__e2e.bodyText();
-                        return t.includes('MultiChrome') && t.includes(${JSON.stringify(appVersionTag)}) && t.includes('导出诊断报告') && t.includes('检查更新') && t.includes('GitHub Star');
+                        return t.includes('MultiChrome') && t.includes(${JSON.stringify(appVersionTag)}) && t.includes('导出诊断报告') && t.includes('检查更新') && t.includes('在 GitHub 查看项目');
                     })()`),
                     4000,
                 );
@@ -3637,6 +3824,7 @@ async function main() {
 
     const failed = results.filter((r) => !r.passed);
     const expected = [
+        'UX-01', 'UX-02', 'UX-03', 'UX-04', 'UX-05', 'UX-06', 'UX-07', 'UX-08',
         ...Array.from({ length: 21 }, (_, i) => 'E2E-' + String(i).padStart(2, '0')),
         'E2E-02a', 'E2E-02b', 'E2E-02c', 'E2E-02d', 'E2E-04a', 'E2E-06a',
     ];

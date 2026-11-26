@@ -844,9 +844,10 @@ const AutomationSettingsPanel: React.FC = () => {
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('启用本地 CDP 与 MCP', 'Enable Local CDP & MCP')}
+                        <label htmlFor="settings-enable-automation">{t('启用本地 CDP 与 MCP', 'Enable Local CDP & MCP')}</label>
                     </span>
                     <Switch
+                        id="settings-enable-automation"
                         data-testid="automation-enable-switch"
                         checked={isEnabled}
                         disabled={controlsDisabled}
@@ -1144,6 +1145,8 @@ const AutomationSettingsPanel: React.FC = () => {
                                             type="button"
                                             role="tab"
                                             aria-selected={active} tabIndex={active ? 0 : -1}
+                                            id={tab.testId}
+                                            aria-controls="automation-snippet-panel"
                                             data-testid={tab.testId}
                                             className={mergeClasses(
                                                 styles.pillTab,
@@ -1196,6 +1199,10 @@ const AutomationSettingsPanel: React.FC = () => {
 
                         <pre
                             className={styles.codeSurface}
+                            id="automation-snippet-panel"
+                            role="tabpanel"
+                            tabIndex={0}
+                            aria-labelledby={snippetTabs.find((tab) => tab.id === snippetTab)?.testId}
                             data-testid="automation-snippet-code"
                         >
                             {snippetCode}

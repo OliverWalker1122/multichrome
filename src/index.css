@@ -1,3 +1,18 @@
+:root {
+    --mc-workspace-inset: 24px;
+    --mc-font-ui:
+        'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI',
+        'Microsoft YaHei UI', 'PingFang SC', 'Microsoft YaHei',
+        'Noto Sans CJK SC', sans-serif;
+    --mc-font-display: 'Segoe UI Variable Display', var(--mc-font-ui);
+}
+
+@media (max-width: 900px) {
+    :root {
+        --mc-workspace-inset: 16px;
+    }
+}
+
 *,
 *::before,
 *::after {
@@ -12,9 +27,7 @@ body {
     width: 100%;
     overflow: hidden;
     background: transparent;
-    font-family:
-        'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI',
-        'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
+    font-family: var(--mc-font-ui);
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
     user-select: none;
@@ -94,6 +107,8 @@ pre,
 
 @media (forced-colors: active) {
     button[aria-current='page'],
+    button[aria-pressed='true'],
+    [role='tab'][aria-selected='true'],
     tr[aria-selected='true'] {
         outline: 1px solid Highlight;
         outline-offset: -1px;

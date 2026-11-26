@@ -111,21 +111,6 @@ export function useEnvironmentsWorkspace({
     const [contextMenu, setContextMenu] =
         useState<EnvContextMenuState | null>(null);
 
-    useEffect(() => {
-        if (!contextMenu) return;
-        const closeMenu = () => setContextMenu(null);
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setContextMenu(null);
-        };
-        window.addEventListener('click', closeMenu);
-        window.addEventListener('scroll', closeMenu, true);
-        window.addEventListener('keydown', onKeyDown);
-        return () => {
-            window.removeEventListener('click', closeMenu);
-            window.removeEventListener('scroll', closeMenu, true);
-            window.removeEventListener('keydown', onKeyDown);
-        };
-    }, [contextMenu]);
 
     const [sortBy, setSortBy] = useSavedTableValue<EnvSortKey>(
         'multichrome.env.sortBy',
@@ -417,14 +402,14 @@ export function useEnvironmentsWorkspace({
     ) => {
         event.preventDefault();
         onSelectEnv(env.id);
-        const menuWidth = 180;
-        const menuHeight = 200;
-        const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
-        const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+        const row = event.currentTarget as HTMLElement;
+        row.focus({ preventScroll: true });
+        const bounds = row.getBoundingClientRect();
+        const keyboard = event.clientX === 0 && event.clientY === 0;
         setContextMenu({
             env,
-            x: Math.max(8, x),
-            y: Math.max(8, y),
+            x: keyboard ? bounds.left + 8 : event.clientX,
+            y: keyboard ? bounds.bottom : event.clientY,
         });
     };
 

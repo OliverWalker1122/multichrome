@@ -133,7 +133,7 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                         icon={<StarRegular />}
                         onClick={() => void handleOpenRepo()}
                     >
-                        GitHub Star
+                        {t('在 GitHub 查看项目', 'View project on GitHub')}
                     </Button>
                     <Button
                         type="button"
@@ -142,7 +142,7 @@ const AboutSettingsPanel: React.FC<AboutSettingsPanelProps> = ({
                         icon={<DocumentTextRegular />}
                         onClick={() => void handleExportDiagnostics()}
                     >
-                        {t('导出诊断报告', 'Export Diagnostics')}
+                        {exportingDiag ? t('导出中…', 'Exporting…') : t('导出诊断报告', 'Export Diagnostics')}
                     </Button>
                     <Button
                         type="button"

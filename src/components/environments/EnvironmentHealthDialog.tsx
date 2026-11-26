@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Badge,
     Button,
@@ -198,6 +198,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
     const styles = useStyles();
     const { isEn, t } = useI18n();
     const [launching, setLaunching] = useState(false);
+    const checkGeneration = useRef(0);
     const [slots, setSlots] = useState<Record<string, HealthCheckSlot>>({});
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -217,7 +218,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
 
     const runChecks = useCallback(
         async (list: ChromeEnvironment[]) => {
-            if (!environmentApi.isAvailable() || list.length === 0) return;
+            const generation = ++checkGeneration.current;
             const initial: Record<string, HealthCheckSlot> = {};
             list.forEach((item) => {
                 initial[item.id] = { loading: true };
@@ -232,21 +233,20 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
             const workers = Array.from(
                 { length: Math.min(4, list.length) },
                 async () => {
-                    while (cursor < list.length) {
+                    while (cursor < list.length && generation === checkGeneration.current) {
                         const target = list[cursor];
                         cursor += 1;
                         try {
                             const report = await environmentApi.inspectHealth(
                                 target.id,
                             );
+                            if (generation !== checkGeneration.current) return;
                             setSlots((prev) => ({
                                 ...prev,
-                                [target.id]: {
-                                    loading: false,
-                                    report: report || undefined,
-                                },
+                                [target.id]: report ? { loading: false, report } : { loading: false, error: fallbackErr },
                             }));
                         } catch (err) {
+                            if (generation !== checkGeneration.current) return;
                             setSlots((prev) => ({
                                 ...prev,
                                 [target.id]: {
@@ -275,6 +275,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                 : targets[0].id,
         );
         void runChecks(targets);
+        return () => { checkGeneration.current += 1; };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [targetsSignature, runChecks]);
 
@@ -284,6 +285,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
     const anyLoading = targets.some(
         (item) => slots[item.id]?.loading !== false,
     );
+    const missingReport = targets.some((item) => !slots[item.id]?.report);
     const doneCount = targets.filter(
         (item) => slots[item.id] && !slots[item.id].loading,
     ).length;
@@ -305,7 +307,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
     const activeReport = activeSlot?.report || null;
 
     const handleConfirmSingleLaunch = async () => {
-        if (!onConfirmLaunch || launching || anyLoading) return;
+        if (!onConfirmLaunch || launching || anyLoading || missingReport) return;
         setLaunching(true);
         try {
             await onConfirmLaunch();
@@ -316,7 +318,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
 
     const handleConfirmBatchLaunch = async () => {
         const handler = onConfirmLaunchAll || onConfirmLaunch;
-        if (!handler || launching || anyLoading) return;
+        if (!handler || launching || anyLoading || missingReport) return;
         setLaunching(true);
         try {
             await handler();
@@ -687,7 +689,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                         className={styles.actionBtn}
                                         appearance="primary"
                                         icon={<PlayRegular />}
-                                        disabled={anyLoading || launching}
+                                        disabled={anyLoading || launching || missingReport}
                                         onClick={() =>
                                             void handleConfirmBatchLaunch()
                                         }
@@ -703,7 +705,7 @@ const EnvironmentHealthDialog: React.FC<EnvironmentHealthDialogProps> = ({
                                         className={styles.actionBtn}
                                         appearance="primary"
                                         icon={<PlayRegular />}
-                                        disabled={anyLoading || launching}
+                                        disabled={anyLoading || launching || missingReport}
                                         onClick={() =>
                                             void handleConfirmSingleLaunch()
                                         }

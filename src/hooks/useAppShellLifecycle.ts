@@ -3,12 +3,13 @@ import type {
     AppSettings,
     ChromeEnvironment,
     KernelStatus,
-    LaunchConsistencyReport,
+    LaunchGuardEntry,
     ManagedProxy,
     ProxyCoreInfo,
     ProxyLog,
 } from '../types';
 import { useI18n } from '../i18n';
+import { canLaunchProfile, checkProfile } from '../utils/launchPrecheck';
 import { useNotification } from '../contexts/NotificationContext';
 import {
     environmentApi,
@@ -426,9 +427,7 @@ export function useAppShellLifecycle({
         }
     }, [logTarget, logContextKey, clearingLogs, showNotification, t]);
 
-    const [launchGuardQueue, setLaunchGuardQueue] = useState<
-        Array<{ env: ChromeEnvironment; report: LaunchConsistencyReport }>
-    >([]);
+    const [launchGuardQueue, setLaunchGuardQueue] = useState<LaunchGuardEntry[]>([]);
     const [launchHealthQueue, setLaunchHealthQueue] = useState<
         ChromeEnvironment[]
     >([]);
@@ -477,6 +476,20 @@ export function useAppShellLifecycle({
         [environments, launchEnvironment],
     );
 
+    const checkConsistency = useCallback(
+        (env: ChromeEnvironment) => checkProfile(env, environmentApi.checkLaunchConsistency, t),
+        [t],
+    );
+
+    const retryIncompleteChecks = async () => {
+        const incomplete = launchGuardQueue.filter((item) => item.incomplete);
+        const retries = await Promise.all(incomplete.map(async (item) =>
+            [item, await checkConsistency(item.env)] as const,
+        ));
+        const results = new Map(retries);
+        setLaunchGuardQueue((current) => current.map((item) => results.get(item) || item));
+    };
+
     const handleLaunchWithGuard = useCallback(
         async (id: string): Promise<boolean> => {
             const env = environments.find((item) => item.id === id);
@@ -489,24 +502,17 @@ export function useAppShellLifecycle({
                 return false;
             }
             if (env) {
-                try {
-                    const report =
-                        await environmentApi.checkLaunchConsistency(id);
-                    if (report && !report.ok && report.issues.length > 0) {
-                        setLaunchGuardQueue((prev) =>
-                            prev.some((item) => item.env.id === env.id)
-                                ? prev
-                                : [...prev, { env, report }],
-                        );
-                        return false;
-                    }
-                } catch {
-                    // guard check failure does not block launch
+                const entry = await checkConsistency(env);
+                if (!entry.report.ok) {
+                    setLaunchGuardQueue((prev) =>
+                        prev.some((item) => item.env.id === id) ? prev : [...prev, entry],
+                    );
+                    return false;
                 }
             }
             return launchEnvironment(id);
         },
-        [environments, launchEnvironment, settings.requireHealthCheckOnLaunch],
+        [environments, launchEnvironment, settings.requireHealthCheckOnLaunch, checkConsistency],
     );
 
     const handleBatchLaunchWithGuard = useCallback(
@@ -535,41 +541,12 @@ export function useAppShellLifecycle({
                 };
             }
 
-            const checks = await Promise.all(
-                targets.map(async (env) => {
-                    try {
-                        const report =
-                            await environmentApi.checkLaunchConsistency(env.id);
-                        return { env, report };
-                    } catch {
-                        return { env, report: null };
-                    }
-                }),
-            );
-
-            const hasAnyGuarded = checks.some(
-                (item) =>
-                    item.report &&
-                    !item.report.ok &&
-                    item.report.issues.length > 0,
-            );
-
-            if (hasAnyGuarded) {
-                const unifiedEntries = checks.map((item) => ({
-                    env: item.env,
-                    report:
-                        item.report ||
-                        ({
-                            ok: true,
-                            hasError: false,
-                            canAutoAlign: false,
-                            issues: [],
-                        } satisfies LaunchConsistencyReport),
-                }));
-                setLaunchGuardQueue(unifiedEntries);
+            const checks = await Promise.all(targets.map(checkConsistency));
+            if (checks.some((item) => !item.report.ok)) {
+                setLaunchGuardQueue(checks);
                 return {
                     launchedCount: 0,
-                    deferredCount: unifiedEntries.length,
+                    deferredCount: checks.length,
                     failedCount: 0,
                 };
             }
@@ -586,6 +563,7 @@ export function useAppShellLifecycle({
             environments,
             launchWithConcurrency,
             settings.requireHealthCheckOnLaunch,
+            checkConsistency,
         ],
     );
 
@@ -620,7 +598,7 @@ export function useAppShellLifecycle({
         if (queue.length === 0) return;
         await Promise.all(
             queue.map(async ({ env, report }) => {
-                if (report.canAutoAlign && report.suggestedPatch) {
+                if (!report.hasError && report.canAutoAlign && report.suggestedPatch) {
                     await updateEnvironment(env.id, report.suggestedPatch, {
                         throwOnError: true,
                     });
@@ -628,7 +606,7 @@ export function useAppShellLifecycle({
             }),
         );
         const launchableIds = queue
-            .filter(({ report }) => !report.hasError)
+            .filter(canLaunchProfile)
             .map(({ env }) => env.id);
         setLaunchGuardQueue([]);
         const launchedCount = await launchWithConcurrency(launchableIds);
@@ -652,7 +630,7 @@ export function useAppShellLifecycle({
         const queue = [...launchGuardQueue];
         if (queue.length === 0) return;
         const launchableIds = queue
-            .filter(({ report }) => !report.hasError)
+            .filter(canLaunchProfile)
             .map(({ env }) => env.id);
         setLaunchGuardQueue([]);
         const launchedCount = await launchWithConcurrency(launchableIds);
@@ -708,6 +686,7 @@ export function useAppShellLifecycle({
         handleClearLogs,
         launchGuardState,
         launchGuardQueue,
+        retryIncompleteChecks,
         launchGuardQueueCount: launchGuardQueue.length,
         handleCancelLaunchGuard,
         launchHealthEnv,

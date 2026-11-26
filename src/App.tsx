@@ -45,6 +45,7 @@ const useStyles = makeStyles({
         flexDirection: 'column',
         overflow: 'hidden',
         backgroundColor: 'var(--glass-shell)',
+        backgroundImage: 'var(--glass-sheen)',
         color: tokens.colorNeutralForeground1,
     },
     body: {
@@ -83,6 +84,7 @@ const AppShell: React.FC = () => {
         settings,
         themeMode,
         isDark,
+        loading: settingsLoading,
         actions: settingsActions,
     } = useSettings();
     const { showNotification } = useNotification();
@@ -90,6 +92,25 @@ const AppShell: React.FC = () => {
 
     const [activeSection, setActiveSection] =
         useState<NavSection>('environments');
+    const [settingsDirty, setSettingsDirty] = useState(false);
+    const [pendingNavigation, setPendingNavigation] = useState<{ section: NavSection; group?: string } | null>(null);
+
+    const navigate = (section: NavSection, group?: string) => {
+        if (activeSection === 'settings' && section !== 'settings' && settingsDirty) {
+            setPendingNavigation({ section, group });
+            return;
+        }
+        if (group !== undefined) actions.setCurrentGroup(group);
+        setActiveSection(section);
+    };
+
+    const finishLeavingSettings = () => {
+        if (!pendingNavigation) return;
+        if (pendingNavigation.group !== undefined) actions.setCurrentGroup(pendingNavigation.group);
+        setActiveSection(pendingNavigation.section);
+        setPendingNavigation(null);
+        setSettingsDirty(false);
+    };
     const [sidebarManualCollapsed, setSidebarManualCollapsed] = useState(false);
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [renameGroupTarget, setRenameGroupTarget] = useState<string | null>(
@@ -337,8 +358,8 @@ const AppShell: React.FC = () => {
         if (activeSection === 'environments') {
             if (lifecycle.selectedEnv) {
                 return isEn
-                    ? `Selected: ${lifecycle.selectedEnv.name} · ${lifecycle.selectedEnv.isRunning ? 'Running' : 'Stopped'}`
-                    : `已选择: ${lifecycle.selectedEnv.name} · ${lifecycle.selectedEnv.isRunning ? '运行中' : '未运行'}`;
+                    ? `Current profile: ${lifecycle.selectedEnv.name} · ${lifecycle.selectedEnv.isRunning ? 'Running' : 'Stopped'}`
+                    : `当前环境： ${lifecycle.selectedEnv.name} · ${lifecycle.selectedEnv.isRunning ? '运行中' : '未运行'}`;
             }
             const running = filteredEnvironments.filter(
                 (e) => e.isRunning,
@@ -356,8 +377,8 @@ const AppShell: React.FC = () => {
                           ? t('启动异常', 'Start error')
                           : t('未启动', 'Stopped');
                 return isEn
-                    ? `Selected: ${lifecycle.selectedProxy.name} · ${status}`
-                    : `已选择: ${lifecycle.selectedProxy.name} · ${status}`;
+                    ? `Current proxy: ${lifecycle.selectedProxy.name} · ${status}`
+                    : `当前代理： ${lifecycle.selectedProxy.name} · ${status}`;
             }
             const running = lifecycle.managedProxies.filter(
                 (p) => p.status === 'running',
@@ -402,7 +423,7 @@ const AppShell: React.FC = () => {
             <div className={styles.body}>
                 <NavigationSidebar
                     activeSection={activeSection}
-                    onSelectSection={(section) => setActiveSection(section)}
+                    onSelectSection={(section) => navigate(section)}
                     collapsed={navCollapsed}
                     canToggleCollapsed={lifecycle.windowWidth >= 880}
                     onToggleCollapsed={() =>
@@ -415,7 +436,7 @@ const AppShell: React.FC = () => {
                     groupCounts={groupCounts}
                     currentGroup={state.currentGroup}
                     emptyGroups={state.emptyGroups}
-                    onSelectGroup={(group) => actions.setCurrentGroup(group)}
+                    onSelectGroup={(group) => navigate('environments', group)}
                     onRequestRenameGroup={(group) =>
                         setRenameGroupTarget(group)
                     }
@@ -526,6 +547,10 @@ const AppShell: React.FC = () => {
                         {activeSection === 'settings' && (
                             <SettingsPage
                                 currentSettings={settings}
+                                onDraftStateChange={setSettingsDirty}
+                                leaveRequested={Boolean(pendingNavigation)}
+                                onLeave={finishLeavingSettings}
+                                onKeepEditing={() => setPendingNavigation(null)}
                                 onSave={settingsActions.saveSettings}
                                 onThemePreview={settingsActions.setThemeMode}
                                 coreInfo={lifecycle.coreInfo}
@@ -621,6 +646,7 @@ const AppShell: React.FC = () => {
                 groups={groupsForModal}
                 defaultGroup={state.currentGroup}
                 defaultEngine={settings.fingerprint?.defaultEngine}
+                defaultNetwork={settingsLoading || !settings.dataPath ? 'unknown' : settings.globalProxy?.enabled && settings.globalProxy.address ? 'proxy' : 'direct'}
                 hasFingerprintKernel={hasFingerprintKernel}
                 managedProxies={lifecycle.managedProxies}
                 allEnvironments={state.environments}
@@ -649,6 +675,7 @@ const AppShell: React.FC = () => {
                 onCancel={lifecycle.handleCancelLaunchGuard}
                 onAutoAlignAndLaunch={lifecycle.handleAutoAlignAndLaunch}
                 onForceLaunch={lifecycle.handleForceLaunch}
+                onRetry={lifecycle.retryIncompleteChecks}
             />
 
             <EnvironmentHealthDialog

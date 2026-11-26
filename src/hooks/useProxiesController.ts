@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type {
     BatchImportProxiesResult,
     ChromeEnvironment,
@@ -56,21 +56,6 @@ export function useProxiesController({
         y: number;
     } | null>(null);
 
-    useEffect(() => {
-        if (!contextMenu) return;
-        const closeMenu = () => setContextMenu(null);
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') setContextMenu(null);
-        };
-        window.addEventListener('click', closeMenu);
-        window.addEventListener('scroll', closeMenu, true);
-        window.addEventListener('keydown', onKeyDown);
-        return () => {
-            window.removeEventListener('click', closeMenu);
-            window.removeEventListener('scroll', closeMenu, true);
-            window.removeEventListener('keydown', onKeyDown);
-        };
-    }, [contextMenu]);
 
     const [sortBy, setSortBy] = useSavedTableValue<ProxySortKey>(
         'multichrome.proxy.sortBy',
@@ -90,6 +75,11 @@ export function useProxiesController({
     );
     const exitRequests = useRef(new Set<string>());
     const [editor, setEditor] = useState<ProxyEditorState | null>(null);
+    const modeDrafts = useRef<Partial<Record<ProxyEditorState['mode'], ProxyEditorState>>>({});
+    const closeEditor = () => {
+        modeDrafts.current = {};
+        setEditor(null);
+    };
     const [formError, setFormError] = useState('');
     const [configProxyId, setConfigProxyId] = useState<string | null>(null);
     const [configView, setConfigView] = useState<ProxyConfigView | null>(null);
@@ -291,9 +281,8 @@ export function useProxiesController({
         }
     };
 
-    const handleBatchCheckAll = async () => {
-        if (busy || batchChecking || filtered.length === 0) return;
-        const targets = [...filtered];
+    const handleBatchCheck = async (targets: ManagedProxy[]) => {
+        if (busy || batchChecking || targets.length === 0) return;
         setBatchChecking({ done: 0, total: targets.length });
         let okCount = 0;
         let failCount = 0;
@@ -342,6 +331,7 @@ export function useProxiesController({
 
     const openEditor = async (proxy?: ManagedProxy) => {
         if (busy) return;
+        modeDrafts.current = {};
         setFormError('');
         if (!proxy) {
             setEditor(createEmptyProxyEditor());
@@ -376,14 +366,16 @@ export function useProxiesController({
     const switchEditorMode = async (mode: ProxyEditorState['mode']) => {
         if (!editor || busy || editor.mode === mode) return;
         setFormError('');
+        modeDrafts.current[editor.mode] = editor;
+        const cached = modeDrafts.current[mode];
         const next: ProxyEditorState = {
-            ...createEmptyProxyEditor(),
+            ...(cached || createEmptyProxyEditor()),
             id: editor.id,
             name: editor.name,
             rotationUrl: editor.rotationUrl,
             mode,
         };
-        if (mode !== 'json' || !editor.id) {
+        if (cached || mode !== 'json' || !editor.id) {
             setEditor(next);
             return;
         }
@@ -436,7 +428,7 @@ export function useProxiesController({
 
         try {
             const saved = await proxyApi.save(input);
-            setEditor(null);
+            closeEditor();
             onSelectProxy(saved.id);
             onRefreshProxies();
             showNotification(
@@ -510,14 +502,14 @@ export function useProxiesController({
     const openContextMenu = (event: React.MouseEvent, proxy: ManagedProxy) => {
         event.preventDefault();
         onSelectProxy(proxy.id);
-        const menuWidth = 184;
-        const menuHeight = 270;
-        const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8);
-        const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8);
+        const row = event.currentTarget as HTMLElement;
+        row.focus({ preventScroll: true });
+        const bounds = row.getBoundingClientRect();
+        const keyboard = event.clientX === 0 && event.clientY === 0;
         setContextMenu({
             proxy,
-            x: Math.max(8, x),
-            y: Math.max(8, y),
+            x: keyboard ? bounds.left + 8 : event.clientX,
+            y: keyboard ? bounds.bottom : event.clientY,
         });
     };
 
@@ -653,6 +645,7 @@ export function useProxiesController({
         handleBatchRemoveSelected,
         editor,
         setEditor,
+        closeEditor,
         formError,
         openEditor,
         switchEditorMode,
@@ -676,7 +669,7 @@ export function useProxiesController({
         setBatchResult,
         handleBatchImport,
         batchChecking,
-        handleBatchCheckAll,
+        handleBatchCheck,
         assignProxy,
         setAssignProxy,
         assignEnvironmentId,

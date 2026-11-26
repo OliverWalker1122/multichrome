@@ -384,7 +384,7 @@ const LogDockPanel: React.FC<LogDockPanelProps> = ({
                 !event.altKey &&
                 event.key.toLowerCase() === 'f'
             ) {
-                if (document.querySelector('[role="dialog"]')) return;
+                if (document.querySelector('[role="dialog"], [role="alertdialog"], [aria-modal="true"]')) return;
                 event.preventDefault();
                 setSearchOpen(true);
                 window.requestAnimationFrame(() => {
@@ -406,7 +406,7 @@ const LogDockPanel: React.FC<LogDockPanelProps> = ({
             const el = container.querySelector<HTMLElement>(
                 `[data-log-id="${CSS.escape(activeMatchedId)}"]`,
             );
-            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'center' });
         });
         return () => window.cancelAnimationFrame(frame);
     }, [open, activeMatchedId, safeMatchIdx]);

@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
     Button,
     Checkbox,
@@ -94,6 +94,10 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
     const styles = useStyles();
     const { isEn, t } = useI18n();
     const formRef = useRef<HTMLFormElement>(null);
+    const errorRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (formError) errorRef.current?.focus();
+    }, [formError]);
 
     return (
         <OverlayDrawer
@@ -134,7 +138,7 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                             <MessageBar intent="error" layout="multiline">
                                 <MessageBarBody>
                                     {t(
-                                        'sing-box 核心不可用，无法校验并保存配置。请使用包含核心的安装包。',
+                                        'sing-box 不可用。请前往“设置 → 组件”安装后再保存。',
                                         'sing-box core is unavailable. Install it in Settings to validate and save proxies.',
                                     )}
                                 </MessageBarBody>
@@ -142,7 +146,7 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                         )}
 
                         {formError && (
-                            <MessageBar intent="error" layout="multiline">
+                            <MessageBar ref={errorRef} tabIndex={-1} intent="error" layout="multiline">
                                 <MessageBarBody>
                                     {isEn
                                         ? `${formError} (Your unsaved input is preserved — adjust and retry.)`
@@ -177,14 +181,15 @@ const ProxyEditorDrawer: React.FC<ProxyEditorDrawerProps> = ({
                                     {t('配置方式', 'Input Mode')}
                                     <InfoTip
                                         content={t(
-                                            '切换方式会清空未保存的输入；编辑已有代理切换到 JSON 时会自动载入原配置',
-                                            'Switching resets unsaved fields; switching to JSON on an existing proxy loads its saved config.',
+                                            '切换方式会保留本次输入，保存时仅使用当前方式。',
+                                            'Switching modes keeps your draft in this editor. Only the active mode is saved.',
                                         )}
                                     />
                                 </span>
                             }
                         >
                             <TabList
+                                aria-label={t('代理配置方式', 'Proxy input mode')}
                                 size="small"
                                 selectedValue={editor.mode}
                                 onTabSelect={(_, data) =>

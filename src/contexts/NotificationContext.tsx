@@ -88,13 +88,13 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
                     aria-label={tr('通知消息', 'Notifications')}
                     style={{
                         position: 'fixed',
-                        top: '46px',
+                        bottom: '44px',
                         right: '16px',
                         zIndex: 10000,
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '8px',
-                        maxWidth: '420px',
+                        maxWidth: 'min(420px, calc(100vw - 32px))',
                         pointerEvents: 'none',
                     }}
                 >

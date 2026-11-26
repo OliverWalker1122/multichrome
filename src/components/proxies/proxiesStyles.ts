@@ -2,6 +2,8 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import {
     selectedTableRow,
     stickyTableHeader,
+    stoppedStatus,
+    tableActionButton,
     tableViewport,
     workspaceTitle,
 } from '../../theme/workspaceStyles';
@@ -27,7 +29,7 @@ export const useProxiesStyles = makeStyles({
         display: 'flex',
         alignItems: 'center',
         gap: '10px',
-        padding: '22px 24px 12px',
+        padding: '22px var(--mc-workspace-inset) 12px',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
@@ -44,6 +46,12 @@ export const useProxiesStyles = makeStyles({
         color: tokens.colorNeutralForeground3,
         fontVariantNumeric: 'tabular-nums',
     },
+    checkAction: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        color: tokens.colorNeutralForeground2,
+    },
     headerActions: {
         display: 'flex',
         alignItems: 'center',
@@ -51,7 +59,7 @@ export const useProxiesStyles = makeStyles({
         gap: '6px',
     },
     alerts: {
-        padding: '0 24px 10px',
+        padding: '0 var(--mc-workspace-inset) 10px',
         display: 'flex',
         flexDirection: 'column',
         gap: '6px',
@@ -62,7 +70,7 @@ export const useProxiesStyles = makeStyles({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '4px 12px',
-        padding: '0 24px',
+        padding: '0 var(--mc-workspace-inset)',
         flexShrink: 0,
         flexWrap: 'wrap',
     },
@@ -134,10 +142,12 @@ export const useProxiesStyles = makeStyles({
     nameTextWrap: {
         display: 'flex',
         flexDirection: 'column',
+        gap: '1px',
         minWidth: 0,
     },
     namePrimary: {
-        fontSize: '15px',
+        fontSize: tokens.fontSizeBase300,
+        lineHeight: tokens.lineHeightBase300,
         fontWeight: tokens.fontWeightSemibold,
         color: tokens.colorNeutralForeground1,
         overflow: 'hidden',
@@ -145,31 +155,14 @@ export const useProxiesStyles = makeStyles({
         whiteSpace: 'nowrap',
     },
     nameSub: {
-        fontSize: '12px',
+        fontSize: tokens.fontSizeBase200,
+        lineHeight: tokens.lineHeightBase200,
         color: tokens.colorNeutralForeground3,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
     },
-    statusRunning: {
-        color: tokens.colorPaletteGreenForeground1,
-        fontWeight: 600,
-        fontSize: '13px',
-        backgroundColor: tokens.colorPaletteGreenBackground1,
-        borderRadius: '5px',
-        padding: '3px 7px',
-    },
-    statusError: {
-        color: tokens.colorPaletteRedForeground1,
-        fontWeight: 600,
-        fontSize: '13px',
-        borderRadius: '5px',
-        padding: '3px 7px',
-    },
-    statusStopped: {
-        color: tokens.colorNeutralForeground3,
-        fontSize: '13px',
-    },
+    statusStopped: stoppedStatus,
     numeric: {
         fontVariantNumeric: 'tabular-nums',
         color: tokens.colorNeutralForeground2,
@@ -181,24 +174,9 @@ export const useProxiesStyles = makeStyles({
         gap: '4px',
         whiteSpace: 'nowrap',
     },
-    runButton: {
-        minWidth: '64px',
-        height: '26px',
-        minHeight: '26px',
-        paddingLeft: '10px',
-        paddingRight: '10px',
-        borderRadius: '6px',
-        justifyContent: 'center',
-        fontSize: '12.5px',
-        fontWeight: tokens.fontWeightMedium,
-        backgroundColor: tokens.colorNeutralBackground1,
-        color: tokens.colorNeutralForeground1,
-        border: `1px solid ${tokens.colorNeutralStroke1}`,
-        boxShadow: '0 1px 1px rgba(0, 0, 0, 0.04)',
-        transitionProperty: 'background-color, color, border-color, box-shadow',
-        transitionDuration: '120ms',
-    },
+    runButton: tableActionButton,
     runButtonStart: {
+        '&:not(:disabled) svg': { color: tokens.colorBrandForeground1 },
         '&:hover:not(:disabled)': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
             color: tokens.colorBrandForeground1,
@@ -211,6 +189,7 @@ export const useProxiesStyles = makeStyles({
         },
     },
     runButtonStop: {
+        '&:not(:disabled) svg': { color: tokens.colorPaletteRedForeground1 },
         '&:hover:not(:disabled)': {
             backgroundColor: tokens.colorNeutralBackground1Hover,
             color: tokens.colorPaletteRedForeground1,

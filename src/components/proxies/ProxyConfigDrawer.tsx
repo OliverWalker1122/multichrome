@@ -8,6 +8,7 @@ import {
     DrawerHeaderTitle,
     MessageBar,
     MessageBarBody,
+    MessageBarActions,
     OverlayDrawer,
     Select,
     Spinner,
@@ -165,6 +166,11 @@ const ProxyConfigDrawer: React.FC<ProxyConfigDrawerProps> = ({
                     {error && (
                         <MessageBar intent="error" layout="multiline">
                             <MessageBarBody>{error}</MessageBarBody>
+                            {proxyId && <MessageBarActions>
+                                <Button size="small" disabled={loading} onClick={() => onSelectProxy(proxyId)}>
+                                    {t('重新读取脱敏配置', 'Reload redacted config')}
+                                </Button>
+                            </MessageBarActions>}
                         </MessageBar>
                     )}
 

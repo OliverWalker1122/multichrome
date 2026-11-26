@@ -202,7 +202,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('默认浏览器', 'Default Browser')}
+                        <label htmlFor="settings-default-engine">{t('默认浏览器', 'Default Browser')}</label>
                         <InfoTip
                             content={
                                 hasActiveKernel
@@ -219,6 +219,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
                     </span>
                     <Select
                         style={{ minWidth: '220px' }}
+                        id="settings-default-engine"
                         value={defaultEngine}
                         onChange={(_, data) =>
                             onDefaultEngineChange(
@@ -239,7 +240,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('省内存模式', 'Memory Saver')}
+                        <label htmlFor="settings-memory-saver">{t('省内存模式', 'Memory Saver')}</label>
                         <InfoTip
                             content={t(
                                 '同时打开多个窗口时自动限制后台标签与缓存占用，不影响网页正常使用与伪装效果',
@@ -248,6 +249,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-memory-saver"
                         checked={memorySaverMode}
                         onChange={(_, data) =>
                             onMemorySaverModeChange(data.checked)
@@ -396,18 +398,21 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
                     <Input
                         style={{ flex: 1, minWidth: '120px' }}
                         placeholder={t('名称', 'Name')}
+                        aria-label={t('书签名称', 'Bookmark name')}
                         value={newBmName}
                         onChange={(_, d) => setNewBmName(d.value)}
                     />
                     <Input
                         style={{ flex: 2, minWidth: '180px' }}
                         placeholder="https://example.com/"
+                        aria-label={t('书签网址', 'Bookmark URL')}
                         value={newBmUrl}
                         onChange={(_, d) => setNewBmUrl(d.value)}
                     />
                     <Input
                         style={{ flex: 1, minWidth: '100px' }}
                         placeholder={t('文件夹（可选）', 'Folder (opt.)')}
+                        aria-label={t('书签文件夹', 'Bookmark folder')}
                         value={newBmFolder}
                         onChange={(_, d) => setNewBmFolder(d.value)}
                     />
@@ -499,6 +504,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
                                         </span>
                                     </div>
                                     <Switch
+                                        aria-label={t(`启用扩展 ${ext.name}`, `Enable extension ${ext.name}`)}
                                         checked={ext.enabled}
                                         onChange={(_, d) =>
                                             onExtensionTemplatesChange((prev) =>
@@ -550,6 +556,7 @@ const BrowserSettingsSection: React.FC<BrowserSettingsSectionProps> = ({
                                 />
                             </span>
                             <Switch
+                                aria-label={t('防关联浏览器也加载扩展', 'Also load on Privacy Browser')}
                                 checked={allowExtensionsOnFingerprintKernel}
                                 onChange={(_, d) =>
                                     onAllowExtensionsOnFingerprintKernelChange(

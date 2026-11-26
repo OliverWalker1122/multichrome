@@ -1,6 +1,8 @@
 import { makeStyles, tokens } from '@fluentui/react-components';
 import { workspaceTitle } from '../../theme/workspaceStyles';
 
+const formWidth = '760px';
+
 export const useSettingsStyles = makeStyles({
     root: {
         display: 'flex',
@@ -14,10 +16,11 @@ export const useSettingsStyles = makeStyles({
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
-        padding: '16px 24px 12px 24px',
+        padding: '22px var(--mc-workspace-inset) 12px',
         flexShrink: 0,
     },
     headerTop: {
+        maxWidth: formWidth,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -59,6 +62,7 @@ export const useSettingsStyles = makeStyles({
         fontFamily: 'inherit',
         cursor: 'pointer',
         whiteSpace: 'nowrap',
+        '& > svg': { width: '16px', height: '16px', flexShrink: 0 },
         transitionProperty: 'background-color, color, box-shadow',
         transitionDuration: '120ms',
         ':hover': {
@@ -91,10 +95,10 @@ export const useSettingsStyles = makeStyles({
         flex: 1,
         minHeight: 0,
         overflowY: 'auto',
-        padding: '4px 24px 32px 24px',
+        padding: '4px var(--mc-workspace-inset) 32px',
     },
     container: {
-        maxWidth: '760px',
+        maxWidth: formWidth,
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
@@ -139,9 +143,9 @@ export const useSettingsStyles = makeStyles({
     },
     cardTitle: {
         margin: 0,
-        fontSize: '14px',
-        fontWeight: 600,
-        lineHeight: '20px',
+        fontSize: tokens.fontSizeBase400,
+        fontWeight: tokens.fontWeightSemibold,
+        lineHeight: tokens.lineHeightBase400,
         color: tokens.colorNeutralForeground1,
     },
     sectionIcon: {
@@ -151,7 +155,7 @@ export const useSettingsStyles = makeStyles({
         width: '24px',
         height: '24px',
         borderRadius: '7px',
-        fontSize: '14px',
+        '& > svg': { width: '18px', height: '18px' },
         flexShrink: 0,
     },
     row: {
@@ -165,8 +169,8 @@ export const useSettingsStyles = makeStyles({
         display: 'inline-flex',
         alignItems: 'center',
         gap: '6px',
-        fontSize: '13px',
-        fontWeight: 500,
+        fontSize: tokens.fontSizeBase300,
+        lineHeight: tokens.lineHeightBase300,
         color: tokens.colorNeutralForeground1,
     },
     divider: {

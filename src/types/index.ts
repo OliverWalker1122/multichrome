@@ -266,6 +266,12 @@ export interface LaunchConsistencyIssue {
     autoFixPatch?: Partial<ChromeEnvironment>;
 }
 
+export interface LaunchGuardEntry {
+    env: ChromeEnvironment;
+    report: LaunchConsistencyReport;
+    incomplete?: boolean;
+}
+
 export interface LaunchConsistencyReport {
     ok: boolean;
     hasError: boolean;

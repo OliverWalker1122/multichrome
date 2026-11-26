@@ -196,7 +196,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                             )}
                         </div>
                     )}
-                    {(narrowWindow || env.notes) && (
+                    {(narrowWindow || (env.notes && !activeOptionalCols.includes('notes'))) && (
                         <span
                             className={styles.nameSub}
                             style={
@@ -454,19 +454,9 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
                         appearance="secondary"
                         icon={
                             busy ? undefined : env.isRunning ? (
-                                <StopFilled
-                                    style={{
-                                        fontSize: '9px',
-                                        color: tokens.colorPaletteRedForeground1,
-                                    }}
-                                />
+                                <StopFilled />
                             ) : (
-                                <PlayFilled
-                                    style={{
-                                        fontSize: '10px',
-                                        color: tokens.colorBrandForeground1,
-                                    }}
-                                />
+                                <PlayFilled />
                             )
                         }
                         disabled={busy}

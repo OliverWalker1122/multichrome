@@ -93,8 +93,9 @@ const useStyles = makeStyles({
         minWidth: 0,
     },
     title: {
-        fontSize: '15px',
-        fontWeight: 600,
+        fontSize: tokens.fontSizeBase500,
+        lineHeight: tokens.lineHeightBase500,
+        fontWeight: tokens.fontWeightSemibold,
         margin: 0,
         color: tokens.colorNeutralForeground1,
         overflow: 'hidden',

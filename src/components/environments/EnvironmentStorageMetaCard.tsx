@@ -28,6 +28,7 @@ export interface EnvironmentStorageMetaCardProps {
     styles: EnvironmentDetailsStyles;
     environment: ChromeEnvironment;
     loadingStorage: boolean;
+    onRetryStorage: () => void;
     storageStats: EnvironmentStorageStats | null;
     clearingCache: boolean;
     onCopyId: () => void;
@@ -41,6 +42,7 @@ const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
     styles,
     environment,
     loadingStorage,
+    onRetryStorage,
     storageStats,
     clearingCache,
     onCopyId,
@@ -119,8 +121,11 @@ const EnvironmentStorageMetaCard: React.FC<EnvironmentStorageMetaCardProps> = ({
                                   ? isEn
                                       ? `${formatStorageBytes(storageStats.totalBytes)} (${formatStorageBytes(storageStats.cacheBytes)} cache)`
                                       : `${formatStorageBytes(storageStats.totalBytes)}（可清缓存 ${formatStorageBytes(storageStats.cacheBytes)}）`
-                                  : '-'}
+                                  : t('无法读取', 'Unavailable')}
                         </span>
+                        {!loadingStorage && !storageStats && (
+                            <Button type="button" appearance="subtle" size="small" onClick={onRetryStorage}>{t('重试', 'Retry')}</Button>
+                        )}
                         <Tooltip
                             content={
                                 environment.isRunning

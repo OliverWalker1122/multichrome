@@ -1,8 +1,14 @@
 import { useDraftField } from '../../hooks/useDraftField';
 import { moveTabFocus } from '../../utils/tabKeyboard';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
     Button,
+    Dialog,
+    DialogActions,
+    DialogBody,
+    DialogContent,
+    DialogSurface,
+    DialogTitle,
     MessageBar,
     MessageBarBody,
     mergeClasses,
@@ -49,6 +55,10 @@ export interface SettingsPageProps {
     currentSettings: AppSettings;
     onSave: (settings: AppSettings) => Promise<boolean>;
     onThemePreview: (theme: ThemeMode) => Promise<void>;
+    onDraftStateChange: (dirty: boolean) => void;
+    leaveRequested: boolean;
+    onLeave: () => void;
+    onKeepEditing: () => void;
     coreInfo: ProxyCoreInfo | null;
     appVersion: string;
     managedProxies: ManagedProxy[];
@@ -64,6 +74,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
     currentSettings,
     onSave,
     onThemePreview,
+    onDraftStateChange,
+    leaveRequested,
+    onLeave,
+    onKeepEditing,
     coreInfo,
     appVersion,
     managedProxies,
@@ -145,6 +159,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             JSON.stringify(currentSettings.groupStartupUrls || {}) ||
         JSON.stringify(fingerprint) !== JSON.stringify(baselineFp);
 
+    useLayoutEffect(() => {
+        onDraftStateChange(isDirty || saving);
+    }, [isDirty, saving, onDraftStateChange]);
+
     const hasActiveKernel = Boolean(
         (kernelStatus?.installedKernels || []).find(
             (k) => k.id === kernelStatus?.activeKernelId,
@@ -189,20 +207,22 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
         setError('');
     };
 
-    const handleSave = async (event: React.FormEvent) => {
-        event.preventDefault();
+    const handleSave = async () => {
+        if (saving) return false;
         if (!dataPath.trim()) {
+            setActiveTab('general');
             setError(t('数据目录不能为空', 'Data directory cannot be empty'));
-            return;
+            return false;
         }
         if (proxyEnabled && !proxyAddress.trim()) {
+            setActiveTab('privacy');
             setError(
                 t(
                     '已开启全局备用代理，请填写代理地址或关闭开关',
                     'Enter a fallback proxy address or turn the switch off',
                 ),
             );
-            return;
+            return false;
         }
 
         try {
@@ -235,8 +255,10 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                     ),
                 );
             }
+            return ok;
         } catch (err) {
             setError(cleanIpcError(err, locale));
+            return false;
         } finally {
             setSaving(false);
         }
@@ -328,6 +350,7 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                                 key={tab.id}
                                 type="button"
                                 role="tab"
+                                id={`settings-tab-${tab.id}`} aria-controls="settings-content"
                                 aria-selected={active} tabIndex={active ? 0 : -1}
                                 data-testid={`settings-tab-${tab.id}`}
                                 className={mergeClasses(
@@ -353,9 +376,9 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
             <form
                 id="app-settings-form"
                 className={styles.body}
-                onSubmit={(event) => void handleSave(event)}
+                onSubmit={(event) => { event.preventDefault(); void handleSave(); }}
             >
-                <div className={styles.container}>
+                <div id="settings-content" role="tabpanel" aria-labelledby={`settings-tab-${activeTab}`} className={styles.container}>
                     {error && (
                         <MessageBar intent="error" layout="multiline">
                             <MessageBarBody>
@@ -451,6 +474,24 @@ const SettingsPage: React.FC<SettingsPageProps> = ({
                     )}
                 </div>
             </form>
+            {leaveRequested && (
+                <Dialog open modalType="alert" onOpenChange={(_, data) => { if (!data.open && !saving) onKeepEditing(); }}>
+                    <DialogSurface>
+                        <DialogBody>
+                            <DialogTitle>{t('保存设置后离开？', 'Save settings before leaving?')}</DialogTitle>
+                            <DialogContent>{t('当前设置有未保存的修改。', 'You have unsaved settings.')}</DialogContent>
+                            <DialogActions>
+                                <Button disabled={saving} onClick={onKeepEditing}>{t('继续编辑', 'Keep editing')}</Button>
+                                <Button disabled={saving} onClick={onLeave}>{t('放弃修改', 'Discard changes')}</Button>
+                                <Button appearance="primary" disabled={saving} onClick={async () => {
+                                    if (await handleSave()) onLeave();
+                                    else onKeepEditing();
+                                }}>{saving ? t('正在保存…', 'Saving…') : t('保存并离开', 'Save and leave')}</Button>
+                            </DialogActions>
+                        </DialogBody>
+                    </DialogSurface>
+                </Dialog>
+            )}
         </section>
     );
 };

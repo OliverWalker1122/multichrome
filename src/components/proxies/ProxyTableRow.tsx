@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+    Badge,
     Button,
     Checkbox,
     Menu,
@@ -29,7 +30,7 @@ import {
 } from '@fluentui/react-icons';
 import type { ChromeEnvironment, ManagedProxy } from '../../types';
 import { useI18n } from '../../i18n';
-import { getProtocolStyle, getToneStyle } from '../../theme/semanticColors';
+import { getProtocolStyle } from '../../theme/semanticColors';
 import ProxyExitInfo from './ProxyExitInfo';
 import type { ProxiesStyles } from './proxiesStyles';
 
@@ -228,26 +229,13 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                     }
                     relationship="description"
                 >
-                    <span
-                        style={
-                            proxy.status === 'error'
-                                ? getToneStyle('rose')
-                                : undefined
-                        }
-                        className={
-                            running
-                                ? styles.statusRunning
-                                : proxy.status === 'error'
-                                  ? styles.statusError
-                                  : styles.statusStopped
-                        }
-                    >
-                        {running
-                            ? t('已启动', 'Running')
-                            : proxy.status === 'error'
-                              ? t('异常', 'Error')
-                              : t('未启动', 'Stopped')}
-                    </span>
+                    {running || proxy.status === 'error' ? (
+                        <Badge appearance="tint" color={running ? 'success' : 'danger'} size="small">
+                            {running ? t('已启动', 'Running') : t('异常', 'Error')}
+                        </Badge>
+                    ) : (
+                        <span className={styles.statusStopped}>{t('未启动', 'Stopped')}</span>
+                    )}
                 </Tooltip>
             </td>
             {!narrowWindow && (
@@ -335,19 +323,9 @@ const ProxyTableRow: React.FC<ProxyTableRowProps> = ({
                             )}
                             icon={
                                 busy === proxy.id ? undefined : running ? (
-                                    <StopFilled
-                                        style={{
-                                            fontSize: '9px',
-                                            color: tokens.colorPaletteRedForeground1,
-                                        }}
-                                    />
+                                    <StopFilled />
                                 ) : (
-                                    <PlayFilled
-                                        style={{
-                                            fontSize: '10px',
-                                            color: tokens.colorBrandForeground1,
-                                        }}
-                                    />
+                                    <PlayFilled />
                                 )
                             }
                             disabled={!!busy || (running && inUse)}

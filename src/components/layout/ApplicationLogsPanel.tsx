@@ -350,7 +350,7 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
                             <Button
                                 size="small"
                                 icon={<DeleteRegular />}
-                                disabled={clearing}
+                                disabled={loading || clearing || entries.length === 0}
                                 onClick={() => void clear()}
                             >
                                 {clearing
@@ -423,9 +423,16 @@ const ApplicationLogsPanel: React.FC<{ onClose: () => void }> = ({
                                               '正在读取后台日志…',
                                               'Loading application logs…',
                                           )
-                                        : search || level !== 'all'
-                                          ? t('没有匹配的日志', 'No matching logs')
-                                          : t('暂无后台日志', 'No application logs yet')}
+                                        : error && entries.length === 0
+                                          ? null
+                                          : search || level !== 'all'
+                                            ? t('没有匹配的日志', 'No matching logs')
+                                            : t('暂无后台日志', 'No application logs yet')}
+                                    {!loading && !error && (search || level !== 'all') && (
+                                        <Button appearance="subtle" size="small" onClick={() => { setSearch(''); setLevel('all'); }}>
+                                            {t('清除筛选', 'Clear filters')}
+                                        </Button>
+                                    )}
                                 </div>
                             )}
                         </div>

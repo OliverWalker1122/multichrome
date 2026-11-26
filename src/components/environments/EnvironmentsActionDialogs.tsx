@@ -1,4 +1,5 @@
 import React from 'react';
+import RowContextMenu from '../common/RowContextMenu';
 import {
     Button,
     Dialog,
@@ -83,12 +84,8 @@ const EnvironmentsActionDialogs: React.FC<EnvironmentsActionDialogsProps> = ({
     return (
         <>
             {contextMenu && (
-                <div
-                    role="menu"
-                    className={styles.contextMenu}
-                    style={{ left: contextMenu.x, top: contextMenu.y }}
-                    onClick={(event) => event.stopPropagation()}
-                >
+                <RowContextMenu x={contextMenu.x} y={contextMenu.y} className={styles.contextMenu}
+                    label={t('环境操作', 'Profile actions')} onClose={onCloseContextMenu}>
                     {contextMenu.env.isRunning && onFocusWindow && (
                         <button
                             type="button"
@@ -209,7 +206,7 @@ const EnvironmentsActionDialogs: React.FC<EnvironmentsActionDialogsProps> = ({
                         <DeleteRegular />
                         {t('移入回收站', 'Move to Trash')}
                     </button>
-                </div>
+                </RowContextMenu>
             )}
 
             <EnvironmentHealthDialog

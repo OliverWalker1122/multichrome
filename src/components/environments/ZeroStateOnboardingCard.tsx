@@ -134,8 +134,8 @@ const ZeroStateOnboardingCard: React.FC<ZeroStateOnboardingCardProps> = ({
                         </h2>
                         <InfoTip
                             content={t(
-                                '所有环境数据、指纹种子与代理凭据均仅保存在本地设备；点击右下角按钮即可创建首个独立浏览器环境',
-                                'All profiles, fingerprint seeds, and encrypted proxies stay 100% local. Complete any step or create your first isolated profile directly.',
+                                '点击“新建环境”即可创建首个独立浏览器环境。',
+                                'Select New Environment to create your first isolated browser profile.',
                             )}
                         />
                     </div>

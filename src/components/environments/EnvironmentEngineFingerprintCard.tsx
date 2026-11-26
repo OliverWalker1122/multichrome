@@ -164,6 +164,7 @@ const EnvironmentEngineFingerprintCard: React.FC<
                                                 <ChevronDownRegular />
                                             )
                                         }
+                                        aria-expanded={showFpDetails}
                                         onClick={onToggleFpDetails}
                                     >
                                         {showFpDetails

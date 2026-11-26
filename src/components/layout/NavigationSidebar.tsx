@@ -17,16 +17,24 @@ import {
 import {
     ChevronDownRegular,
     ChevronRightRegular,
+    Delete20Filled,
+    Delete20Regular,
     DeleteRegular,
     EditRegular,
-    FolderRegular,
-    GlobeRegular,
-    GridRegular,
+    type FluentIcon,
+    Folder16Filled,
+    Folder16Regular,
+    Globe20Filled,
+    Globe20Regular,
+    Grid16Filled,
+    Grid16Regular,
     MoreHorizontalRegular,
     PanelLeftContractRegular,
     PanelLeftExpandRegular,
-    SettingsRegular,
-    WindowMultipleRegular,
+    Settings20Filled,
+    Settings20Regular,
+    WindowMultiple20Filled,
+    WindowMultiple20Regular,
 } from '@fluentui/react-icons';
 import { useI18n } from '../../i18n';
 import { getGroupStyle } from '../../theme/semanticColors';
@@ -200,7 +208,7 @@ const useStyles = makeStyles({
         },
     },
     navIcon: {
-        fontSize: '18px',
+        fontSize: '20px',
         width: '20px',
         height: '20px',
         flexShrink: 0,
@@ -388,7 +396,6 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 
     const selectGroup = (group: string) => {
         onSelectGroup(group);
-        onSelectSection('environments');
         setGroupPopoverOpen(false);
     };
 
@@ -404,6 +411,9 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                 const count = isAll ? environmentCount : groupCounts[group] || 0;
                 const isActive =
                     activeSection === 'environments' && currentGroup === group;
+                const GroupIcon = isAll
+                    ? (isActive ? Grid16Filled : Grid16Regular)
+                    : (isActive ? Folder16Filled : Folder16Regular);
                 return (
                     <div
                         key={group}
@@ -422,14 +432,10 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                             onClick={() => selectGroup(group)}
                             title={label}
                         >
-                            {isAll ? (
-                                <GridRegular className={styles.groupIcon} />
-                            ) : (
-                                <FolderRegular
-                                    className={styles.groupIcon}
-                                    style={getGroupStyle(group)}
-                                />
-                            )}
+                            <GroupIcon
+                                className={styles.groupIcon}
+                                style={isAll ? undefined : getGroupStyle(group)}
+                            />
                             <span
                                 className={mergeClasses(
                                     styles.navLabel,
@@ -499,7 +505,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     const renderPrimaryItem = (
         id: NavSection,
         label: string,
-        icon: React.ReactNode,
+        icons: readonly [FluentIcon, FluentIcon],
         count?: number,
         showDot?: boolean,
         dotTooltip?: string,
@@ -509,6 +515,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         const active =
             activeSection === id &&
             (!isEnvironments || (collapsed && !groupPopoverOpen));
+        const Icon = active ? icons[1] : icons[0];
         const button = (
             <button
                 type="button"
@@ -526,7 +533,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     if (expandable) setGroupsExpanded(true);
                 }}
             >
-                <span className={styles.navIcon}>{icon}</span>
+                <span className={styles.navIcon} aria-hidden="true"><Icon /></span>
                 {collapsed && showDot && (
                     <span
                         className={styles.navDotCollapsed}
@@ -633,7 +640,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     {renderPrimaryItem(
                         'environments',
                         t('环境', 'Environments'),
-                        <WindowMultipleRegular />,
+                        [WindowMultiple20Regular, WindowMultiple20Filled],
                     )}
                     {!collapsed && (
                         <div
@@ -648,7 +655,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     {renderPrimaryItem(
                         'proxies',
                         t('代理', 'Proxies'),
-                        <GlobeRegular />,
+                        [Globe20Regular, Globe20Filled],
                         proxyCount,
                     )}
                 </nav>
@@ -660,7 +667,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     {renderPrimaryItem(
                         'trash',
                         t('回收站', 'Trash'),
-                        <DeleteRegular />,
+                        [Delete20Regular, Delete20Filled],
                         trashCount > 0 ? trashCount : undefined,
                     )}
                     <div
@@ -672,7 +679,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                         {renderPrimaryItem(
                             'settings',
                             t('设置', 'Settings'),
-                            <SettingsRegular />,
+                            [Settings20Regular, Settings20Filled],
                             undefined,
                             settingsBadge,
                             settingsBadgeTooltip,

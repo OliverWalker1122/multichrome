@@ -1,4 +1,5 @@
 import React from 'react';
+import RowContextMenu from '../common/RowContextMenu';
 import {
     Button,
     Dialog,
@@ -218,15 +219,8 @@ const ProxyActionDialogs: React.FC<ProxyActionDialogsProps> = ({
                     const inUse = assigned.some((env) => env.isRunning);
                     const running = target.status === 'running';
                     return (
-                        <div
-                            className={styles.contextMenu}
-                            role="menu"
-                            style={{
-                                left: contextMenu.x,
-                                top: contextMenu.y,
-                            }}
-                            onClick={(event) => event.stopPropagation()}
-                        >
+                        <RowContextMenu x={contextMenu.x} y={contextMenu.y} className={styles.contextMenu}
+                            label={t('代理操作', 'Proxy actions')} onClose={onCloseContextMenu}>
                             <button
                                 type="button"
                                 role="menuitem"
@@ -341,7 +335,7 @@ const ProxyActionDialogs: React.FC<ProxyActionDialogsProps> = ({
                                 <DeleteRegular />
                                 {t('删除代理', 'Delete')}
                             </button>
-                        </div>
+                        </RowContextMenu>
                     );
                 })()}
         </>

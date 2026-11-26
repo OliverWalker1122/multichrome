@@ -20,13 +20,10 @@ import {
     ShieldCheckmarkRegular,
     WarningRegular,
 } from '@fluentui/react-icons';
-import { ChromeEnvironment, LaunchConsistencyReport } from '../../types';
+import { ChromeEnvironment, LaunchConsistencyReport, LaunchGuardEntry } from '../../types';
 import { useI18n } from '../../i18n';
-
-export interface LaunchGuardEntry {
-    env: ChromeEnvironment;
-    report: LaunchConsistencyReport;
-}
+import { canLaunchProfile } from '../../utils/launchPrecheck';
+import { useNotification } from '../../contexts/NotificationContext';
 
 interface LaunchGuardDialogProps {
     env: ChromeEnvironment | null;
@@ -35,6 +32,7 @@ interface LaunchGuardDialogProps {
     onCancel: () => void;
     onAutoAlignAndLaunch: () => Promise<void>;
     onForceLaunch: () => Promise<void>;
+    onRetry: () => Promise<void>;
 }
 
 const useStyles = makeStyles({
@@ -143,10 +141,12 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
     onCancel,
     onAutoAlignAndLaunch,
     onForceLaunch,
+    onRetry,
 }) => {
     const styles = useStyles();
     const { isEn, t } = useI18n();
-    const [busy, setBusy] = useState<'align' | 'force' | null>(null);
+    const { showNotification } = useNotification();
+    const [busy, setBusy] = useState<'align' | 'force' | 'retry' | null>(null);
 
     const effectiveItems = useMemo<LaunchGuardEntry[]>(() => {
         if (items && items.length > 0) return items;
@@ -159,9 +159,10 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
     const isBatch = effectiveItems.length > 1;
     const primaryItem = effectiveItems[0];
     const hasAnyError = effectiveItems.some((entry) => entry.report.hasError);
-    const launchableCount = effectiveItems.filter(
-        (entry) => !entry.report.hasError,
-    ).length;
+    const launchableCount = effectiveItems.filter(canLaunchProfile).length;
+    const incompleteCount = effectiveItems.filter((item) => item.incomplete).length;
+    const blockedCount = effectiveItems.length - launchableCount - incompleteCount;
+    const hasWarning = effectiveItems.some(({ report }) => !report.hasError && !report.ok);
     const anyCanAutoAlign = effectiveItems.some(
         (entry) => entry.report.canAutoAlign && !entry.report.hasError,
     );
@@ -171,6 +172,8 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
         setBusy('align');
         try {
             await onAutoAlignAndLaunch();
+        } catch {
+            showNotification('error', t('无法完成配置调整，请检查配置后重试。', 'Configuration changes could not be completed. Review the settings and retry.'));
         } finally {
             setBusy(null);
         }
@@ -214,19 +217,18 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                     </DialogTitle>
                     <DialogContent>
                         <MessageBar
-                            intent={hasAnyError ? 'error' : 'warning'}
+                            intent={hasAnyError ? 'error' : hasWarning ? 'warning' : 'success'}
                             layout="multiline"
                         >
                             <MessageBarBody>
                                 {isBatch
-                                    ? hasAnyError
-                                        ? isEn
-                                            ? `Inspected ${effectiveItems.length} profiles: blocking issues must be fixed before those profiles can start.`
-                                            : `已并发预检全部 ${effectiveItems.length} 个环境：标红阻断项需先修复，其余可正常启动并自动平铺窗口。`
-                                        : isEn
-                                          ? `Inspected all ${effectiveItems.length} selected profiles. Review notices below and launch all windows together.`
-                                          : `已并发预检全部 ${effectiveItems.length} 个所选环境，确认后将同时拉起并自动平铺窗口。`
-                                    : primaryItem.report.hasError
+                                    ? t(`可启动 ${launchableCount} 项，已阻断 ${blockedCount} 项，未完成 ${incompleteCount} 项。`,
+                                        `${launchableCount} can launch, ${blockedCount} blocked, ${incompleteCount} incomplete.`)
+                                    : primaryItem.incomplete
+                                      ? t('预检未完成，请重试。', 'The check did not complete. Please retry.')
+                                      : primaryItem.report.ok
+                                      ? t('预检通过，可以启动。', 'Checks passed. Ready to launch.')
+                                      : primaryItem.report.hasError
                                       ? t(
                                             '检测到阻断性配置问题，请先修复后再启动环境。',
                                             'Blocking configuration issues detected. Fix them before launching.',
@@ -243,7 +245,7 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                                 className={styles.issueList}
                                 data-testid="batch-guard-overview"
                             >
-                                {effectiveItems.map(({ env: itemEnv, report: itemReport }) => (
+                                {effectiveItems.map(({ env: itemEnv, report: itemReport, incomplete }) => (
                                     <div
                                         key={itemEnv.id}
                                         className={styles.batchCard}
@@ -308,7 +310,7 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                                                           : 'success'
                                                 }
                                             >
-                                                {itemReport.hasError
+                                                {incomplete ? t('未完成', 'Incomplete') : itemReport.hasError
                                                     ? t('阻断', 'Blocked')
                                                     : itemReport.issues.length >
                                                         0
@@ -463,6 +465,12 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                         >
                             {t('取消', 'Cancel')}
                         </Button>
+                        {incompleteCount > 0 && (
+                            <Button disabled={!!busy} onClick={async () => {
+                                setBusy('retry');
+                                try { await onRetry(); } finally { setBusy(null); }
+                            }}>{busy === 'retry' ? t('检查中…', 'Checking…') : t('重新检查', 'Retry check')}</Button>
+                        )}
                         {launchableCount > 0 && (
                             <Button
                                 className={styles.actionBtn}
@@ -477,9 +485,9 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                                     ? t('启动中…', 'Launching…')
                                     : isBatch
                                       ? isEn
-                                          ? `Launch All (${launchableCount})`
-                                          : `忽略警告全部启动（${launchableCount}）`
-                                      : t('忽略警告直接启动', 'Launch Anyway')}
+                                          ? `Launch ${launchableCount} eligible`
+                                          : `启动可用的 ${launchableCount} 项`
+                                      : hasWarning ? t('忽略警告直接启动', 'Launch Anyway') : t('启动', 'Launch')}
                             </Button>
                         )}
                         {anyCanAutoAlign && (
@@ -494,8 +502,8 @@ const LaunchGuardDialog: React.FC<LaunchGuardDialogProps> = ({
                                     ? t('对齐并启动中…', 'Aligning & Launching…')
                                     : isBatch
                                       ? t(
-                                            '一键对齐并全部启动',
-                                            'Auto-Align & Launch All',
+                                            `对齐并启动可用的 ${launchableCount} 项`,
+                                            `Align and launch ${launchableCount} eligible`,
                                         )
                                       : t('一键对齐并启动', 'Auto-Align & Launch')}
                             </Button>

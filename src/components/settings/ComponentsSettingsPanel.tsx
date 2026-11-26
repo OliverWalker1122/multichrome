@@ -1066,6 +1066,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             <Select
                                 style={{ flex: 1, minWidth: '160px' }}
                                 disabled={downloadingSingbox}
+                                aria-label={t('sing-box 下载连接方式', 'sing-box download connection')}
                                 value={singboxProxyChoice}
                                 onChange={(_, data) =>
                                     setSingboxProxyChoice(data.value)
@@ -1127,6 +1128,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                     </Button>
                                 </div>
                                 <ProgressBar
+                                    aria-label={t('sing-box 下载进度', 'sing-box download progress')}
                                     value={
                                         singboxProgress.stage ===
                                             'downloading' &&
@@ -1662,6 +1664,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                             <Select
                                 style={{ flex: 1, minWidth: '160px' }}
                                 disabled={downloadingFp}
+                                aria-label={t('浏览器内核下载连接方式', 'Browser engine download connection')}
                                 value={downloadProxyChoice}
                                 onChange={(_, data) =>
                                     setDownloadProxyChoice(data.value)
@@ -1730,6 +1733,7 @@ const ComponentsSettingsPanel: React.FC<ComponentsSettingsPanelProps> = ({
                                     </Button>
                                 </div>
                                 <ProgressBar
+                                    aria-label={t('浏览器内核下载进度', 'Browser engine download progress')}
                                     value={
                                         fpProgress.stage === 'downloading' &&
                                         fpProgress.totalBytes

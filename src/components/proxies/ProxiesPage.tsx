@@ -14,7 +14,6 @@ import {
     MessageBarActions,
     MessageBarBody,
     Spinner,
-    Tooltip,
     tokens,
 } from '@fluentui/react-components';
 import {
@@ -92,6 +91,12 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
     const [removal, setRemoval] = useState<string[] | null>(null);
     const visibleSelected = ctrl.filtered.filter(p => ctrl.selectedProxyIds.has(p.id)).length;
     const hiddenSelected = ctrl.activeSelectedProxyIds.length - visibleSelected;
+    const hasSelection = ctrl.activeSelectedProxyIds.length > 0;
+    const checkTargets = hasSelection ? proxies.filter((p) => ctrl.selectedProxyIds.has(p.id)) : ctrl.filtered;
+    const stoppedTargets = checkTargets.filter((p) => p.status !== 'running').length;
+    const checkLabel = hasSelection
+        ? t(`检测所选 ${checkTargets.length} 项`, `Check ${checkTargets.length} selected`)
+        : t(`检测筛选结果 ${checkTargets.length} 项`, `Check ${checkTargets.length} listed`);
 
     return (
         <div className={styles.workspace}>
@@ -152,31 +157,31 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                                 {t('批量删除', 'Remove Selected')}
                             </Button>
                         )}
-                        <Tooltip
-                            content={t(
-                                '启动未运行的代理并刷新当前列表所有代理的出口 IP、地区与延迟',
-                                'Start stopped proxies and probe exit IP, region, and latency for all listed proxies',
-                            )}
-                            relationship="description"
-                        >
+                        <div className={styles.checkAction}>
                             <Button
                                 appearance="subtle"
                                 icon={<PulseRegular />}
                                 disabled={
                                     !!ctrl.busy ||
                                     !!ctrl.batchChecking ||
-                                    ctrl.filtered.length === 0 ||
+                                    checkTargets.length === 0 ||
                                     (coreInfo ? !coreInfo.available : false)
                                 }
-                                onClick={() => void ctrl.handleBatchCheckAll()}
+                                onClick={() => void ctrl.handleBatchCheck(checkTargets)}
                             >
                                 {ctrl.batchChecking
                                     ? isEn
                                         ? `Checking (${ctrl.batchChecking.done}/${ctrl.batchChecking.total})`
                                         : `测活中 (${ctrl.batchChecking.done}/${ctrl.batchChecking.total})`
-                                    : t('批量测活', 'Batch Check')}
+                                    : checkLabel}
                             </Button>
-                        </Tooltip>
+                            {!ctrl.batchChecking && (stoppedTargets > 0 || hiddenSelected > 0) && (
+                                <small>{[
+                                    stoppedTargets > 0 && t(`将启动 ${stoppedTargets} 项`, `Starts ${stoppedTargets}`),
+                                    hiddenSelected > 0 && t(`含隐藏 ${hiddenSelected} 项`, `${hiddenSelected} hidden`),
+                                ].filter(Boolean).join(' · ')}</small>
+                            )}
+                        </div>
                         <Button
                             appearance="subtle"
                             icon={<ArrowImportRegular />}
@@ -559,7 +564,7 @@ const ProxiesPage: React.FC<ProxiesPageProps> = ({
                 onChange={ctrl.setEditor}
                 onSwitchMode={ctrl.switchEditorMode}
                 onSubmit={ctrl.saveProxy}
-                onClose={() => ctrl.setEditor(null)}
+                onClose={ctrl.closeEditor}
                 formError={ctrl.formError}
                 busy={ctrl.busy}
                 coreInfo={coreInfo}

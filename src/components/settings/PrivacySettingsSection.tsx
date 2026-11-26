@@ -89,7 +89,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('启动前安全检查', 'Pre-Launch Check')}
+                        <label htmlFor="settings-launch-check">{t('启动前安全检查', 'Pre-Launch Check')}</label>
                         <InfoTip
                             content={t(
                                 '开启后，每次启动环境前会先核对代理、时区、语言与防泄露状态，确认无误再打开窗口',
@@ -98,6 +98,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-launch-check"
                         checked={requireHealthCheckOnLaunch}
                         onChange={(_, data) =>
                             onRequireHealthCheckOnLaunchChange(data.checked)
@@ -109,7 +110,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('全局备用代理', 'Fallback Proxy')}
+                        <label htmlFor="settings-fallback-proxy">{t('全局备用代理', 'Fallback Proxy')}</label>
                         <InfoTip
                             content={t(
                                 '当某个环境没有单独绑定代理时，自动走这里配置的备用代理',
@@ -118,6 +119,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-fallback-proxy"
                         checked={proxyEnabled}
                         onChange={(_, data) =>
                             onProxyEnabledChange(data.checked)
@@ -147,7 +149,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('自动匹配时区', 'Auto-Match Timezone')}
+                        <label htmlFor="settings-auto-timezone">{t('自动匹配时区', 'Auto-Match Timezone')}</label>
                         <InfoTip
                             content={t(
                                 '根据代理出口 IP 所在地区自动设置浏览器时区',
@@ -156,6 +158,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-auto-timezone"
                         checked={fingerprint.autoMatchTimezone}
                         onChange={(_, data) =>
                             onFingerprintChange((prev) => ({
@@ -168,7 +171,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('自动匹配语言', 'Auto-Match Language')}
+                        <label htmlFor="settings-auto-language">{t('自动匹配语言', 'Auto-Match Language')}</label>
                         <InfoTip
                             content={t(
                                 '同时适用于标准 Chrome 与防关联浏览器（纯原生参数生效，无 JS 痕迹）；根据代理出口国家自动切换网页语言',
@@ -177,6 +180,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-auto-language"
                         checked={Boolean(fingerprint.autoMatchLanguage)}
                         onChange={(_, data) =>
                             onFingerprintChange((prev) => ({
@@ -189,9 +193,10 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('默认网页语言', 'Default Language')}
+                        <label htmlFor="settings-default-language">{t('默认网页语言', 'Default Language')}</label>
                     </span>
                     <Select
+                        id="settings-default-language"
                         style={{ minWidth: '200px' }}
                         value={
                             COMMON_LANGUAGES.some(
@@ -217,7 +222,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
 
                 <div className={styles.row}>
                     <span className={styles.rowLabel}>
-                        {t('同步定位 (GPS)', 'Sync Geolocation')}
+                        <label htmlFor="settings-auto-geolocation">{t('同步定位 (GPS)', 'Sync Geolocation')}</label>
                         <InfoTip
                             content={t(
                                 '同时适用于标准 Chrome 与防关联浏览器。默认关闭以保持防关联浏览器零调试挂载；仅在网站明确校验位置权限时建议开启',
@@ -226,6 +231,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                         />
                     </span>
                     <Switch
+                        id="settings-auto-geolocation"
                         checked={Boolean(fingerprint.autoMatchGeolocation)}
                         onChange={(_, data) =>
                             onFingerprintChange((prev) => ({
@@ -278,6 +284,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                                 )
                             }
                             iconPosition="after"
+                            aria-expanded={fpCustomizeOpen}
                             onClick={() =>
                                 setFpCustomizeOpen((prev) => !prev)
                             }
@@ -359,6 +366,7 @@ const PrivacySettingsSection: React.FC<PrivacySettingsSectionProps> = ({
                                         />
                                     </span>
                                     <Switch
+                                        aria-label={isEn ? item.en : item.zh}
                                         checked={
                                             fingerprint.spoofing[item.key]
                                         }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Button,
     Dialog,
@@ -48,6 +48,7 @@ interface CreateEnvironmentModalProps {
     groups: string[];
     defaultGroup?: string;
     defaultEngine?: BrowserEngineType;
+    defaultNetwork: 'proxy' | 'direct' | 'unknown';
     hasFingerprintKernel?: boolean;
     managedProxies?: ManagedProxy[];
     allEnvironments?: ChromeEnvironment[];
@@ -92,6 +93,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
     groups,
     defaultGroup,
     defaultEngine = 'system-chrome',
+    defaultNetwork,
     hasFingerprintKernel = false,
     managedProxies = [],
     allEnvironments = [],
@@ -118,8 +120,9 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
     }>({});
     const [submitError, setSubmitError] = useState('');
 
+    const wasOpen = useRef(false);
     useEffect(() => {
-        if (open) {
+        if (open && !wasOpen.current) {
             setGroupName(
                 (prev) =>
                     prev ||
@@ -135,6 +138,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
             setSubmitError('');
             setFieldErrors({});
         }
+        wasOpen.current = open;
     }, [open, defaultGroup, groups, defaultEngine, hasFingerprintKernel]);
 
     const resetAndClose = () => {
@@ -358,17 +362,14 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                 </Field>
 
                                 <Field
-                                    label={
-                                        <span className={styles.labelRow}>
-                                            {t('代理', 'Proxy')}
-                                            <InfoTip
-                                                content={t(
-                                                    '不指定时将使用全局备用代理或直连',
-                                                    'Uses fallback proxy or direct connection when unspecified.',
-                                                )}
-                                            />
-                                        </span>
-                                    }
+                                    label={t('代理', 'Proxy')}
+                                    hint={proxyId && (proxyId !== '__sequential__' || isBulkMode)
+                                        ? t('绑定代理不可用时将阻止启动。', 'Launch is blocked if the bound proxy is unavailable.')
+                                        : defaultNetwork === 'proxy'
+                                          ? t('按当前设置，将使用全局备用代理。', 'Current settings use the global fallback proxy.')
+                                          : defaultNetwork === 'direct'
+                                            ? t('按当前设置，将直接连接网络。', 'Current settings use a direct connection.')
+                                            : t('全局网络设置尚未确认。', 'Global network settings have not been confirmed.')}
                                 >
                                     <Select
                                         value={proxyId}
@@ -502,6 +503,7 @@ const CreateEnvironmentModal: React.FC<CreateEnvironmentModalProps> = ({
                                             )
                                         }
                                         iconPosition="after"
+                                        aria-expanded={showMore}
                                         onClick={() =>
                                             setShowMore((prev) => !prev)
                                         }
