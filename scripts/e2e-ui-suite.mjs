@@ -285,6 +285,79 @@ async function captureUiFixture(cdp, name) {
     }
 }
 
+async function openViewSubmenu(cdp, label) {
+    await cdp.eval(`window.__e2e.clickExact('视图', 'main button')`);
+    await waitUntil(() => cdp.eval(`window.__e2e.clickExact(${JSON.stringify(label)}, '[role="menuitem"]')`));
+}
+
+async function toggleTimeZoneColumn(cdp) {
+    await openViewSubmenu(cdp, '显示列');
+    await waitUntil(() => cdp.eval(`window.__e2e.clickExact('时区', '[role="menuitemcheckbox"]')`));
+}
+
+async function verifyWorkspacePreferences(cdp, reloadUI) {
+    const check = async (expression, label) => {
+        if (!await waitUntil(() => cdp.eval(expression))) throw new Error(label);
+    };
+    const click = (selector) => cdp.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
+    const star = 'table button[aria-label="星标环境 测试环境Alpha"]';
+    const cards = '[aria-label="常用环境卡片"]';
+    const hasCards = `Boolean(document.querySelector('${cards} article'))`;
+    try {
+        await check("document.documentElement.dataset.palette === 'neutral'", '新安装简白');
+        const originalMode = await cdp.eval('window.electronAPI.settings.getSettings().then(settings => settings.theme)');
+        await click(star);
+        await check(hasCards, '星标卡片');
+        await click('aside button[title="测试环境Alpha"]');
+        await check("Boolean(document.querySelector('[data-details-panel]')) && document.querySelector('main h1').textContent === '常用环境'", '跨分组星标入口');
+        await click('[data-details-panel] button[aria-label="关闭详情面板"]');
+        await cdp.eval(`window.__e2e.clickExact('视图', 'main button')`);
+        await check(`window.__e2e.clickExact('仅列表', '[role="menuitemradio"]')`, '切换列表');
+        await reloadUI();
+        await check(`!${hasCards} && document.querySelector('${star}')?.getAttribute('aria-pressed') === 'true'`, '重载保留星标与视图');
+        await cdp.eval(`window.__e2e.clickExact('视图', 'main button')`);
+        await check(`window.__e2e.clickExact('卡片和列表', '[role="menuitemradio"]')`, '切换卡片');
+        await check(hasCards, '重显卡片');
+        const secondStar = 'table button[aria-label="星标环境 测试环境Beta"]';
+        await click(secondStar);
+        await check(`document.querySelectorAll('${cards} article').length === 2`, '两张常用卡片');
+        const shellColors = new Set();
+        for (const palette of ['blue', 'sage', 'neutral']) {
+            await click('nav button[aria-label="设置"]');
+            const radio = 'input[name="theme-palette"][value="' + palette + '"]';
+            await check(`Boolean(document.querySelector('${radio}'))`, '主题预览');
+            await click(radio);
+            await check(`document.documentElement.dataset.palette === '${palette}'`, '应用 ' + palette);
+            shellColors.add(await cdp.eval("getComputedStyle(document.querySelector('main').parentElement.parentElement).backgroundColor"));
+            if (palette === 'sage') {
+                await cdp.eval(`document.querySelector('${radio}').scrollIntoView({ block: 'center' })`);
+                await captureUiFixture(cdp, 'settings-palette');
+            }
+            await reloadUI();
+            await check(`document.documentElement.dataset.palette === '${palette}' && ${hasCards}`, '重载配色 ' + palette);
+            for (const mode of ['light', 'dark']) {
+                if (await cdp.eval(`document.documentElement.dataset.theme !== '${mode}'`)) {
+                    await click('header button[aria-label*="色"]');
+                }
+                await check(`document.documentElement.dataset.theme === '${mode}' && document.documentElement.dataset.palette === '${palette}'`, palette + ' / ' + mode);
+                await captureUiFixture(cdp, 'favorites-' + palette + '-' + mode);
+            }
+        }
+        if (shellColors.size !== 3) throw new Error('三种外壳配色应有区分');
+        await click(secondStar);
+        await check(`document.querySelectorAll('${cards} article').length === 1`, '列表取消星标');
+        await click(cards + ' button[aria-pressed="true"]');
+        await check(`!${hasCards} && !document.querySelector('aside button[title="测试环境Alpha"]')`, '取消星标');
+        await cdp.eval(`window.electronAPI.settings.getSettings().then(({ dataPath }) =>
+            window.electronAPI.settings.saveSettings({ dataPath, theme: ${JSON.stringify(originalMode)} }))`);
+        record('UX-09', '常用环境、视图切换与三套配色持久化', true);
+    } catch (error) {
+        record('UX-09', '常用环境、视图切换与三套配色持久化', false, error.message);
+    } finally {
+        await reloadUI();
+    }
+}
+
 async function verifyPageControls(cdp) {
     const issues = [];
     const roles = new Set(['button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'spinbutton', 'combobox', 'tab']);
@@ -321,7 +394,8 @@ async function verifyPageControls(cdp) {
     };
     const navigate = async (label) => {
         await cdp.eval(`document.querySelector('aside button[aria-label^="${label}"]')?.click()`);
-        return waitUntil(() => cdp.eval(`document.querySelector('main h1')?.textContent?.trim() === '${label}'`));
+        const heading = label === '环境' ? '全部环境' : label;
+        return waitUntil(() => cdp.eval(`document.querySelector('main h1')?.textContent?.trim() === '${heading}'`));
     };
     for (const page of ['环境', '代理', '回收站', '设置']) {
         if (!(await navigate(page))) { issues.push(`${page}: navigation`); continue; }
@@ -850,6 +924,7 @@ async function main() {
         // Sync UI after direct IPC environment creation
         await reloadUI();
         await waitUntil(() => cdp.eval(`window.__e2e.bodyText().includes('测试环境Alpha')`));
+        await verifyWorkspacePreferences(cdp, reloadUI);
         await verifyWindowMaterials(cdp, reloadUI);
 
         const sidebarLayoutOk = await cdp.eval(`(() => {
@@ -2372,15 +2447,7 @@ async function main() {
             await sleep(200);
 
             // Toggle optional "时区" column ON via toolbar Columns popover to test exact 8-column layout
-            await cdp.eval(`window.__e2e.clickExact('列', 'main button')`);
-            await waitUntil(() =>
-                cdp.eval(`Array.from(document.querySelectorAll('label')).some(l => (l.textContent || '').includes('时区'))`),
-            );
-            await cdp.eval(`(() => {
-                const lbl = Array.from(document.querySelectorAll('label')).find(l => (l.textContent || '').includes('时区'));
-                const cb = lbl?.closest('span, div')?.querySelector('input[type="checkbox"]') || lbl?.previousElementSibling;
-                if (cb) cb.click();
-            })()`);
+            await toggleTimeZoneColumn(cdp);
             await waitUntil(() =>
                 cdp.eval(`Array.from(document.querySelectorAll('table[aria-label="环境列表"] thead th')).some(th => (th.textContent || '').includes('时区'))`),
             );
@@ -2461,15 +2528,7 @@ async function main() {
 
             // Clear selection & toggle "时区" OFF cleanly
             await cdp.eval(`window.__e2e.clickByText('取消选择', '[aria-label="批量操作栏"] button')`);
-            await cdp.eval(`window.__e2e.clickExact('列', 'main button')`);
-            await waitUntil(() =>
-                cdp.eval(`Array.from(document.querySelectorAll('label')).some(l => (l.textContent || '').includes('时区'))`),
-            );
-            await cdp.eval(`(() => {
-                const lbl = Array.from(document.querySelectorAll('label')).find(l => (l.textContent || '').includes('时区'));
-                const cb = lbl?.closest('span, div')?.querySelector('input[type="checkbox"]') || lbl?.previousElementSibling;
-                if (cb) cb.click();
-            })()`);
+            await toggleTimeZoneColumn(cdp);
             await sleep(100);
             await cdp.eval(`document.body.click()`);
 
@@ -2581,7 +2640,7 @@ async function main() {
             // 3) Verify Single '窗口布局' Dropdown (no accidental direct tile), Split-Grid Dock + Reset App Window Size, Uniform Stack, Cascade & Pure-CDP Locate Window!
             const singleLayoutDropdownOk = await waitUntil(() =>
                 cdp.eval(`(() => {
-                    const layoutBtn = document.querySelector('button[aria-label="窗口布局"]');
+                    const layoutBtn = document.querySelector('button[aria-label="排列浏览器窗口"]');
                     const legacySplitChevron = document.querySelector('button[aria-label="更多窗口布局"]');
                     return Boolean(layoutBtn && !legacySplitChevron);
                 })()`),
@@ -2670,7 +2729,7 @@ async function main() {
                 redCloseAllIconOk = Boolean(batchStopRed && headerCloseAllRed);
 
                 // Clicking '窗口布局' MUST only open the menu without triggering an immediate tile toast!
-                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
                 const menuOpened = await waitUntil(
                     () => cdp.eval(`Boolean(document.querySelector('[role="menu"]'))`),
                     3000,
@@ -2688,7 +2747,7 @@ async function main() {
 
                 // Open '窗口布局' -> '分屏并排平铺' (docks MultiChrome narrow on left when display workArea >= 1040px) -> then '恢复主窗口大小'
                 const canSplitConsole = await cdp.eval(`window.screen.availWidth >= 1040`);
-                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
                     4000,
@@ -2703,7 +2762,7 @@ async function main() {
                           5000,
                       );
 
-                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('恢复主窗口大小', '[role="menuitem"]')`),
                     4000,
@@ -2734,7 +2793,7 @@ async function main() {
                 );
 
                 // Open '窗口布局' -> Uniform Stack ('统一尺寸堆叠')
-                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('统一尺寸堆叠', '[role="menuitem"]')`),
                     4000,
@@ -2745,7 +2804,7 @@ async function main() {
                 );
 
                 // Open '窗口布局' -> Cascade ('阶梯错位层叠')
-                await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+                await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
                 await waitUntil(() =>
                     cdp.eval(`window.__e2e.clickByText('阶梯错位层叠', '[role="menuitem"]')`),
                     4000,
@@ -2895,7 +2954,7 @@ async function main() {
             // 5) Dock narrow via Split-Grid (on displays >= 1040px) -> Simultaneous Batch Stop -> Verify zero-running fallback '恢复主窗口' restores App Window!
             const canSplitConsoleStep5 = await cdp.eval(`window.screen.availWidth >= 1040`);
             const preStopNormalW = await cdp.eval(`window.outerWidth`);
-            await cdp.eval(`document.querySelector('button[aria-label="窗口布局"]')?.click()`);
+            await cdp.eval(`document.querySelector('button[aria-label="排列浏览器窗口"]')?.click()`);
             await waitUntil(() =>
                 cdp.eval(`window.__e2e.clickByText('分屏并排平铺', '[role="menuitem"]')`),
                 4000,
@@ -3216,11 +3275,11 @@ async function main() {
                 envSearchAndResetOk = Boolean(emptyFilterShown && restoredRowsAfterReset);
 
                 // 2) Sort menu (名称 / 创建时间 / 最近使用)
-                await cdp.eval(`document.querySelector('button[aria-label="排序方式"]')?.click()`);
+                await openViewSubmenu(cdp, '排序方式');
                 await waitUntil(() => cdp.eval(`window.__e2e.clickByText('名称', '[role="menuitem"]')`), 3000);
-                await cdp.eval(`document.querySelector('button[aria-label="排序方式"]')?.click()`);
+                await openViewSubmenu(cdp, '排序方式');
                 await waitUntil(() => cdp.eval(`window.__e2e.clickByText('创建时间', '[role="menuitem"]')`), 3000);
-                await cdp.eval(`document.querySelector('button[aria-label="排序方式"]')?.click()`);
+                await openViewSubmenu(cdp, '排序方式');
                 const sortRestored = await waitUntil(
                     () => cdp.eval(`window.__e2e.clickByText('最近使用', '[role="menuitem"]')`),
                     3000,
@@ -3824,7 +3883,7 @@ async function main() {
 
     const failed = results.filter((r) => !r.passed);
     const expected = [
-        'UX-01', 'UX-02', 'UX-03', 'UX-04', 'UX-05', 'UX-06', 'UX-07', 'UX-08',
+        'UX-01', 'UX-02', 'UX-03', 'UX-04', 'UX-05', 'UX-06', 'UX-07', 'UX-08', 'UX-09',
         ...Array.from({ length: 21 }, (_, i) => 'E2E-' + String(i).padStart(2, '0')),
         'E2E-02a', 'E2E-02b', 'E2E-02c', 'E2E-02d', 'E2E-04a', 'E2E-06a',
     ];

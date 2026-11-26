@@ -30,6 +30,9 @@ export async function verifyStorageRestore(directory) {
     fs.writeFileSync(settingsFile, JSON.stringify({ dataPath: directory, globalProxy: { enabled: true, address: legacy } }));
     const makeSettings = () => new SettingsManager({ directory, proxyAddresses: createProxyAddressStorage(storage) });
     const settings = makeSettings();
+    assert.equal(settings.getSettings().palette, 'blue');
+    assert.equal(await settings.saveSettings({ dataPath: directory, palette: 'sage' }), true);
+    assert.equal(makeSettings().getSettings().palette, 'sage');
     const options = { appDataPath: directory, launchService: { getRunningIds: () => [] } };
     const profiles = new EnvironmentService({}, settings, {}, options);
     const db = new Database(path.join(directory, 'chrome-environments.db'));

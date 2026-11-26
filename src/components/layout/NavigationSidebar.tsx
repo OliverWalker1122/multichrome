@@ -29,8 +29,8 @@ import {
     Grid16Filled,
     Grid16Regular,
     MoreHorizontalRegular,
-    PanelLeftContractRegular,
-    PanelLeftExpandRegular,
+    Star16Filled,
+    Window16Regular,
     Settings20Filled,
     Settings20Regular,
     WindowMultiple20Filled,
@@ -45,8 +45,9 @@ interface NavigationSidebarProps {
     activeSection: NavSection;
     onSelectSection: (section: NavSection) => void;
     collapsed: boolean;
-    canToggleCollapsed: boolean;
-    onToggleCollapsed: () => void;
+    favorites: ReadonlyArray<{ id: string; name: string }>;
+    favoritesOnly: boolean;
+    onSelectFavorites: (id?: string) => void;
     environmentCount: number;
     proxyCount: number;
     trashCount: number;
@@ -80,47 +81,6 @@ const useStyles = makeStyles({
         width: '56px',
         minWidth: '56px',
         padding: '12px 6px 8px',
-    },
-    settingsRow: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-        '& > div:first-child': {
-            flex: 1,
-            minWidth: 0,
-        },
-    },
-    settingsRowCollapsed: {
-        flexDirection: 'column',
-        alignItems: 'stretch',
-    },
-    toggleBtn: {
-        minWidth: '32px',
-        height: '32px',
-        flexShrink: 0,
-        borderRadius: '8px',
-        border: 'none',
-        backgroundColor: 'transparent',
-        color: 'var(--shell-foreground-muted)',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        padding: 0,
-        fontSize: '17px',
-        transitionProperty: 'background-color, color',
-        transitionDuration: '120ms',
-        '&:hover': {
-            backgroundColor: tokens.colorSubtleBackgroundHover,
-            color: tokens.colorNeutralForeground1,
-        },
-        '&:active': {
-            backgroundColor: tokens.colorSubtleBackgroundPressed,
-        },
-        '&:focus-visible': {
-            outline: `2px solid ${tokens.colorStrokeFocus2}`,
-            outlineOffset: '-2px',
-        },
     },
     topNav: {
         flex: 1,
@@ -369,8 +329,9 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     activeSection,
     onSelectSection,
     collapsed,
-    canToggleCollapsed,
-    onToggleCollapsed,
+    favorites,
+    favoritesOnly,
+    onSelectFavorites,
     environmentCount,
     proxyCount,
     trashCount,
@@ -399,106 +360,127 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         setGroupPopoverOpen(false);
     };
 
-    const renderGroups = () => (
-        <div
-            className={styles.groupItems}
-            role="group"
-            aria-label={t('环境分组', 'Environment groups')}
-        >
-            {['用户分组', ...visibleGroups].map((group) => {
-                const isAll = group === '用户分组';
-                const label = isAll ? t('全部环境', 'All Environments') : group;
-                const count = isAll ? environmentCount : groupCounts[group] || 0;
-                const isActive =
-                    activeSection === 'environments' && currentGroup === group;
-                const GroupIcon = isAll
-                    ? (isActive ? Grid16Filled : Grid16Regular)
-                    : (isActive ? Folder16Filled : Folder16Regular);
-                return (
-                    <div
-                        key={group}
+    const showFavorites = (id?: string) => {
+        onSelectFavorites(id);
+        setGroupPopoverOpen(false);
+    };
+    const favoriteActive = activeSection === 'environments' && favoritesOnly;
+    const renderGroup = (group: string) => {
+        const isAll = group === '用户分组';
+        const label = isAll ? t('全部环境', 'All Environments') : group;
+        const count = isAll ? environmentCount : groupCounts[group] || 0;
+        const isActive =
+            activeSection === 'environments' && !favoritesOnly && currentGroup === group;
+        const GroupIcon = isAll
+            ? (isActive ? Grid16Filled : Grid16Regular)
+            : (isActive ? Folder16Filled : Folder16Regular);
+        return (
+            <div key={group}
+                className={mergeClasses(
+                    styles.groupRow,
+                    !isAll && styles.editableGroup,
+                )}
+            >
+                <button
+                    type="button"
+                    className={mergeClasses(
+                        styles.groupItem,
+                        isActive && styles.activeItem,
+                    )}
+                    aria-current={isActive ? 'page' : undefined}
+                    onClick={() => selectGroup(group)}
+                    title={label}
+                >
+                    <GroupIcon
+                        className={styles.groupIcon}
+                        style={isAll ? undefined : getGroupStyle(group)}
+                    />
+                    <span
                         className={mergeClasses(
-                            styles.groupRow,
-                            !isAll && styles.editableGroup,
+                            styles.navLabel,
+                            'mc-group-label',
                         )}
                     >
-                        <button
-                            type="button"
-                            className={mergeClasses(
-                                styles.groupItem,
-                                isActive && styles.activeItem,
-                            )}
-                            aria-current={isActive ? 'page' : undefined}
-                            onClick={() => selectGroup(group)}
-                            title={label}
-                        >
-                            <GroupIcon
-                                className={styles.groupIcon}
-                                style={isAll ? undefined : getGroupStyle(group)}
-                            />
-                            <span
-                                className={mergeClasses(
-                                    styles.navLabel,
-                                    'mc-group-label',
-                                )}
-                            >
-                                {label}
-                            </span>
-                            <span
-                                className={mergeClasses(
-                                    styles.navCount,
-                                    styles.groupCount,
-                                    isActive && styles.activeCount,
-                                )}
-                            >
-                                {count}
-                            </span>
-                        </button>
-                        {!isAll && (
-                            <Menu>
-                                <MenuTrigger disableButtonEnhancement>
-                                    <Button
-                                        appearance="subtle"
-                                        size="small"
-                                        icon={<MoreHorizontalRegular />}
-                                        className={mergeClasses(
-                                            styles.groupMore,
-                                            'mc-group-more',
-                                        )}
-                                        aria-label={t(
-                                            `管理分组 ${group}`,
-                                            `Manage group ${group}`,
-                                        )}
-                                        title={t('管理分组', 'Manage group')}
-                                    />
-                                </MenuTrigger>
-                                <MenuPopover>
-                                    <MenuList>
-                                        <MenuItem
-                                            icon={<EditRegular />}
-                                            onClick={() => {
-                                                setGroupPopoverOpen(false);
-                                                onRequestRenameGroup(group);
-                                            }}
-                                        >
-                                            {t('重命名分组', 'Rename group')}
-                                        </MenuItem>
-                                        <MenuItem
-                                            icon={<DeleteRegular />}
-                                            onClick={() => {
-                                                setGroupPopoverOpen(false);
-                                                onRequestDeleteGroup(group);
-                                            }}
-                                        >
-                                            {t('删除分组', 'Delete group')}
-                                        </MenuItem>
-                                    </MenuList>
-                                </MenuPopover>
-                            </Menu>
+                        {label}
+                    </span>
+                    <span
+                        className={mergeClasses(
+                            styles.navCount,
+                            styles.groupCount,
+                            isActive && styles.activeCount,
                         )}
-                    </div>
-                );
-            })}
+                    >
+                        {count}
+                    </span>
+                </button>
+                {!isAll && (
+                    <Menu>
+                        <MenuTrigger disableButtonEnhancement>
+                            <Button
+                                appearance="subtle"
+                                size="small"
+                                icon={<MoreHorizontalRegular />}
+                                className={mergeClasses(
+                                    styles.groupMore,
+                                    'mc-group-more',
+                                )}
+                                aria-label={t(
+                                    `管理分组 ${group}`,
+                                    `Manage group ${group}`,
+                                )}
+                                title={t('管理分组', 'Manage group')}
+                            />
+                        </MenuTrigger>
+                        <MenuPopover>
+                            <MenuList>
+                                <MenuItem
+                                    icon={<EditRegular />}
+                                    onClick={() => {
+                                        setGroupPopoverOpen(false);
+                                        onRequestRenameGroup(group);
+                                    }}
+                                >
+                                    {t('重命名分组', 'Rename group')}
+                                </MenuItem>
+                                <MenuItem
+                                    icon={<DeleteRegular />}
+                                    onClick={() => {
+                                        setGroupPopoverOpen(false);
+                                        onRequestDeleteGroup(group);
+                                    }}
+                                >
+                                    {t('删除分组', 'Delete group')}
+                                </MenuItem>
+                            </MenuList>
+                        </MenuPopover>
+                    </Menu>
+                )}
+            </div>
+        );
+    };
+
+    const renderGroups = () => (
+        <div className={styles.groupItems} role="group" aria-label={t('环境分组', 'Environment groups')}>
+            {renderGroup('用户分组')}
+            <div className={styles.groupRow}>
+                <button type="button" className={mergeClasses(styles.groupItem, favoriteActive && styles.activeItem)}
+                    aria-current={favoriteActive ? 'page' : undefined}
+                    onClick={() => showFavorites()}>
+                    <Star16Filled className={styles.groupIcon} style={{ color: 'var(--tone-amber-foreground)' }} />
+                    <span className={styles.navLabel}>{t('常用环境', 'Favorites')}</span>
+                    <span className={mergeClasses(styles.navCount, styles.groupCount)}>{favorites.length}</span>
+                </button>
+            </div>
+            {favorites.map(env => (
+                <div key={env.id} className={styles.groupRow} style={{ marginLeft: '12px' }}>
+                    <button type="button" className={styles.groupItem} title={env.name}
+                        onClick={() => showFavorites(env.id)}>
+                        <Window16Regular className={styles.groupIcon} />
+                        <span className={styles.navLabel}>{env.name}</span>
+                    </button>
+                </div>
+            ))}
+            {visibleGroups.map(renderGroup)}
         </div>
     );
 
@@ -626,7 +608,7 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 
     return (
         <>
-            <aside
+            <aside id="main-navigation"
                 aria-label={t('主导航', 'Main navigation')}
                 className={mergeClasses(
                     styles.sidebar,
@@ -670,50 +652,14 @@ const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                         [Delete20Regular, Delete20Filled],
                         trashCount > 0 ? trashCount : undefined,
                     )}
-                    <div
-                        className={mergeClasses(
-                            styles.settingsRow,
-                            collapsed && styles.settingsRowCollapsed,
-                        )}
-                    >
-                        {renderPrimaryItem(
-                            'settings',
-                            t('设置', 'Settings'),
-                            [Settings20Regular, Settings20Filled],
-                            undefined,
-                            settingsBadge,
-                            settingsBadgeTooltip,
-                        )}
-                        {canToggleCollapsed && (
-                            <Tooltip
-                                content={
-                                    collapsed
-                                        ? t('展开导航栏', 'Expand sidebar')
-                                        : t('收起导航栏', 'Collapse sidebar')
-                                }
-                                relationship="label"
-                                positioning={collapsed ? 'after' : 'above'}
-                            >
-                                <button
-                                    type="button"
-                                    className={styles.toggleBtn}
-                                    aria-label={
-                                        collapsed
-                                            ? t('展开导航栏', 'Expand sidebar')
-                                            : t('收起导航栏', 'Collapse sidebar')
-                                    }
-                                    aria-expanded={!collapsed}
-                                    onClick={onToggleCollapsed}
-                                >
-                                    {collapsed ? (
-                                        <PanelLeftExpandRegular />
-                                    ) : (
-                                        <PanelLeftContractRegular />
-                                    )}
-                                </button>
-                            </Tooltip>
-                        )}
-                    </div>
+                    {renderPrimaryItem(
+                        'settings',
+                        t('设置', 'Settings'),
+                        [Settings20Regular, Settings20Filled],
+                        undefined,
+                        settingsBadge,
+                        settingsBadgeTooltip,
+                    )}
                 </nav>
             </aside>
         </>

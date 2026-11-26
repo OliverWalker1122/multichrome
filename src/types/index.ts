@@ -387,6 +387,7 @@ export interface ProxyCoreInfo {
     configDirectory: string;
 }
 
+export type ThemePalette = 'neutral' | 'blue' | 'sage';
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type AppLocale = 'zh-CN' | 'en-US';
 
@@ -412,6 +413,7 @@ export interface AppSettings {
     };
     startupUrl?: string;
     theme?: ThemeMode;
+    palette?: ThemePalette;
     locale?: AppLocale;
     memorySaverMode?: boolean;
     bookmarkTemplates?: BookmarkTemplate[];

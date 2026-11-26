@@ -27,6 +27,7 @@ import {
     StopRegular,
     TargetRegular,
 } from '@fluentui/react-icons';
+import FavoriteButton from './FavoriteButton';
 import dayjs from 'dayjs';
 import type {
     ChromeEnvironment,
@@ -42,6 +43,8 @@ export interface EnvironmentTableRowProps {
     styles: EnvironmentsStyles;
     env: ChromeEnvironment;
     selected: boolean;
+    favorite: boolean;
+    onToggleFavorite: () => void;
     checked: boolean;
     narrowWindow: boolean;
     showGroupCol: boolean;
@@ -72,6 +75,8 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
     env,
     selected,
     checked,
+    favorite,
+    onToggleFavorite,
     narrowWindow,
     showGroupCol,
     showProxyCol,
@@ -151,6 +156,7 @@ const EnvironmentTableRow: React.FC<EnvironmentTableRowProps> = ({
             <td className={styles.td}>
                 <div className={styles.nameTextWrap}>
                     <span className={styles.namePrimary} title={env.name}>
+                        <FavoriteButton name={env.name} checked={favorite} onToggle={onToggleFavorite} />
                         <span className={styles.clippedLabel}>{env.name}</span>
                         {env.browserEngine === 'fingerprint-chromium' && (
                             <Badge

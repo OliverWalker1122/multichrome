@@ -6,7 +6,7 @@ import React, {
     useMemo,
     useState,
 } from 'react';
-import { AppLocale, AppSettings, ThemeMode } from '../types';
+import { AppLocale, AppSettings, ThemeMode, ThemePalette } from '../types';
 import { useErrorHandler } from '../hooks/useErrorHandler';
 import { getStoredLocale, I18nProvider, saveStoredLocale } from '../i18n';
 import { systemApi } from '../services';
@@ -21,6 +21,7 @@ interface SettingsContextType {
         loadSettings: () => Promise<void>;
         saveSettings: (settings: AppSettings) => Promise<boolean>;
         setThemeMode: (theme: ThemeMode) => Promise<void>;
+        setPalette: (palette: ThemePalette) => Promise<void>;
         setLocale: (locale: AppLocale) => Promise<void>;
     };
 }
@@ -50,6 +51,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
     const { handleError } = useErrorHandler();
 
     const themeMode: ThemeMode = settings.theme || 'system';
+    const palette = settings.palette ?? 'neutral';
+    useEffect(() => {
+        document.documentElement.dataset.palette = palette;
+    }, [palette]);
     const locale: AppLocale = settings.locale === 'zh-CN' ? 'zh-CN' : 'en-US';
     const isDark =
         themeMode === 'dark' || (themeMode === 'system' && systemDark);
@@ -123,7 +128,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
             try {
                 const success = await systemApi.saveSettings(newSettings);
                 if (success) {
-                    setSettings(newSettings);
+                    setSettings(current => ({ ...current, ...newSettings }));
                 }
                 return success;
             } catch (err) {
@@ -139,36 +144,41 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const setThemeMode = useCallback(
         async (nextTheme: ThemeMode) => {
-            const nextSettings: AppSettings = { ...settings, theme: nextTheme };
-            setSettings(nextSettings);
-            if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
+            setSettings(current => ({ ...current, theme: nextTheme }));
+            if (systemApi.hasSettingsApi() && settings.dataPath) {
                 try {
-                    await systemApi.saveSettings({ dataPath: nextSettings.dataPath, theme: nextTheme });
+                    await systemApi.saveSettings({ dataPath: settings.dataPath, theme: nextTheme });
                 } catch {
                     // keep live theme if dataPath is not ready
                 }
             }
         },
-        [settings],
+        [settings.dataPath],
     );
+
+    const setPalette = useCallback(async (next: ThemePalette) => {
+        try {
+            const saved = await systemApi.saveSettings({ dataPath: settings.dataPath, palette: next });
+            if (!saved) throw new Error(locale === 'zh-CN' ? '无法保存配色' : 'Could not save color palette');
+            setSettings(current => ({ ...current, palette: next }));
+        } catch (error) {
+            handleError(error, locale === 'zh-CN' ? '主题配色' : 'Color palette');
+        }
+    }, [settings.dataPath, locale, handleError]);
 
     const setLocale = useCallback(
         async (nextLocale: AppLocale) => {
             saveStoredLocale(nextLocale);
-            const nextSettings: AppSettings = {
-                ...settings,
-                locale: nextLocale,
-            };
-            setSettings(nextSettings);
-            if (systemApi.hasSettingsApi() && nextSettings.dataPath) {
+            setSettings(current => ({ ...current, locale: nextLocale }));
+            if (systemApi.hasSettingsApi() && settings.dataPath) {
                 try {
-                    await systemApi.saveSettings({ dataPath: nextSettings.dataPath, locale: nextLocale });
+                    await systemApi.saveSettings({ dataPath: settings.dataPath, locale: nextLocale });
                 } catch {
                     // keep local cache if dataPath is not ready
                 }
             }
         },
-        [settings],
+        [settings.dataPath],
     );
 
     useEffect(() => {
@@ -190,6 +200,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({
             loadSettings,
             saveSettings,
             setThemeMode,
+            setPalette,
             setLocale,
         },
     };

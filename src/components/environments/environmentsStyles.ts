@@ -56,14 +56,6 @@ export const useEnvironmentsStyles = makeStyles({
         minWidth: 0,
         flex: '0 1 auto',
     },
-    toolbarDivider: {
-        width: '1px',
-        height: '16px',
-        marginLeft: '4px',
-        marginRight: '4px',
-        backgroundColor: tokens.colorNeutralStroke2,
-        flexShrink: 0,
-    },
     headerActions: {
         display: 'flex',
         alignItems: 'center',
@@ -85,6 +77,9 @@ export const useEnvironmentsStyles = makeStyles({
     },
     toolbarActions: {
         display: 'flex',
+        maxWidth: '100%',
+        flexWrap: 'wrap',
+        justifyContent: 'flex-end',
         alignItems: 'center',
         gap: '4px',
         marginLeft: 'auto',
@@ -280,12 +275,6 @@ export const useEnvironmentsStyles = makeStyles({
         padding: '32px 20px',
         color: tokens.colorNeutralForeground3,
         textAlign: 'center',
-    },
-    colMenuList: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-        minWidth: '150px',
     },
     contextMenu: {
         position: 'fixed',

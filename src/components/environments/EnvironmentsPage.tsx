@@ -30,6 +30,8 @@ import {
     useEnvironmentsWorkspace,
 } from '../../hooks/useEnvironmentsWorkspace';
 import { useI18n } from '../../i18n';
+import { useSavedTableValue } from '../../hooks/useTableWorkspace';
+import FavoriteCards from './FavoriteCards';
 import ColumnResizeHandle from '../common/ColumnResizeHandle';
 import CookieTransferDialog from './CookieTransferDialog';
 import EnvironmentDetailsPanel, {
@@ -44,6 +46,9 @@ import { useEnvironmentsStyles } from './environmentsStyles';
 export type { OptionalEnvColumn };
 
 interface EnvironmentsPageProps {
+    favoritesOnly: boolean;
+    favoriteIds: ReadonlySet<string>;
+    onToggleFavorite: (id: string) => void;
     environments: ChromeEnvironment[];
     allEnvironments?: ChromeEnvironment[];
     allGroups: string[];
@@ -84,6 +89,9 @@ interface EnvironmentsPageProps {
 }
 
 const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
+    favoritesOnly,
+    favoriteIds,
+    onToggleFavorite,
     environments,
     allEnvironments,
     allGroups,
@@ -127,6 +135,11 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         onClose,
         onRefresh,
     });
+
+    const [showCards, setShowCards] = useSavedTableValue('multichrome.env.showCards', true,
+        (value): value is boolean => typeof value === 'boolean');
+    const favoriteCards = React.useMemo(() => showCards ? ws.filtered.filter(env => favoriteIds.has(env.id)) : [],
+        [showCards, ws.filtered, favoriteIds]);
 
     const optionalColWidths: Record<OptionalEnvColumn, number> = {
         timezone: 144,
@@ -176,7 +189,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
         ws.filtered.some((item) => ws.selectedIds.has(item.id));
 
     const headingTitle =
-        currentGroup === '用户分组' ? t('环境', 'Environments') : currentGroup;
+        favoritesOnly ? t('常用环境', 'Favorites') :
+        currentGroup === '用户分组' ? t('全部环境', 'All environments') : currentGroup;
     const totalMemoryText =
         ws.allRunningCount > 0
             ? formatMemoryBytes(ws.resourceStats?.totalMemoryBytes)
@@ -206,6 +220,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                 <EnvironmentsToolbar
                     styles={styles}
                     headingTitle={headingTitle}
+                    showCards={showCards}
+                    onShowCardsChange={setShowCards}
                     totalMemoryText={totalMemoryText}
                     currentGroup={currentGroup}
                     narrowWindow={narrowWindow}
@@ -379,6 +395,13 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                     </div>
                 )}
 
+                {favoriteCards.length > 0 && (
+                    <FavoriteCards environments={favoriteCards} proxies={ws.proxyMap} busyId={ws.busyId}
+                        onToggle={onToggleFavorite}
+                        onLaunch={ws.handleRunToggle}
+                        onLocate={id => ws.handleFocusWindow(id, { highlightOnly: false })} />
+                )}
+
                 {loading && environments.length === 0 ? (
                     <div className={styles.emptyState}>
                         <Spinner
@@ -390,7 +413,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                         />
                     </div>
                 ) : ws.filtered.length === 0 ? (
-                    !hasActiveFilters &&
+                    !favoritesOnly && !hasActiveFilters &&
                     environments.length === 0 &&
                     onNavigateComponents &&
                     onNavigateProxies ? (
@@ -414,6 +437,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                             >
                                 {hasActiveFilters
                                     ? t('未找到匹配的环境', 'No matching environments')
+                                    : favoritesOnly ? t('还没有常用环境', 'No favorites yet')
                                     : t('还没有 Chrome 环境', 'No Chrome environments yet')}
                             </span>
                             <span style={{ fontSize: '12px' }}>
@@ -422,6 +446,7 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                           '尝试调整搜索词、运行状态或标签筛选条件。',
                                           'Try adjusting the search keyword, status, or tag filters.',
                                       )
+                                    : favoritesOnly ? t('在全部环境中点击名称旁的星标，即可在这里找到它。', 'Star an environment in the list to see it here.')
                                     : t(
                                           '点击右上角“新建环境”创建第一个独立隔离的浏览器环境。',
                                           'Click "New Environment" in the top right to create your first isolated browser profile.',
@@ -641,6 +666,8 @@ const EnvironmentsPage: React.FC<EnvironmentsPageProps> = ({
                                                 key={env.id}
                                                 styles={styles}
                                                 env={env}
+                                                favorite={favoriteIds.has(env.id)}
+                                                onToggleFavorite={() => onToggleFavorite(env.id)}
                                                 selected={selected}
                                                 checked={ws.selectedIds.has(env.id)}
                                                 narrowWindow={narrowWindow}

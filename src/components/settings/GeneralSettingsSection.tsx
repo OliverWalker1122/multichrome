@@ -1,3 +1,4 @@
+import PalettePicker from './PalettePicker';
 import React, { useState } from 'react';
 import {
     Button,
@@ -232,7 +233,7 @@ const GeneralSettingsSection: React.FC<GeneralSettingsSectionProps> = ({
                     </h2>
                 </div>
                 <div className={styles.twoCol}>
-                    <Field label={t('主题', 'Theme')}>
+                    <Field label={t('明暗模式', 'Color mode')}>
                         <Select
                             value={theme}
                             onChange={(_, data) =>
@@ -258,6 +259,7 @@ const GeneralSettingsSection: React.FC<GeneralSettingsSectionProps> = ({
                         </Select>
                     </Field>
                 </div>
+                <PalettePicker />
             </div>
 
             <div className={styles.card}>

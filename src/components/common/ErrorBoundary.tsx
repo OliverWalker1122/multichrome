@@ -3,7 +3,7 @@ import { Button, FluentProvider, Text, tokens } from '@fluentui/react-components
 import { ErrorCircleRegular } from '@fluentui/react-icons';
 import { handleGlobalError } from '../../utils/notificationEvents';
 import { getStoredLocale } from '../../i18n';
-import { win11DarkTheme, win11LightTheme } from '../../theme/win11Theme';
+import { getWindowTheme } from '../../theme/win11Theme';
 
 interface Props {
     children: ReactNode;
@@ -44,13 +44,14 @@ export class ErrorBoundary extends Component<Props, State> {
             }
 
             const isEn = getStoredLocale() === 'en-US';
-            const theme = document.documentElement.dataset.theme;
+            const { theme, palette } = document.documentElement.dataset;
+            const activePalette = palette === 'blue' || palette === 'sage' ? palette : 'neutral';
             const dark = theme
                 ? theme === 'dark'
                 : window.matchMedia('(prefers-color-scheme: dark)').matches;
             return (
                 <FluentProvider
-                    theme={dark ? win11DarkTheme : win11LightTheme}
+                    theme={getWindowTheme(activePalette, dark)}
                     style={{
                         display: 'flex',
                         alignItems: 'center',

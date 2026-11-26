@@ -1,7 +1,8 @@
 import React from 'react';
 import {
     Button,
-    Checkbox,
+    MenuItemRadio,
+    MenuItemCheckbox,
     Input,
     Menu,
     MenuDivider,
@@ -57,6 +58,8 @@ export interface EnvironmentsToolbarProps {
     totalMemoryText: string;
     currentGroup: string;
     narrowWindow: boolean;
+    showCards: boolean;
+    onShowCardsChange: (show: boolean) => void;
     totalCount: number;
     runningCount: number;
     allRunningCount: number;
@@ -90,6 +93,8 @@ export interface EnvironmentsToolbarProps {
 const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
     styles,
     headingTitle,
+    showCards,
+    onShowCardsChange,
     totalMemoryText,
     currentGroup,
     narrowWindow,
@@ -189,125 +194,6 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                     </Tooltip>
                 )}
                 <div className={styles.toolbarActions}>
-                    {allRunningCount === 0 && consoleDocked && onTileWindows && (
-                        <Button
-                            appearance="subtle"
-                            icon={<ArrowResetRegular />}
-                            disabled={tilingWindows}
-                            aria-label={t('恢复主窗口', 'Reset Window')}
-                            onClick={() => onTileWindows('reset-app-window')}
-                        >
-                            {t('恢复主窗口', 'Reset Window')}
-                        </Button>
-                    )}
-                    {allRunningCount > 0 && onTileWindows && (
-                        <Menu positioning="below-end">
-                            <MenuTrigger disableButtonEnhancement>
-                                <Button
-                                    appearance="subtle"
-                                    icon={<GridRegular />}
-                                    disabled={tilingWindows || closingAll}
-                                    aria-label={t('窗口布局', 'Window Layout')}
-                                >
-                                    {t('窗口布局', 'Window Layout')}
-                                    <ChevronDownRegular
-                                        style={{
-                                            marginLeft: '4px',
-                                            fontSize: '12px',
-                                        }}
-                                    />
-                                </Button>
-                            </MenuTrigger>
-                            <MenuPopover>
-                                <MenuList>
-                                    <MenuItem
-                                        icon={<GridRegular />}
-                                        onClick={() => onTileWindows('grid')}
-                                    >
-                                        {t('无缝宫格平铺', 'Seamless Grid')}
-                                    </MenuItem>
-                                    <MenuItem
-                                        icon={<SplitVerticalRegular />}
-                                        onClick={() =>
-                                            onTileWindows('split-grid')
-                                        }
-                                    >
-                                        {t(
-                                            '分屏并排平铺',
-                                            'Split Beside Console',
-                                        )}
-                                    </MenuItem>
-                                    <MenuItem
-                                        icon={<SquareMultipleRegular />}
-                                        onClick={() => onTileWindows('stack')}
-                                    >
-                                        {t('统一尺寸堆叠', 'Uniform Stack')}
-                                    </MenuItem>
-                                    <MenuItem
-                                        icon={<WindowNewRegular />}
-                                        onClick={() => onTileWindows('cascade')}
-                                    >
-                                        {t('阶梯错位层叠', 'Cascade Windows')}
-                                    </MenuItem>
-                                    <MenuDivider />
-                                    <MenuItem
-                                        icon={<ArrowMinimizeRegular />}
-                                        onClick={() =>
-                                            onTileWindows('minimize')
-                                        }
-                                    >
-                                        {t('最小化全部窗口', 'Minimize All')}
-                                    </MenuItem>
-                                    <MenuItem
-                                        icon={<MaximizeRegular />}
-                                        onClick={() => onTileWindows('restore')}
-                                    >
-                                        {t('恢复全部窗口', 'Restore All')}
-                                    </MenuItem>
-                                    <MenuDivider />
-                                    <MenuItem
-                                        icon={<ArrowResetRegular />}
-                                        onClick={() =>
-                                            onTileWindows('reset-app-window')
-                                        }
-                                    >
-                                        {t(
-                                            '恢复主窗口大小',
-                                            'Reset App Window',
-                                        )}
-                                    </MenuItem>
-                                </MenuList>
-                            </MenuPopover>
-                        </Menu>
-                    )}
-                    {allRunningCount > 0 && !hideCloseAll && (
-                        <Button
-                            appearance="subtle"
-                            icon={
-                                <DismissRegular
-                                    style={{
-                                        color: tokens.colorPaletteRedForeground1,
-                                    }}
-                                />
-                            }
-                            disabled={closingAll}
-                            onClick={onOpenCloseAllConfirm}
-                        >
-                            {isEn
-                                ? `Stop All (${allRunningCount})`
-                                : `关闭全部 (${allRunningCount})`}
-                        </Button>
-                    )}
-                    {((allRunningCount === 0 &&
-                        consoleDocked &&
-                        onTileWindows) ||
-                        (allRunningCount > 0 &&
-                            (onTileWindows || !hideCloseAll))) && (
-                        <span
-                            aria-hidden="true"
-                            className={styles.toolbarDivider}
-                        />
-                    )}
                     {currentGroup !== '用户分组' &&
                         (onRequestRenameGroup || onRequestDeleteGroup) && (
                             <Menu positioning="below-end">
@@ -504,116 +390,173 @@ const EnvironmentsToolbar: React.FC<EnvironmentsToolbarProps> = ({
                         </Popover>
                     )}
 
-                    {!narrowWindow && (
-                        <Popover positioning="below-end">
-                            <PopoverTrigger disableButtonEnhancement>
-                                <Button
-                                    appearance="subtle"
-                                    icon={<TableSettingsRegular />}
-                                >
-                                    {t('列', 'Columns')}
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverSurface>
-                                <div className={styles.colMenuList}>
-                                    <span
-                                        style={{
-                                            fontSize: '12px',
-                                            fontWeight: 600,
-                                            color: tokens.colorNeutralForeground3,
-                                            marginBottom: '4px',
-                                        }}
-                                    >
-                                        {t('显示附加列', 'Extra Columns')}
-                                    </span>
-                                    {OPTIONAL_COLUMNS.map((col) => (
-                                        <Checkbox
-                                            key={col.key}
-                                            label={isEn ? col.en : col.zh}
-                                            checked={optionalColumns.includes(
-                                                col.key,
-                                            )}
-                                            onChange={() =>
-                                                onToggleOptionalColumn(col.key)
-                                            }
-                                        />
-                                    ))}
-                                </div>
-                            </PopoverSurface>
-                        </Popover>
-                    )}
-
                     <Menu positioning="below-end">
                         <MenuTrigger disableButtonEnhancement>
-                            <Tooltip
-                                content={t('排序方式', 'Sort by')}
-                                relationship="label"
-                            >
-                                <Button
-                                    appearance="subtle"
-                                    icon={<ArrowSortRegular />}
-                                    aria-label={t('排序方式', 'Sort by')}
-                                />
-                            </Tooltip>
+                            <Button appearance="subtle" icon={<GridRegular />}>
+                                {t('视图', 'View')} <ChevronDownRegular />
+                            </Button>
                         </MenuTrigger>
                         <MenuPopover>
-                            <MenuList>
-                                <MenuItem
-                                    onClick={() => {
-                                        onSortByChange('lastUsed');
-                                        onSortOrderChange((prev) =>
-                                            sortBy === 'lastUsed' &&
-                                            prev === 'desc'
-                                                ? 'asc'
-                                                : 'desc',
-                                        );
-                                    }}
-                                >
-                                    {t('最近使用', 'Last Used')}{' '}
-                                    {sortBy === 'lastUsed'
-                                        ? sortOrder === 'desc'
-                                            ? '↓'
-                                            : '↑'
-                                        : ''}
-                                </MenuItem>
-                                <MenuItem
-                                    onClick={() => {
-                                        onSortByChange('createdAt');
-                                        onSortOrderChange((prev) =>
-                                            sortBy === 'createdAt' &&
-                                            prev === 'desc'
-                                                ? 'asc'
-                                                : 'desc',
-                                        );
-                                    }}
-                                >
-                                    {t('创建时间', 'Created At')}{' '}
-                                    {sortBy === 'createdAt'
-                                        ? sortOrder === 'desc'
-                                            ? '↓'
-                                            : '↑'
-                                        : ''}
-                                </MenuItem>
-                                <MenuItem
-                                    onClick={() => {
-                                        onSortByChange('name');
-                                        onSortOrderChange((prev) =>
-                                            sortBy === 'name' && prev === 'asc'
-                                                ? 'desc'
-                                                : 'asc',
-                                        );
-                                    }}
-                                >
-                                    {t('名称', 'Name')}{' '}
-                                    {sortBy === 'name'
-                                        ? sortOrder === 'desc'
-                                            ? '↓'
-                                            : '↑'
-                                        : ''}
-                                </MenuItem>
+                            <MenuList checkedValues={{ layout: [showCards ? 'cards' : 'list'] }}>
+                                <MenuItemRadio name="layout" value="cards" onClick={() => onShowCardsChange(true)}>
+                                    {t('卡片和列表', 'Cards and list')}
+                                </MenuItemRadio>
+                                <MenuItemRadio name="layout" value="list" onClick={() => onShowCardsChange(false)}>
+                                    {t('仅列表', 'List only')}
+                                </MenuItemRadio>
+                                <MenuDivider />
+                                <Menu>
+                                    <MenuTrigger disableButtonEnhancement>
+                                        <MenuItem icon={<ArrowSortRegular />}>{t('排序方式', 'Sort by')}</MenuItem>
+                                    </MenuTrigger>
+                                    <MenuPopover>
+                                        <MenuList>
+                                            {([
+                                                ['lastUsed', t('最近使用', 'Last used')],
+                                                ['createdAt', t('创建时间', 'Created at')],
+                                                ['name', t('名称', 'Name')],
+                                            ] as const).map(([key, label]) => (
+                                                <MenuItem key={key} onClick={() => {
+                                                    const initial = key === 'name' ? 'asc' : 'desc';
+                                                    onSortOrderChange(sortBy === key && sortOrder === initial
+                                                        ? (initial === 'asc' ? 'desc' : 'asc') : initial);
+                                                    onSortByChange(key);
+                                                }}>
+                                                    {label}{sortBy === key && (sortOrder === 'desc' ? ' ↓' : ' ↑')}
+                                                </MenuItem>
+                                            ))}
+                                        </MenuList>
+                                    </MenuPopover>
+                                </Menu>
+                                {!narrowWindow && (
+                                    <Menu>
+                                        <MenuTrigger disableButtonEnhancement>
+                                            <MenuItem icon={<TableSettingsRegular />}>{t('显示列', 'Show columns')}</MenuItem>
+                                        </MenuTrigger>
+                                        <MenuPopover>
+                                            <MenuList checkedValues={{ columns: optionalColumns }}>
+                                                {OPTIONAL_COLUMNS.map(col => (
+                                                    <MenuItemCheckbox key={col.key} name="columns" value={col.key}
+                                                        onClick={() => onToggleOptionalColumn(col.key)}>
+                                                        {isEn ? col.en : col.zh}
+                                                    </MenuItemCheckbox>
+                                                ))}
+                                            </MenuList>
+                                        </MenuPopover>
+                                    </Menu>
+                                )}
                             </MenuList>
                         </MenuPopover>
                     </Menu>
+                    {allRunningCount === 0 && consoleDocked && onTileWindows && (
+                        <Button
+                            appearance="subtle"
+                            icon={<ArrowResetRegular />}
+                            disabled={tilingWindows}
+                            aria-label={t('恢复主窗口', 'Reset Window')}
+                            onClick={() => onTileWindows('reset-app-window')}
+                        >
+                            {t('恢复主窗口', 'Reset Window')}
+                        </Button>
+                    )}
+                    {onTileWindows && (
+                        <Menu positioning="below-end">
+                            <MenuTrigger disableButtonEnhancement>
+                                <Button
+                                    appearance="subtle"
+                                    icon={<SquareMultipleRegular />}
+                                    disabled={allRunningCount === 0 || tilingWindows || closingAll}
+                                    aria-label={t('排列浏览器窗口', 'Arrange browser windows')}
+                                >
+                                    {t('排列浏览器窗口', 'Arrange browser windows')}
+                                    <ChevronDownRegular
+                                        style={{
+                                            marginLeft: '4px',
+                                            fontSize: '12px',
+                                        }}
+                                    />
+                                </Button>
+                            </MenuTrigger>
+                            <MenuPopover>
+                                <MenuList>
+                                    <MenuItem
+                                        icon={<GridRegular />}
+                                        onClick={() => onTileWindows('grid')}
+                                    >
+                                        {t('无缝宫格平铺', 'Seamless Grid')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<SplitVerticalRegular />}
+                                        onClick={() =>
+                                            onTileWindows('split-grid')
+                                        }
+                                    >
+                                        {t(
+                                            '分屏并排平铺',
+                                            'Split Beside Console',
+                                        )}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<SquareMultipleRegular />}
+                                        onClick={() => onTileWindows('stack')}
+                                    >
+                                        {t('统一尺寸堆叠', 'Uniform Stack')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<WindowNewRegular />}
+                                        onClick={() => onTileWindows('cascade')}
+                                    >
+                                        {t('阶梯错位层叠', 'Cascade Windows')}
+                                    </MenuItem>
+                                    <MenuDivider />
+                                    <MenuItem
+                                        icon={<ArrowMinimizeRegular />}
+                                        onClick={() =>
+                                            onTileWindows('minimize')
+                                        }
+                                    >
+                                        {t('最小化全部窗口', 'Minimize All')}
+                                    </MenuItem>
+                                    <MenuItem
+                                        icon={<MaximizeRegular />}
+                                        onClick={() => onTileWindows('restore')}
+                                    >
+                                        {t('恢复全部窗口', 'Restore All')}
+                                    </MenuItem>
+                                    <MenuDivider />
+                                    <MenuItem
+                                        icon={<ArrowResetRegular />}
+                                        onClick={() =>
+                                            onTileWindows('reset-app-window')
+                                        }
+                                    >
+                                        {t(
+                                            '恢复主窗口大小',
+                                            'Reset App Window',
+                                        )}
+                                    </MenuItem>
+                                </MenuList>
+                            </MenuPopover>
+                        </Menu>
+                    )}
+                    {allRunningCount > 0 && !hideCloseAll && (
+                        <Button
+                            appearance="subtle"
+                            icon={
+                                <DismissRegular
+                                    style={{
+                                        color: tokens.colorPaletteRedForeground1,
+                                    }}
+                                />
+                            }
+                            disabled={closingAll}
+                            onClick={onOpenCloseAllConfirm}
+                        >
+                            {isEn
+                                ? `Stop All (${allRunningCount})`
+                                : `关闭全部 (${allRunningCount})`}
+                        </Button>
+                    )}
                 </div>
             </div>
 

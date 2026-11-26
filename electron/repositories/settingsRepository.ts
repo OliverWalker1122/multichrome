@@ -62,6 +62,7 @@ export interface AppSettings {
     };
     startupUrl?: string;
     theme?: ThemeMode;
+    palette?: 'neutral' | 'blue' | 'sage';
     locale?: AppLocale;
     memorySaverMode?: boolean;
     bookmarkTemplates?: BookmarkTemplate[];
@@ -82,7 +83,9 @@ export class SettingsManager {
         proxyAddresses?: ReturnType<typeof createProxyAddressStorage>;
     } = {}) {
         this.proxyAddresses = options.proxyAddresses ?? createProxyAddressStorage(safeStorage);
-        // 初始化存储
+        // Capture upgrade state before electron-store creates the settings file.
+        const settingsFile = path.resolve(app.getPath('userData'), options.directory ?? '.', 'app-settings.json');
+        const initialPalette = fs.existsSync(settingsFile) ? 'blue' : 'neutral';
         this.store = new Store<AppSettings>({
             name: 'app-settings',
             cwd: options.directory,
@@ -116,6 +119,11 @@ export class SettingsManager {
                     type: 'string',
                     enum: ['system', 'light', 'dark'],
                     default: 'system',
+                },
+                palette: {
+                    type: 'string',
+                    enum: ['neutral', 'blue', 'sage'],
+                    default: initialPalette,
                 },
                 locale: {
                     type: 'string',
@@ -169,6 +177,7 @@ export class SettingsManager {
                     get address() { return addresses.open('global', storedProxy.address); },
                 },
                 startupUrl: this.store.get('startupUrl'),
+                palette: this.store.get('palette'),
                 theme: this.store.get('theme') || 'system',
                 locale:
                     this.store.get('locale') === 'zh-CN' ? 'zh-CN' : 'en-US',
@@ -236,6 +245,7 @@ export class SettingsManager {
             }
             if (settings.startupUrl !== undefined) next.startupUrl = settings.startupUrl;
             if (['system', 'light', 'dark'].includes(settings.theme || '')) next.theme = settings.theme;
+            if (settings.palette !== undefined) next.palette = settings.palette;
             if (settings.locale === 'zh-CN' || settings.locale === 'en-US') next.locale = settings.locale;
             for (const key of ['memorySaverMode', 'allowExtensionsOnFingerprintKernel', 'requireHealthCheckOnLaunch'] as const) {
                 if (typeof settings[key] === 'boolean') next[key] = settings[key];

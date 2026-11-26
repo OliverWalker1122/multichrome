@@ -6,7 +6,7 @@ import {
     ChromeEnvironment,
     DeleteGroupOptions,
 } from './types';
-import { win11DarkTheme, win11LightTheme } from './theme/win11Theme';
+import { getWindowTheme } from './theme/win11Theme';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import {
     EnvironmentProvider,
@@ -18,6 +18,7 @@ import {
     useNotification,
 } from './contexts/NotificationContext';
 import { environmentApi } from './services';
+import { useSavedTableValue } from './hooks/useTableWorkspace';
 import { useAppShellLifecycle } from './hooks/useAppShellLifecycle';
 import TitleBar from './components/layout/TitleBar';
 import NavigationSidebar, {
@@ -36,6 +37,13 @@ import RenameGroupDialog from './components/environments/RenameGroupDialog';
 import LaunchGuardDialog from './components/environments/LaunchGuardDialog';
 import EnvironmentHealthDialog from './components/environments/EnvironmentHealthDialog';
 import { useI18n } from './i18n';
+
+interface NavigationTarget {
+    section: NavSection;
+    group?: string;
+    favorites?: boolean;
+    environmentId?: string;
+}
 
 const useStyles = makeStyles({
     shell: {
@@ -93,25 +101,47 @@ const AppShell: React.FC = () => {
     const [activeSection, setActiveSection] =
         useState<NavSection>('environments');
     const [settingsDirty, setSettingsDirty] = useState(false);
-    const [pendingNavigation, setPendingNavigation] = useState<{ section: NavSection; group?: string } | null>(null);
+    const [pendingNavigation, setPendingNavigation] = useState<NavigationTarget | null>(null);
+    const [favoritesOnly, setFavoritesOnly] = useState(false);
+    const [shortcutRevision, setShortcutRevision] = useState(0);
+    const [favoriteIds, setFavoriteIds] = useSavedTableValue<string[]>(
+        'multichrome.env.favorites', [],
+        (value): value is string[] => Array.isArray(value) && value.every(id => typeof id === 'string'),
+    );
+    const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds]);
+    const favorites = useMemo(() => state.environments.filter(env => favoriteSet.has(env.id)), [state.environments, favoriteSet]);
+    const toggleFavorite = (id: string) => setFavoriteIds(current =>
+        current.includes(id) ? current.filter(item => item !== id) : [...current, id],
+    );
 
-    const navigate = (section: NavSection, group?: string) => {
-        if (activeSection === 'settings' && section !== 'settings' && settingsDirty) {
-            setPendingNavigation({ section, group });
-            return;
+    const applyNavigation = (target: NavigationTarget) => {
+        if (target.group !== undefined) {
+            actions.setCurrentGroup(target.group);
+            setFavoritesOnly(Boolean(target.favorites));
         }
-        if (group !== undefined) actions.setCurrentGroup(group);
-        setActiveSection(section);
+        if (target.environmentId) {
+            setSelectedEnvId(target.environmentId);
+            setEnvDetailsOpen(true);
+            setShortcutRevision(current => current + 1);
+        }
+        setActiveSection(target.section);
+    };
+    const navigate = (section: NavSection, group?: string, favorites?: boolean, environmentId?: string) => {
+        const target = { section, group, favorites, environmentId };
+        if (activeSection === 'settings' && section !== 'settings' && settingsDirty) {
+            setPendingNavigation(target);
+        } else {
+            applyNavigation(target);
+        }
     };
 
     const finishLeavingSettings = () => {
         if (!pendingNavigation) return;
-        if (pendingNavigation.group !== undefined) actions.setCurrentGroup(pendingNavigation.group);
-        setActiveSection(pendingNavigation.section);
+        applyNavigation(pendingNavigation);
         setPendingNavigation(null);
         setSettingsDirty(false);
     };
-    const [sidebarManualCollapsed, setSidebarManualCollapsed] = useState(false);
+    const [sidebarOverride, setSidebarOverride] = useState<{ compact: boolean; collapsed: boolean } | null>(null);
     const [createModalOpen, setCreateModalOpen] = useState(false);
     const [renameGroupTarget, setRenameGroupTarget] = useState<string | null>(
         null,
@@ -142,8 +172,8 @@ const AppShell: React.FC = () => {
         updateEnvironment: actions.updateEnvironment,
     });
 
-    const navCollapsed =
-        lifecycle.windowWidth < 880 || sidebarManualCollapsed;
+    const compact = lifecycle.windowWidth < 880;
+    const navCollapsed = sidebarOverride?.compact === compact ? sidebarOverride.collapsed : compact;
     const narrowWindow = lifecycle.contentWidth < 760;
     const overlayDetails = lifecycle.contentWidth < 1120;
     const totalRunningEnvs = useMemo(
@@ -175,12 +205,12 @@ const AppShell: React.FC = () => {
 
     const filteredEnvironments = useMemo(
         () =>
-            state.currentGroup === '用户分组'
+            favoritesOnly ? favorites : state.currentGroup === '用户分组'
                 ? state.environments
                 : state.environments.filter(
                       (env) => env.groupName === state.currentGroup,
                   ),
-        [state.environments, state.currentGroup],
+        [state.environments, state.currentGroup, favorites, favoritesOnly],
     );
 
     const kernelUpdateSummary = lifecycle.kernelStatus?.updateSummary;
@@ -415,6 +445,8 @@ const AppShell: React.FC = () => {
                 themeMode={themeMode}
                 isDark={isDark}
                 onToggleTheme={handleQuickToggleTheme}
+                collapsed={navCollapsed}
+                onToggleCollapsed={() => setSidebarOverride({ compact, collapsed: !navCollapsed })}
                 runningCount={totalRunningEnvs}
                 singboxReady={Boolean(lifecycle.coreInfo?.available)}
                 onOpenSettings={() => setActiveSection('settings')}
@@ -425,10 +457,9 @@ const AppShell: React.FC = () => {
                     activeSection={activeSection}
                     onSelectSection={(section) => navigate(section)}
                     collapsed={navCollapsed}
-                    canToggleCollapsed={lifecycle.windowWidth >= 880}
-                    onToggleCollapsed={() =>
-                        setSidebarManualCollapsed((prev) => !prev)
-                    }
+                    favorites={favorites}
+                    favoritesOnly={favoritesOnly}
+                    onSelectFavorites={(id) => navigate('environments', '用户分组', true, id)}
                     environmentCount={state.environments.length}
                     proxyCount={lifecycle.managedProxies.length}
                     trashCount={lifecycle.trashCount}
@@ -454,6 +485,10 @@ const AppShell: React.FC = () => {
                     <div className={styles.workspaceHost}>
                         {activeSection === 'environments' && (
                             <EnvironmentsPage
+                                key={shortcutRevision}
+                                favoritesOnly={favoritesOnly}
+                                favoriteIds={favoriteSet}
+                                onToggleFavorite={toggleFavorite}
                                 environments={filteredEnvironments}
                                 allEnvironments={state.environments}
                                 allGroups={groupsForModal}
@@ -692,10 +727,12 @@ const AppShell: React.FC = () => {
 };
 
 const ThemedApp: React.FC = () => {
-    const { isDark } = useSettings();
+    const { isDark, settings } = useSettings();
+    const palette = settings.palette ?? 'neutral';
+    const theme = useMemo(() => getWindowTheme(palette, isDark), [palette, isDark]);
     return (
         <FluentProvider
-            theme={isDark ? win11DarkTheme : win11LightTheme}
+            theme={theme}
             style={{
                 height: '100%',
                 width: '100%',

@@ -2,6 +2,8 @@ import React from 'react';
 import { Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import {
     LocalLanguageRegular,
+    PanelLeftContractRegular,
+    PanelLeftExpandRegular,
     WeatherMoonRegular,
     WeatherSunnyRegular,
 } from '@fluentui/react-icons';
@@ -14,6 +16,8 @@ interface TitleBarProps {
     themeMode: ThemeMode;
     isDark: boolean;
     onToggleTheme: () => void;
+    collapsed: boolean;
+    onToggleCollapsed: () => void;
     runningCount: number;
     singboxReady: boolean;
     onOpenSettings: () => void;
@@ -94,6 +98,7 @@ const useStyles = makeStyles({
             outlineOffset: '-1px',
         },
     },
+    sidebarToggle: { fontSize: '18px' },
     compactAction: {
         width: 'auto',
         padding: '0 7px',
@@ -128,6 +133,8 @@ const TitleBar: React.FC<TitleBarProps> = ({
     themeMode,
     isDark,
     onToggleTheme,
+    collapsed,
+    onToggleCollapsed,
     runningCount,
     singboxReady,
     onOpenSettings,
@@ -138,6 +145,7 @@ const TitleBar: React.FC<TitleBarProps> = ({
     const isMac = platform === 'darwin';
     const isLinux = platform === 'linux';
 
+    const sidebarLabel = collapsed ? t('展开导航栏', 'Expand sidebar') : t('收起导航栏', 'Collapse sidebar');
     const themeLabel =
         themeMode === 'system'
             ? isEn
@@ -162,7 +170,13 @@ const TitleBar: React.FC<TitleBarProps> = ({
             aria-label={t('应用顶栏', 'Application title bar')}
         >
             <div className={styles.left}>
-                {/* 品牌图标始终位于最左侧（Linux 使用系统原生标题栏时不重复渲染） */}
+                <Tooltip content={sidebarLabel} relationship="label">
+                    <button type="button" className={mergeClasses(styles.iconBtn, styles.sidebarToggle, 'win11-no-drag')}
+                        aria-label={sidebarLabel} aria-expanded={!collapsed} aria-controls="main-navigation"
+                        onClick={onToggleCollapsed}>
+                        {collapsed ? <PanelLeftExpandRegular /> : <PanelLeftContractRegular />}
+                    </button>
+                </Tooltip>
                 {!isLinux && (
                     <div className={styles.brand}>
                         <AppBrandIcon size={20} />

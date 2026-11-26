@@ -187,6 +187,9 @@ export function sanitizeAppSettingsPayload(settings: unknown): AppSettings {
     }
 
     const validSettings: AppSettings = { dataPath: settingsData.dataPath };
+    if (settingsData.palette === 'neutral' || settingsData.palette === 'blue' || settingsData.palette === 'sage') {
+        validSettings.palette = settingsData.palette;
+    }
 
     if ('globalProxy' in settingsData && settingsData.globalProxy) {
         const proxy = settingsData.globalProxy as Record<string, unknown>;
