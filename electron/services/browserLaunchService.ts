@@ -1092,7 +1092,9 @@ export class BrowserLaunchService {
                         ) {
                             log.info(`✅ [${env.name}] CDP连接成功 - ID:${envIdShort}`);
                             const overridesReady =
-                                await this.cdpManager.applyOverrides(id);
+                                await this.cdpManager.applyOverrides(id, {
+                                    parkPreGateHttpTabs: true,
+                                });
                             if (
                                 overridesReady &&
                                 !startupGate.isAborted() &&

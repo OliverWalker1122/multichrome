@@ -358,4 +358,89 @@ test('CDPManager fails closed when Emulation timezone ACK times out and symmetri
         sessionCalls.some((c) => c.method === 'Page.reload'),
         false,
     );
+
+    // 3. Simulate a deferred background restored tab whose Blink agent hangs until Browser-side Page.navigate('about:blank') runs
+    cdp.primeEnvironment('env-deferred', {
+        timezone: 'Asia/Tokyo',
+        locale: 'en-US',
+    });
+    let bgParkedToBlank = false;
+    let bgFinalUrl = '';
+    const deferredWs = {
+        readyState: 1,
+        send(raw) {
+            const payload = JSON.parse(raw);
+            const entry = cdp.pendingResponses.get(payload.id);
+            if (!entry) return;
+            if (
+                payload.sessionId === 'sess-bg' &&
+                !bgParkedToBlank &&
+                (payload.method.startsWith('Emulation.') || payload.method === 'Runtime.evaluate')
+            ) {
+                // Blink does not respond until Browser-side Page.navigate('about:blank') cancels the blocked restore navigation!
+                return;
+            }
+            clearTimeout(entry.timer);
+            cdp.pendingResponses.delete(payload.id);
+            if (payload.method === 'Page.navigate' && payload.sessionId === 'sess-bg') {
+                if (payload.params?.url === 'about:blank') {
+                    bgParkedToBlank = true;
+                } else {
+                    bgFinalUrl = payload.params?.url;
+                }
+                entry.resolve({ id: payload.id, result: {} });
+            } else if (payload.method === 'Runtime.evaluate' && payload.sessionId === 'sess-bg') {
+                entry.resolve({
+                    id: payload.id,
+                    result: { result: { value: bgFinalUrl || 'about:blank' } },
+                });
+            } else {
+                entry.resolve({ id: payload.id, result: {} });
+            }
+        },
+        close() {},
+    };
+    cdp.connections.set('env-deferred', {
+        ws: deferredWs,
+        debugUrl: 'ws://127.0.0.1:9224/devtools/browser/t3',
+        debugPort: 9224,
+        envId: 'env-deferred',
+        browserPID: null,
+        connected: true,
+        autoAttachEnabled: true,
+        autoAttachPromise: Promise.resolve(),
+        manualDisconnect: false,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        onDisconnect() {},
+    });
+    // Trigger real Target.attachedToTarget so an initial pre-park Emulation command is queued and stalled
+    cdp.handleCDPEvent(
+        'env-deferred',
+        'Target.attachedToTarget',
+        {
+            sessionId: 'sess-bg',
+            waitingForDebugger: false,
+            targetInfo: {
+                targetId: 't-bg',
+                type: 'page',
+                url: 'http://e2e-restore.invalid/restore-uncached',
+            },
+        },
+        deferredWs,
+    );
+    assert.equal(await cdp.applyOverrides('env-deferred', { parkPreGateHttpTabs: true }), true);
+    assert.equal(cdp.envSessions.get('env-deferred').get('sess-bg').injected, true);
+    let bgGateDropped = false;
+    const bgFlush = await cdp.flushStartupGate('env-deferred', {
+        isReleased: () => bgGateDropped,
+        release: () => 0,
+        dropHeldAndRelease: () => {
+            bgGateDropped = true;
+            return { droppedCount: 2 };
+        },
+    });
+    assert.equal(bgFlush.reloadedCount, 1);
+    assert.equal(bgFinalUrl, 'http://e2e-restore.invalid/restore-uncached');
+    cdp.disconnect('env-deferred');
 });

@@ -36,9 +36,10 @@ interface AttachedSession {
 }
 
 interface PendingResponse {
-    resolve: (msg: Record<string, unknown>) => void;
+    resolve: (msg: Record<string, unknown> | null) => void;
     timer: NodeJS.Timeout;
     envId: string;
+    sessionId?: string;
 }
 
 // CDP 管理器类
@@ -52,6 +53,10 @@ export class CDPManager {
     > = new Map();
     private envSessions: Map<string, Map<string, AttachedSession>> = new Map();
     private envInjectionTasks: Map<string, Set<Promise<void>>> = new Map();
+    private parkedStartupTabs: Map<
+        string,
+        Map<string, { targetUrl: string; wasPreCommitted: boolean }>
+    > = new Map();
     private pendingResponses: Map<number, PendingResponse> = new Map();
     private messageId: number = 0;
 
@@ -113,7 +118,7 @@ export class CDPManager {
                 resolve(null);
             }, timeoutMs);
 
-            this.pendingResponses.set(id, { resolve, timer, envId });
+            this.pendingResponses.set(id, { resolve, timer, envId, sessionId });
 
             try {
                 ws.send(JSON.stringify(payload));
@@ -124,6 +129,16 @@ export class CDPManager {
                 resolve(null);
             }
         });
+    }
+
+    private clearPendingForSession(envId: string, sessionId: string): void {
+        for (const [id, entry] of this.pendingResponses.entries()) {
+            if (entry.envId === envId && entry.sessionId === sessionId) {
+                clearTimeout(entry.timer);
+                this.pendingResponses.delete(id);
+                entry.resolve(null);
+            }
+        }
     }
 
     private clearPendingForEnv(envId: string): void {
@@ -586,7 +601,7 @@ export class CDPManager {
                         'Emulation.setTimezoneOverride',
                         { timezoneId: timezone },
                         sessionId,
-                        3000,
+                        4500,
                     ),
                 );
             }
@@ -598,7 +613,7 @@ export class CDPManager {
                         'Emulation.setLocaleOverride',
                         { locale },
                         sessionId,
-                        3000,
+                        4500,
                     ),
                 );
             }
@@ -663,7 +678,7 @@ export class CDPManager {
                             cmd.method,
                             cmd.params,
                             sessionId,
-                            3000,
+                            4500,
                         ),
                     ),
                 );
@@ -683,11 +698,13 @@ export class CDPManager {
             return true;
         }
         if (!allAcked) {
-            session.injected = false;
-            log.warn(
-                `[CDP] 原生 Emulation 命令未完全确认 (session ${sessionId.substring(0, 8)})`,
-            );
-            return false;
+            if (!session.injected) {
+                session.injected = false;
+                log.warn(
+                    `[CDP] 原生 Emulation 命令未完全确认 (session ${sessionId.substring(0, 8)})`,
+                );
+            }
+            return session.injected;
         }
 
         session.injected = true;
@@ -754,6 +771,7 @@ export class CDPManager {
         this.clearPendingForEnv(envId);
         this.envSessions.delete(envId);
         this.envInjectionTasks.delete(envId);
+        this.parkedStartupTabs.delete(envId);
         this.envTimezones.delete(envId);
         this.envLocales.delete(envId);
         this.envGeolocations.delete(envId);
@@ -845,9 +863,168 @@ export class CDPManager {
     }
 
     /**
+     * 在启动闸门关闭期间，先将所有 pre-CDP 恢复或首开的 HTTP(S) 页面通过 Browser 侧 PageHandler
+     * 中止并切到 about:blank，解除后台恢复标签页在挂起代理连接或 SessionRestore 队列上的死锁，
+     * 使 Blink 主线程立即就绪并确认原生时区与语言覆盖。
+     */
+    private async parkPreGateHttpSessions(
+        envId: string,
+        ws: WebSocket,
+    ): Promise<void> {
+        const sessions = this.envSessions.get(envId);
+        if (!sessions || sessions.size === 0) return;
+
+        let parkedMap = this.parkedStartupTabs.get(envId);
+        if (!parkedMap) {
+            parkedMap = new Map();
+            this.parkedStartupTabs.set(envId, parkedMap);
+        }
+
+        const pageSessions = Array.from(sessions.values()).filter(
+            (s) => s.type === 'page' && !parkedMap!.has(s.sessionId),
+        );
+        if (pageSessions.length === 0) return;
+
+        const toPark: Array<{
+            session: AttachedSession;
+            targetUrl: string;
+            wasPreCommitted: boolean;
+        }> = [];
+
+        await Promise.all(
+            pageSessions.map(async (session) => {
+                let committedHref = '';
+                // Only probe Runtime.evaluate before parking if Blink already responded on this session;
+                // otherwise an uncached restored background tab blocked on the closed gate would stall in Blink.
+                if (session.injected) {
+                    try {
+                        const resp = await this.sendCommand(
+                            envId,
+                            ws,
+                            'Runtime.evaluate',
+                            {
+                                expression: 'location.href',
+                                returnByValue: true,
+                            },
+                            session.sessionId,
+                            400,
+                        );
+                        const val = (
+                            resp?.result as
+                                | { result?: { value?: unknown } }
+                                | undefined
+                        )?.result?.value;
+                        if (typeof val === 'string') {
+                            committedHref = val;
+                        }
+                    } catch {
+                        committedHref = '';
+                    }
+                }
+
+                const isPreCommittedHttp = /^https?:\/\//i.test(committedHref);
+                let targetUrl = isPreCommittedHttp
+                    ? committedHref
+                    : /^https?:\/\//i.test(session.url || '')
+                      ? session.url
+                      : '';
+
+                if (!targetUrl && session.targetId) {
+                    const infoResp = await this.sendCommand(
+                        envId,
+                        ws,
+                        'Target.getTargetInfo',
+                        { targetId: session.targetId },
+                        undefined,
+                        800,
+                    );
+                    const liveUrl = (
+                        infoResp?.result as
+                            | { targetInfo?: { url?: unknown } }
+                            | undefined
+                    )?.targetInfo?.url;
+                    if (
+                        typeof liveUrl === 'string' &&
+                        /^https?:\/\//i.test(liveUrl)
+                    ) {
+                        targetUrl = liveUrl;
+                    }
+                }
+
+                if (targetUrl) {
+                    toPark.push({
+                        session,
+                        targetUrl,
+                        wasPreCommitted: isPreCommittedHttp,
+                    });
+                }
+            }),
+        );
+
+        if (toPark.length === 0) return;
+
+        await Promise.allSettled(
+            toPark.map(async ({ session, targetUrl, wasPreCommitted }) => {
+                parkedMap!.set(session.sessionId, {
+                    targetUrl,
+                    wasPreCommitted,
+                });
+                session.url = 'about:blank';
+                this.clearPendingForSession(envId, session.sessionId);
+
+                await this.sendCommand(
+                    envId,
+                    ws,
+                    'Page.stopLoading',
+                    {},
+                    session.sessionId,
+                    800,
+                );
+                await this.sendCommand(
+                    envId,
+                    ws,
+                    'Page.navigate',
+                    { url: 'about:blank' },
+                    session.sessionId,
+                    2000,
+                );
+                const blankDeadline = Date.now() + 800;
+                while (Date.now() < blankDeadline) {
+                    const check = await this.sendCommand(
+                        envId,
+                        ws,
+                        'Runtime.evaluate',
+                        { expression: 'location.href', returnByValue: true },
+                        session.sessionId,
+                        300,
+                    );
+                    const cur = (
+                        check?.result as
+                            | { result?: { value?: unknown } }
+                            | undefined
+                    )?.result?.value;
+                    if (cur === 'about:blank') break;
+                    await new Promise((r) => setTimeout(r, 20));
+                }
+                if (this.shouldEnableOverrides(envId)) {
+                    await this.injectToSession(
+                        envId,
+                        session.sessionId,
+                        ws,
+                        false,
+                    );
+                }
+            }),
+        );
+    }
+
+    /**
      * 应用当前环境已缓存的原生 V8/Blink Emulation 覆盖到现有页面和后续页面。
      */
-    public async applyOverrides(envId: string): Promise<boolean> {
+    public async applyOverrides(
+        envId: string,
+        options?: { parkPreGateHttpTabs?: boolean },
+    ): Promise<boolean> {
         try {
             const connection = this.connections.get(envId);
             if (!connection || !connection.connected) {
@@ -870,10 +1047,14 @@ export class CDPManager {
                 pageSessionCount = this.countPageSessions(envId);
             }
 
+            if (options?.parkPreGateHttpTabs) {
+                await this.parkPreGateHttpSessions(envId, ws);
+            }
+
             // 等待所有已附加页面与 Worker 完成原生 Emulation ACK
             await this.awaitPendingInjections(envId);
 
-            // 对尚未确认 ACK 的页面/iframe session 补发一次确认；若关键时区/语言仍未确认则 Fail-Closed 拒绝放行
+            // 对尚未确认 ACK 的页面与 iframe session 补发一次确认；若关键时区与语言仍未确认则 Fail-Closed 拒绝放行
             const sessions = this.envSessions.get(envId);
             if (sessions && sessions.size > 0) {
                 const uninjected = Array.from(sessions.values()).filter(
@@ -920,12 +1101,10 @@ export class CDPManager {
     }
 
     /**
-     * 在全部恢复标签页完成原生 V8 时区/语言挂载后，安全放行代理启动闸门：
-     * - 若没有任何 HTTP(S) 标签页在 CDP 挂载前发起或提交加载（如全新空白页/NewTab），直接放行（0 重载、0 丢包）；
-     * - 若存在会话恢复或首开抢跑的 HTTP(S) 标签页（含已命中磁盘缓存提交的页面与卡在挂起代理上的未提交投机帧），
-     *   先在闸门关闭态统一中止旧加载并切回 about:blank、确认 DevToolsSession 持久化时区状态，
-     *   再物理销毁闸门内全部旧 TCP 连接并打开闸门，最后统一用 Page.navigate 重新加载目标 URL，
-     *   杜绝跨进程投机渲染帧或缓存抢跑泄露宿主机时区。
+     * 在全部恢复标签页完成原生 V8 时区与语言挂载后，安全放行代理启动闸门：
+     * - 若没有任何 HTTP(S) 标签页在 CDP 挂载前发起或提交加载，直接放行（0 重载、0 丢包）；
+     * - 若存在已停靠到 about:blank 的恢复或抢跑 HTTP(S) 标签页，先物理销毁闸门内全部 pre-CDP 旧连接并打开闸门，
+     *   再统一用 Page.navigate 重新加载目标 URL，杜绝跨进程投机渲染帧或离线缓存抢跑泄露宿主机时区。
      */
     public async flushStartupGate(
         envId: string,
@@ -937,6 +1116,7 @@ export class CDPManager {
         forwardedCount: number;
     }> {
         if (gate.isReleased()) {
+            this.parkedStartupTabs.delete(envId);
             return {
                 preCommittedCount: 0,
                 reloadedCount: 0,
@@ -954,6 +1134,7 @@ export class CDPManager {
             !sessions ||
             sessions.size === 0
         ) {
+            this.parkedStartupTabs.delete(envId);
             const forwardedCount = gate.release();
             return {
                 preCommittedCount: 0,
@@ -964,80 +1145,18 @@ export class CDPManager {
         }
 
         const ws = connection.ws;
-        const pageSessions = Array.from(sessions.values()).filter(
-            (s) => s.type === 'page',
-        );
-        const restoredHttpTabs: Array<{
-            session: AttachedSession;
-            targetUrl: string;
-            wasPreCommitted: boolean;
-        }> = [];
+        await this.parkPreGateHttpSessions(envId, ws);
 
-        await Promise.all(
-            pageSessions.map(async (session) => {
-                let committedHref = '';
-                try {
-                    const resp = await this.sendCommand(
-                        envId,
-                        ws,
-                        'Runtime.evaluate',
-                        {
-                            expression: 'location.href',
-                            returnByValue: true,
-                        },
-                        session.sessionId,
-                        1500,
-                    );
-                    const resultObj = resp?.result as
-                        | { result?: { value?: unknown } }
-                        | undefined;
-                    if (typeof resultObj?.result?.value === 'string') {
-                        committedHref = resultObj.result.value;
-                    }
-                } catch {
-                    committedHref = '';
-                }
+        const parkedMap = this.parkedStartupTabs.get(envId);
+        this.parkedStartupTabs.delete(envId);
 
-                const isPreCommittedHttp = /^https?:\/\//i.test(committedHref);
-                let targetUrl = isPreCommittedHttp
-                    ? committedHref
-                    : /^https?:\/\//i.test(session.url || '')
-                      ? session.url
-                      : '';
+        const restoredEntries = parkedMap
+            ? Array.from(parkedMap.entries()).filter(([sid]) =>
+                  sessions.has(sid),
+              )
+            : [];
 
-                if (!targetUrl && session.targetId) {
-                    const infoResp = await this.sendCommand(
-                        envId,
-                        ws,
-                        'Target.getTargetInfo',
-                        { targetId: session.targetId },
-                        undefined,
-                        800,
-                    );
-                    const liveUrl = (
-                        infoResp?.result as
-                            | { targetInfo?: { url?: unknown } }
-                            | undefined
-                    )?.targetInfo?.url;
-                    if (
-                        typeof liveUrl === 'string' &&
-                        /^https?:\/\//i.test(liveUrl)
-                    ) {
-                        targetUrl = liveUrl;
-                    }
-                }
-
-                if (targetUrl) {
-                    restoredHttpTabs.push({
-                        session,
-                        targetUrl,
-                        wasPreCommitted: isPreCommittedHttp,
-                    });
-                }
-            }),
-        );
-
-        if (restoredHttpTabs.length === 0) {
+        if (restoredEntries.length === 0) {
             const forwardedCount = gate.release();
             log.info(
                 `[CDP] 启动闸门已放行（无抢跑 HTTP 标签页）: forwarded=${forwardedCount}`,
@@ -1050,78 +1169,31 @@ export class CDPManager {
             };
         }
 
-        const preCommittedCount = restoredHttpTabs.filter(
-            (item) => item.wasPreCommitted,
+        const preCommittedCount = restoredEntries.filter(
+            ([, info]) => info.wasPreCommitted,
         ).length;
 
-        // Step 1（闸门保持关闭）：把所有恢复/抢跑的 HTTP(S) 标签页统一中止并切回 about:blank，
-        // 彻底销毁旧 Document 与 pre-CDP 投机渲染帧（Speculative RenderFrameHost），并在稳定空白帧上确认 Emulation 状态！
-        await Promise.allSettled(
-            restoredHttpTabs.map(async ({ session }) => {
-                await this.sendCommand(
-                    envId,
-                    ws,
-                    'Page.stopLoading',
-                    {},
-                    session.sessionId,
-                    800,
-                );
-                await this.sendCommand(
-                    envId,
-                    ws,
-                    'Page.navigate',
-                    { url: 'about:blank' },
-                    session.sessionId,
-                    1500,
-                );
-                const blankDeadline = Date.now() + 600;
-                while (Date.now() < blankDeadline) {
-                    const check = await this.sendCommand(
-                        envId,
-                        ws,
-                        'Runtime.evaluate',
-                        { expression: 'location.href', returnByValue: true },
-                        session.sessionId,
-                        300,
-                    );
-                    const cur = (
-                        check?.result as { result?: { value?: unknown } } | undefined
-                    )?.result?.value;
-                    if (cur === 'about:blank') break;
-                    await new Promise((r) => setTimeout(r, 20));
-                }
-                if (this.shouldEnableOverrides(envId)) {
-                    await this.injectToSession(
-                        envId,
-                        session.sessionId,
-                        ws,
-                        false,
-                    );
-                }
-            }),
-        );
-
-        // 等待 Network Service 进程完全处理完旧 Document / 挂起请求的 URLLoader 取消 IPC
+        // 等待 Network Service 进程完全处理完旧 Document 与挂起请求的 URLLoader 取消 IPC
         await new Promise((r) => setTimeout(r, 40));
 
-        // Step 2：物理销毁闸门内全部 pre-CDP 旧 TCP 连接并打开闸门
+        // 物理销毁闸门内全部 pre-CDP 旧 TCP 连接并打开闸门
         const { droppedCount } = gate.dropHeldAndRelease();
 
-        // Step 3：在 DevToolsSession 原生时区/语言已确认且闸门已打开状态下，统一用 Page.navigate 重新加载目标 URL
+        // 在 DevToolsSession 原生时区与语言已确认且闸门已打开状态下，统一用 Page.navigate 重新加载目标 URL
         await Promise.allSettled(
-            restoredHttpTabs.map(({ session, targetUrl }) =>
+            restoredEntries.map(([sessionId, { targetUrl }]) =>
                 this.sendCommand(
                     envId,
                     ws,
                     'Page.navigate',
                     { url: targetUrl },
-                    session.sessionId,
+                    sessionId,
                     2500,
                 ),
             ),
         );
 
-        const reloadedCount = restoredHttpTabs.length;
+        const reloadedCount = restoredEntries.length;
         log.info(
             `[CDP] 启动闸门已对齐 ${reloadedCount} 个恢复标签页（离线抢跑=${preCommittedCount}），丢弃 ${droppedCount} 条旧连接并受控重载`,
         );
@@ -1873,5 +1945,6 @@ export class CDPManager {
             clearTimeout(entry.timer);
         }
         this.pendingResponses.clear();
+        this.parkedStartupTabs.clear();
     }
 }
