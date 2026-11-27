@@ -82,7 +82,7 @@ export function useAppShellLifecycle({
     const [coreInfo, setCoreInfo] = useState<ProxyCoreInfo | null>(null);
     const [kernelStatus, setKernelStatus] = useState<KernelStatus | null>(null);
     const [trashCount, setTrashCount] = useState(0);
-    const [appVersion, setAppVersion] = useState('1.7.0');
+    const [appVersion, setAppVersion] = useState('1.7.1');
     const [proxyRefreshTick, setProxyRefreshTick] = useState(0);
 
     const proxiesSigRef = useRef('');

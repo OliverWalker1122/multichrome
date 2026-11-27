@@ -40,7 +40,7 @@ Windows 的 L2、L3 和 L4 直接通过表中的 npm 命令在本机或 GitHub �
 ## 3. 自动化构建与发布
 
 - **CI 流水线（[ci.yml](../.github/workflows/ci.yml)）**：每次推送至 `main` 或提交 PR 时自动执行 `npm run check`、`npm run lint`、`npm run prepare:singbox`、`npm test` 与 `npm run build`，并同步更新仓库测试状态徽章。
-- **Release 流水线（[release.yml](../.github/workflows/release.yml)）**：推送与 `package.json` 版本号一致的 `v*` 标签（如 `git tag -a v1.7.0 -m "MultiChrome v1.7.0" && git push origin v1.7.0`）后，自动完成发布前校验，并行构建 Windows (`.exe`)、macOS (`.dmg` / `.zip`)、Linux (`.AppImage` / `.deb`) 安装包，生成 `SHA256SUMS.txt` 与 SLSA 构建溯源证明并发布到 GitHub Releases。
+- **Release 流水线（[release.yml](../.github/workflows/release.yml)）**：推送与 `package.json` 版本号一致的 `v*` 标签（如 `git tag -a v1.7.1 -m "MultiChrome v1.7.1" && git push origin v1.7.1`）后，自动完成发布前校验，并行构建 Windows (`.exe`)、macOS (`.dmg` / `.zip`)、Linux (`.AppImage` / `.deb`) 安装包，生成 `SHA256SUMS.txt` 与 SLSA 构建溯源证明并发布到 GitHub Releases。
 
 ## 本地客户端验收
 

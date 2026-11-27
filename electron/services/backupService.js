@@ -15,7 +15,7 @@ export class BackupService {
         environmentService,
         proxyService,
         settingsRepository,
-        getAppVersion = () => '1.7.0',
+        getAppVersion = () => '1.7.1',
     }) {
         this.environmentService = environmentService;
         this.proxyService = proxyService;

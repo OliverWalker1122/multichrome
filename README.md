@@ -77,7 +77,7 @@ MultiChrome uses a 4-layer verification suite with native Node V8 code coverage 
 
 ## Documentation
 
-- [Changelog](CHANGELOG.md) — Release history and new capabilities (`v1.7.0`)
+- [Changelog](CHANGELOG.md) — Release history and new capabilities (`v1.7.1`)
 - [Architecture & Design](docs/architecture.md) ([简体中文](docs/architecture_zh.md)) — Dual-engine model, fail-closed networking, supply-chain verification, and bottom-up repository layout
 - [Testing & Verification](docs/verification.md) ([简体中文](docs/verification_zh.md)) — 4-layer test suite, external checker observations, and release automation
 - [Development & Packaging](docs/development.md) ([简体中文](docs/development_zh.md)) — Building from source, running tests, and creating platform installers

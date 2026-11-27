@@ -2,6 +2,17 @@
 
 All notable changes to MultiChrome are documented in this file.
 
+## [1.7.1] - 2026-11-27
+
+### Fixed
+
+- Seed non-blank Windows password status in fresh profile `Local State` files and merge Chromium's Autofill test switches so multi-profile launches and local browser tests do not trigger blank-password `LogonUser` probes or account lockouts, while keeping Windows Security log `4625`/`4740` verification in CI.
+- Park restored HTTP(S) tabs onto `about:blank` before awaiting Blink `Emulation` acknowledgements, raise cold-start startup gate budgets, and retry initial C++ kernel default Google Search setup so cold Windows launches and session restores complete without timezone leaks or timeouts.
+- Desktop release checks now observe the selected browser window directly. The test verifies that selecting a row and opening its details leave the window minimized, and that Locate restores it.
+- The Apple Silicon release build now uses the standard macOS 26 ARM64 runner.
+
+---
+
 ## [1.7.0] - 2026-11-27
 
 ### Added
