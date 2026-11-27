@@ -4,8 +4,8 @@
   "message": "77.6% lines",
   "color": "ca8a04",
   "metrics": {
-    "lines": 77.59,
-    "branches": 71.64,
+    "lines": 77.57,
+    "branches": 71.52,
     "functions": 85.09,
     "testsTotal": 212,
     "testsPassed": 212,
