@@ -1059,6 +1059,7 @@ app.whenReady().then(async () => {
         let auditedCount = 0;
 
         if (OPTS.envs.length > 0) {
+            delete process.env.MULTICHROME_TEST_PROFILE_ROOT;
             realChromeManager = new ChromeManager(
                 proxyManager,
                 settingsManager,
@@ -1138,6 +1139,7 @@ app.whenReady().then(async () => {
                 tempAuditRoot = fs.mkdtempSync(
                     path.join(os.tmpdir(), 'multichrome-live-audit-'),
                 );
+                process.env.MULTICHROME_TEST_PROFILE_ROOT = tempAuditRoot;
                 const tempSettingsManager = new SettingsManager({ directory: tempAuditRoot });
                 const saved = await tempSettingsManager.saveSettings({
                     dataPath: tempAuditRoot,

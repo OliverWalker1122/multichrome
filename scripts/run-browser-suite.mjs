@@ -45,7 +45,11 @@ async function runWindows() {
     }).catch(() => { throw new Error('Another Windows browser test suite is running or the test lock is unavailable'); });
     try {
         const check = directory => audit('-Mode', 'Check', '-Baseline', baseline, '-Directory', directory);
-        return await supervise(run, check, 2000, (engine, count) => {
+        const start = async directory => {
+            await audit('-Mode', 'PrepareProfile', '-Directory', directory);
+            return run(directory);
+        };
+        return await supervise(start, check, 2000, (engine, count) => {
             console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
         });
     } finally {
@@ -59,7 +63,7 @@ export async function supervise(startSuite, checkEvents, observationMs, report =
     const permitted = new Map();
     let active;
     try {
-        active = startSuite(directory);
+        active = await startSuite(directory);
         let finished = false;
         const result = active.done.finally(() => { finished = true; });
         result.catch(() => {});
@@ -80,10 +84,11 @@ export async function supervise(startSuite, checkEvents, observationMs, report =
                     await delay(50);
                 }
                 const engine = receipt.split('.')[2];
+                const firstForEngine = !permitted.has(engine);
                 permitted.set(engine, (permitted.get(engine) ?? 0) + 1);
                 // The first real profile for each engine runs alone. Apply the same
                 // observation interval to later launches; existing windows remain open.
-                await delay(observationMs);
+                await delay(firstForEngine ? 3 * observationMs : observationMs);
                 await check();
                 nextCheck = Date.now() + 3000;
             } else if (Date.now() >= nextCheck) {

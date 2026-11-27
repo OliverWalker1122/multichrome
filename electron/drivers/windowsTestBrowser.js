@@ -13,6 +13,20 @@ export function windowsTestArgs(args) {
     return [prefix + [...features].join(','), ...args.filter(arg => !arg.startsWith(prefix))];
 }
 
+// Create a synthetic first-run Local State exclusively inside this suite's
+// disposable profiles. Never open, copy from, or overwrite existing browser state.
+export function prepareTestProfile(auditDirectory, fixtureRoot, profileDirectory) {
+    if (!fixtureRoot || !profileDirectory) return;
+    const relative = path.relative(fs.realpathSync.native(fixtureRoot), fs.realpathSync.native(profileDirectory));
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) return;
+    try {
+        fs.copyFileSync(path.join(auditDirectory, 'test-local-state.json'),
+            path.join(profileDirectory, 'Local State'), fs.constants.COPYFILE_EXCL);
+    } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+    }
+}
+
 /**
  * Wait for a supervisor permit before using the normal executable and startup gate.
  * @param {string} directory
@@ -32,6 +46,8 @@ export async function spawnAuditedTestBrowser(directory, engine, args, launch) {
         await delay(50);
     }
     if (fs.existsSync(path.join(directory, 'stop'))) throw new Error('Windows browser test audit stopped');
+    const dataArg = args.find(arg => arg.startsWith('--user-data-dir='));
+    prepareTestProfile(directory, process.env.MULTICHROME_TEST_PROFILE_ROOT, dataArg?.slice('--user-data-dir='.length));
     const child = launch(windowsTestArgs(args));
     if (!Number.isSafeInteger(child.pid)) {
         child.once('error', () => {});

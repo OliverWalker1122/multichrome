@@ -43,6 +43,7 @@ const OPTS = parseArgs(process.argv.slice(2));
 // so we explicitly resolve `<appData>/multichrome` (cross-platform: AppData/Application Support/.config).
 const REAL_USER_DATA = path.join(app.getPath('appData'), 'multichrome');
 const TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'multichrome-e2e-'));
+process.env.MULTICHROME_TEST_PROFILE_ROOT = TEMP_ROOT;
 const TEMP_USER_DATA = path.join(TEMP_ROOT, 'userData');
 const TEMP_DATA_PATH = path.join(TEMP_ROOT, 'data');
 fs.mkdirSync(TEMP_USER_DATA, { recursive: true });

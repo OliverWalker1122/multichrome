@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
-import { spawnAuditedTestBrowser, windowsTestArgs } from '../electron/drivers/windowsTestBrowser.js';
+import { prepareTestProfile, spawnAuditedTestBrowser, windowsTestArgs } from '../electron/drivers/windowsTestBrowser.js';
 import { supervise } from '../scripts/run-browser-suite.mjs';
 
 test('Windows test launches merge disabled features without changing the caller or other arguments', () => {
@@ -22,6 +24,23 @@ function simulate(engines, launched) {
         }))).then(() => 0),
     });
 }
+
+test('only a fresh profile inside the suite receives the synthetic non-blank account fixture', t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-test-local-state-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const fixtures = fs.mkdirSync(path.join(root, 'fixtures'), { recursive: true });
+    const profile = fs.mkdirSync(path.join(fixtures, 'new'), { recursive: true });
+    const outside = fs.mkdirSync(path.join(root, 'fixtures-other'), { recursive: true });
+    const synthetic = JSON.stringify({ password_manager: { os_password_blank: false, os_password_last_changed: '123' } });
+    fs.writeFileSync(path.join(root, 'test-local-state.json'), synthetic);
+    prepareTestProfile(root, fixtures, profile);
+    assert.equal(fs.readFileSync(path.join(profile, 'Local State'), 'utf8'), synthetic);
+    fs.writeFileSync(path.join(profile, 'Local State'), 'existing synthetic fixture');
+    prepareTestProfile(root, fixtures, profile);
+    assert.equal(fs.readFileSync(path.join(profile, 'Local State'), 'utf8'), 'existing synthetic fixture');
+    prepareTestProfile(root, fixtures, outside);
+    assert.equal(fs.existsSync(path.join(outside, 'Local State')), false);
+});
 
 test('concurrent engine requests each have a PID receipt before the next permit and final audit', async () => {
     const launched = [];

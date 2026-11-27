@@ -881,6 +881,7 @@ async function main() {
     const childEnv = {
         ...process.env,
         MULTICHROME_USER_DATA: tempUserData,
+        MULTICHROME_TEST_PROFILE_ROOT: tempRoot,
         NODE_ENV: 'production',
     };
     delete childEnv.ELECTRON_RUN_AS_NODE;

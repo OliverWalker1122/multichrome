@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('ConfigureHosted', 'Start', 'Check')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('ConfigureHosted', 'Start', 'PrepareProfile', 'Check')][string]$Mode,
     [long]$Baseline,
     [string]$Directory
 )
@@ -18,6 +18,20 @@ if ($Mode -eq 'ConfigureHosted') {
 }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+if ($Mode -eq 'PrepareProfile') {
+    # The upstream blank-password probe can run even with Autofill flags off on
+    # Chromium 148. The non-blank branch keeps device reauthentication required.
+    # Seed only the cache for this dedicated account's actual last password change.
+    $account = Get-LocalUser -SID $identity.User
+    if (-not $account.PasswordLastSet) { throw 'Test account password change time unavailable.' }
+    $ticks = $account.PasswordLastSet.ToUniversalTime().ToFileTimeUtc()
+    # Chromium stores microseconds since 1601 and adds one second for its own
+    # whole-second password-age clock skew (password_manager_util_win.cc).
+    $micros = [long]([decimal]::Floor([decimal]$ticks / 10)) + 1000000L
+    $prefs = @{ password_manager = @{ os_password_blank = $false; os_password_last_changed = [string]$micros } }
+    [IO.File]::WriteAllText((Join-Path $Directory 'test-local-state.json'), ($prefs | ConvertTo-Json -Compress))
+    return
+}
 if ($Mode -eq 'Start') {
     if (-not $hostedRunner) {
         $group = Get-LocalGroup -Name 'MultiChromeTestRunners' -ErrorAction SilentlyContinue
