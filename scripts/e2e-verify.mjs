@@ -20,6 +20,7 @@
  */
 
 import path from 'node:path';
+import './require-browser-supervisor.cjs';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';

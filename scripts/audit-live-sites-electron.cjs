@@ -11,6 +11,7 @@
  * to solve or bypass CAPTCHAs — reports CAPTCHA/Challenge transparently.
  */
 
+require('./require-browser-supervisor.cjs')();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

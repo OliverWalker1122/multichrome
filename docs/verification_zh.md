@@ -17,6 +17,10 @@ MultiChrome 采用四层测试结构，分别覆盖纯业务逻辑、离线安�
 
 ## 验收与发布要求
 
+Windows 的 L2、L3 和 L4 通过表中的 npm 命令启动。日常账户默认只运行基础 CI。真浏览器测试使用 GitHub 托管 Windows VM，或在专用测试机上使用本地组 `MultiChromeTestRunners` 的专用账户（加入后重新登录）。专用账户需要有权读取 Security 日志，且系统须启用“登录”的失败审计和“用户账户管理”的成功审计。GitHub 作业会在临时 VM 内准备这些审计设置。
+
+测试启动器对真实浏览器合并 Chromium 上游的两个自动填充测试开关，逐个放行新进程并记录 PID。遇到与浏览器 PID 匹配的 4625、测试账户的 4740 或无法核验日志，剩余启动会被阻断。已有窗口仍可同时运行。普通应用启动沿用用户的浏览器参数。[Chromium 缺陷记录](https://issues.chromium.org/issues/541310282)
+
 - 常规代码变更运行 `npm run ci`，包含准备测试用 sing-box、Lint、类型检查、L1 和完整构建。离线测试启用 `SKIP_DOTENV=true` 与 `DOTENV_CONFIG_PATH=/dev/null`；使用临时用户目录和合成配置。
 - 代理、内核、CDP、指纹或启动行为变更追加 L2；核心界面、弹窗或状态流转变更追加 L3。需要双内核验收时使用 `--require-kernel`，并在报告中核对两种引擎各自的实际检查。仅有系统 Chrome 结果时标为单内核。
 - 更换内核或 sing-box、修改 WebRTC、语言、时区或指纹策略，或执行完整发版验收时，在真实受管代理下运行 L4。可用 `npm run audit:live -- --auto-proxies=1 --engine=both` 让两个临时环境共用一个可用代理。按内核和站点分别记录观测值、加载失败或 `CAPTCHA/Challenge`；遇到验证停止该站点检查。页面仅加载或未返回指标时记为未判定。报告中排除真实代理名、出口 IP、凭据和环境标识。

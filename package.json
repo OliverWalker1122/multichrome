@@ -20,9 +20,9 @@
         "lint:fix": "eslint . --ext .js,.ts,.tsx --fix",
         "test": "node --test",
         "test:coverage": "node scripts/run-coverage.mjs",
-        "test:e2e": "node scripts/e2e-verify.mjs",
-        "test:ui": "node scripts/e2e-ui-suite.mjs",
-        "audit:live": "node scripts/audit-live-sites.mjs",
+        "test:e2e": "node scripts/run-browser-suite.mjs e2e",
+        "test:ui": "node scripts/run-browser-suite.mjs ui",
+        "audit:live": "node scripts/run-browser-suite.mjs live",
         "ci": "npm run prepare:singbox && npm run lint && npm run check && npm test && npm run build",
         "prepare:singbox": "node scripts/prepare-singbox.js",
         "check": "tsc --noEmit -p tsconfig.json"

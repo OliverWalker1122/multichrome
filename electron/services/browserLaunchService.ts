@@ -1,4 +1,5 @@
 import { spawn, type StdioOptions } from 'child_process';
+import { spawnAuditedTestBrowser } from '../drivers/windowsTestBrowser.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -908,7 +909,11 @@ export class BrowserLaunchService {
                           env: spawnEnv,
                       };
 
-            const chromeProcess = spawn(chromePath, args, spawnOptions);
+            const auditDirectory = process.platform === 'win32' && process.env.MULTICHROME_TEST_AUDIT_DIR;
+            const chromeProcess = auditDirectory
+                ? await spawnAuditedTestBrowser(auditDirectory, browserEngine, args,
+                    (testArgs: string[]) => spawn(chromePath, testArgs, spawnOptions))
+                : spawn(chromePath, args, spawnOptions);
 
             if (needPipe && chromeProcess.stdio[3] && chromeProcess.stdio[4]) {
                 loadExtensionsViaCdpPipe(

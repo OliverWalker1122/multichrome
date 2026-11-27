@@ -116,10 +116,7 @@ jobs:
 
       - name: Verify Windows desktop and local MCP clients
         if: runner.os == 'Windows'
+        uses: ./.github/actions/verify-windows
         env:
           SKIP_DOTENV: 'true'
           DOTENV_CONFIG_PATH: '/dev/null'
-        run: |
-          npm run test:e2e
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:ui

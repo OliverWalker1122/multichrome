@@ -1,0 +1,22 @@
+name: Verify Windows browsers
+description: Run both installed browser engines and desktop tests on a disposable Windows runner
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      run: |
+        ./scripts/windows-browser-audit.ps1 -Mode ConfigureHosted
+        $asset = node --input-type=module -e "import {getAllowedFingerprintReleases as list} from './electron/domain/kernelPolicy.js'; console.log(JSON.stringify(list('win32').find(release => release.recommended)))" | ConvertFrom-Json
+        if (-not $asset.sha256) { throw 'Missing pinned Windows browser asset' }
+        $directory = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $directory | Out-Null
+        $archive = Join-Path $directory 'kernel.zip'
+        curl.exe --fail --silent --show-error --location --retry 2 --output $archive $asset.downloadUrl
+        if ($LASTEXITCODE -or (Get-Item $archive).Length -ne $asset.sizeBytes -or (Get-FileHash $archive -Algorithm SHA256).Hash -ne $asset.sha256) { throw 'Windows kernel archive verification failed' }
+        Expand-Archive -LiteralPath $archive -DestinationPath $directory
+        $kernels = @(Get-ChildItem -LiteralPath $directory -Filter chrome.exe -File -Recurse)
+        if ($kernels.Count -ne 1) { throw 'Expected one verified kernel executable' }
+        npm run test:e2e -- --no-build --require-kernel "--kernel=$($kernels[0].FullName)"
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        npm run test:ui
+        exit $LASTEXITCODE

@@ -70,16 +70,14 @@ jobs:
       - name: Build application
         run: npm run build
 
+      - name: Prepare verified sing-box core
+        run: npm run prepare:singbox
+
       - name: Verify Windows browser, desktop and MCP clients
+        uses: ./.github/actions/verify-windows
         env:
           SKIP_DOTENV: 'true'
           DOTENV_CONFIG_PATH: '/dev/null'
-        run: |
-          npm run prepare:singbox
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:e2e
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:ui
 
       - name: Package Windows installer
         run: npm run package:win

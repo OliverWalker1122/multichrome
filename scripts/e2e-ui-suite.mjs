@@ -10,6 +10,7 @@
  */
 
 import fs from 'node:fs';
+import requireAuditedBuild from './require-browser-supervisor.cjs';
 import { verifyMcpClients } from './verify-mcp-clients.mjs';
 import os from 'node:os';
 import path from 'node:path';
@@ -156,8 +157,8 @@ class SimpleCDP {
         this.pending = new Map();
     }
 
-    async connect() {
-        this.ws = new WebSocket(this.wsUrl);
+    async connect(headers) {
+        this.ws = new WebSocket(this.wsUrl, { headers });
         await new Promise((resolve, reject) => {
             this.ws.once('open', resolve);
             this.ws.once('error', reject);
@@ -189,7 +190,6 @@ class SimpleCDP {
                 // ignore
             }
         });
-        await this.send('Runtime.enable');
     }
 
     send(method, params = {}) {
@@ -299,6 +299,8 @@ async function verifyRunningActions(cdp) {
     const click = selector => cdp.eval(`document.querySelector(${JSON.stringify(selector)})?.click()`);
     const card = '[aria-label="Favorite environment cards"] article';
     const star = 'table button[aria-label="Favorite MultiWin 02"]';
+    const previous = await cdp.eval('window.electronAPI.automation.getStatus()');
+    let browser;
     try {
         await click('header button[aria-label*="English"]');
         await waitUntil(() => cdp.eval("document.documentElement.lang === 'en-US'"));
@@ -318,13 +320,32 @@ async function verifyRunningActions(cdp) {
         })()`));
         await cdp.send('Page.bringToFront');
         await settleUiPaint(cdp);
-        const nativeFocus = process.platform === 'win32' && isNativeWindowFocusAvailable();
-        const before = nativeFocus && getForegroundWindowPid();
+        // Observe the target browser itself while the other two profile windows finish starting.
+        const status = await cdp.eval('window.electronAPI.automation.updateConfig({ enabled: true })');
+        const token = await cdp.eval('window.electronAPI.automation.getToken()');
+        const headers = { Authorization: `Bearer ${token}` };
+        const profiles = await httpRequest({ port: status.port, path: '/api/v1/profiles?status=running', headers });
+        const profile = profiles.json?.data?.profiles?.find(item => item.name === 'MultiWin 02');
+        if (!profile?.cdp?.wsEndpoint) throw new Error('Missing running profile for UX-11');
+        browser = new SimpleCDP(profile.cdp.wsEndpoint);
+        await browser.connect(headers);
+        const { targetInfos } = await browser.send('Target.getTargets');
+        const page = targetInfos.find(target => target.type === 'page');
+        if (!page) throw new Error('Missing page in the UX-11 profile');
+        const { windowId } = await browser.send('Browser.getWindowForTarget', { targetId: page.targetId });
+        const windowState = async () => (await browser.send('Browser.getWindowBounds', { windowId })).bounds.windowState;
+        const minimizeResult = await cdp.eval(`window.electronAPI.chromeEnvironments.tileWindows({
+            mode: 'minimize', envIds: [${JSON.stringify(profile.id)}]
+        })`);
+        const minimized = minimizeResult.tiledCount === 1
+            && await waitUntil(async () => await windowState() === 'minimized');
+        await cdp.eval(`document.querySelector('table button[aria-label="Locate window MultiWin 01"]').closest('tr').click()`);
+        const rowSelected = () => cdp.eval(`document.querySelector('${star}').closest('tr').getAttribute('aria-selected') === 'true'`);
+        const initiallyUnselected = await waitUntil(async () => !(await rowSelected()));
         await cdp.eval(`document.querySelector('${star}').closest('tr').click()`);
-        await sleep(300);
-        const selected = await cdp.eval(`document.querySelector('${star}').closest('tr').getAttribute('aria-selected') === 'true'`);
-        const sameFocus = !before || getForegroundWindowPid() === before;
-        if (sizesOk && selected && sameFocus && process.argv.includes('--screenshots')) {
+        const selected = initiallyUnselected && await waitUntil(rowSelected);
+        const stayedMinimized = minimized && await windowState() === 'minimized';
+        if (sizesOk && selected && stayedMinimized && process.argv.includes('--screenshots')) {
             await cdp.eval(`document.querySelectorAll('button[aria-label="Dismiss notification"]').forEach(button => button.click())`);
             await captureUiFixture(cdp, 'running-environment-actions');
         }
@@ -332,9 +353,15 @@ async function verifyRunningActions(cdp) {
         const details = await waitUntil(() => cdp.eval(`Boolean(document.querySelector('[data-details-panel]'))
             && !document.querySelector('[data-details-panel] button[aria-label*="Locate"]')`));
         await click('[data-details-panel] button[aria-label="Close details panel"]');
-        record('UX-11', '单击只选中、双击打开详情、运行卡片与列表操作同尺寸', sizesOk && selected && sameFocus && details,
-            `size=${sizesOk}, selected=${selected}, focus=${sameFocus}, details=${details}`);
+        const stillMinimized = await windowState() === 'minimized';
+        await click('table button[aria-label="Locate window MultiWin 02"]');
+        const located = await waitUntil(async () => ['normal', 'maximized', 'fullscreen'].includes(await windowState()));
+        record('UX-11', '单击选中、双击打开详情、定位恢复目标窗口、卡片与列表操作同尺寸',
+            sizesOk && selected && stayedMinimized && details && stillMinimized && located,
+            `size=${sizesOk}, selected=${selected}, minimized=${minimized}, afterClick=${stayedMinimized}, details=${details}, afterDetails=${stillMinimized}, located=${located}`);
     } finally {
+        browser?.close();
+        await cdp.eval(`window.electronAPI.automation.updateConfig({ enabled: ${Boolean(previous.enabled)} })`);
         await click('table button[aria-label="Favorite MultiWin 02"][aria-pressed="true"]');
         await click('header button[aria-label*="Chinese"]');
         await waitUntil(() => cdp.eval("document.documentElement.lang === 'zh-CN'"));
@@ -842,6 +869,7 @@ function startLocalTestServer() {
 }
 
 async function main() {
+    requireAuditedBuild();
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-ui-e2e-'));
     const tempUserData = path.join(tempRoot, 'userData');
     fs.mkdirSync(tempUserData, { recursive: true });
@@ -878,6 +906,7 @@ async function main() {
         const target = await waitForRendererTarget(debugPort, 25000);
         cdp = new SimpleCDP(target.webSocketDebuggerUrl);
         await cdp.connect();
+        await cdp.send('Runtime.enable');
 
         // Wait until React app mounts and electronAPI is ready (fresh install defaults to English en-US)
         const mountedDefaultEn = await waitUntil(
@@ -2250,9 +2279,9 @@ async function main() {
                     mcpStdioBridgeOk =
                         Array.isArray(stdioBridgeRes) &&
                         stdioBridgeRes.length === 3 &&
-                        stdioBridgeRes[0]?.result?.serverInfo?.name === 'multichrome-mcp' &&
-                        stdioBridgeRes[1]?.result?.tools?.length === 4 &&
-                        Array.isArray(stdioBridgeRes[2]?.result?.structuredContent?.profiles);
+                        stdioBridgeRes.find(reply => reply.id === 101)?.result?.serverInfo?.name === 'multichrome-mcp' &&
+                        stdioBridgeRes.find(reply => reply.id === 102)?.result?.tools?.length === 4 &&
+                        Array.isArray(stdioBridgeRes.find(reply => reply.id === 103)?.result?.structuredContent?.profiles);
 
                     // 3) Launch 2 more profiles concurrently via MCP (`cloned` + `mcpEnvC`) so 3 real windows run at once!
                     const mcpEnvC = await cdp.eval(

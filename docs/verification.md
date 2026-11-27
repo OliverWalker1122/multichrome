@@ -6,6 +6,10 @@ MultiChrome uses a four-tier verification pyramid covering pure domain rules, of
 
 ## 1. Four-Layer Verification Suite
 
+On Windows, run L2, L3 and L4 with the npm commands below on a disposable GitHub-hosted VM or a dedicated test machine. For a dedicated machine, sign in with a test account belonging to the local `MultiChromeTestRunners` group after provisioning membership. The account needs Security log access, with failure auditing for Logon and success auditing for User Account Management. Hosted jobs configure auditing on their temporary VM. Use base CI on a daily-use account.
+
+The supervisor merges Chromium's two Autofill test switches, records real browser PIDs and checks the Security log between starts and at suite completion. A matching 4625, a 4740 for the test account or unreadable audit evidence blocks subsequent starts. Multiple running windows remain available to exercise desktop behavior. [Chromium issue](https://issues.chromium.org/issues/541310282)
+
 | Layer | Command | Scope & Responsibilities |
 | :--- | :--- | :--- |
 | **L1 Unit and integration tests** | `npm test`, `npm run test:coverage` | Checks domain policies, credential recovery, proxy behavior and protocol contracts. See the current CI results for counts and coverage. |
