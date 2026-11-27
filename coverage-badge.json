@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "label": "coverage",
-  "message": "77.9% lines",
+  "message": "77.6% lines",
   "color": "ca8a04",
   "metrics": {
-    "lines": 77.86,
-    "branches": 71.13,
-    "functions": 85.35,
-    "testsTotal": 199,
-    "testsPassed": 199,
+    "lines": 77.59,
+    "branches": 71.64,
+    "functions": 85.09,
+    "testsTotal": 212,
+    "testsPassed": 212,
     "testsFailed": 0
   }
 }
