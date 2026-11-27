@@ -44,13 +44,16 @@ async function runWindows() {
         lock.listen('\\\\.\\pipe\\MultiChrome-WindowsBrowserTests', resolve);
     }).catch(() => { throw new Error('Another Windows browser test suite is running or the test lock is unavailable'); });
     try {
-        return await supervise(run, directory => audit('-Mode', 'Check', '-Baseline', baseline, '-Directory', directory));
+        const check = directory => audit('-Mode', 'Check', '-Baseline', baseline, '-Directory', directory);
+        return await supervise(run, check, 2000, (engine, count) => {
+            console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
+        });
     } finally {
         lock.close();
     }
 }
 
-export async function supervise(startSuite, checkEvents, observationMs = 2000) {
+export async function supervise(startSuite, checkEvents, observationMs, report = () => {}) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'multichrome-browser-audit-'));
     const check = () => checkEvents(directory);
     const permitted = new Map();
@@ -94,9 +97,7 @@ export async function supervise(startSuite, checkEvents, observationMs = 2000) {
         await delay(observationMs);
         await check();
         if (!permitted.size && code === 0) throw new Error('No browser starts observed. Windows audit unverified.');
-        for (const [engine, count] of permitted) {
-            console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
-        }
+        for (const [engine, count] of permitted) report(engine, count);
         return code;
     } catch (error) {
         fs.writeFileSync(path.join(directory, 'stop'), '');

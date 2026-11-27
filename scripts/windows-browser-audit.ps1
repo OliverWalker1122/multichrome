@@ -25,16 +25,33 @@ if ($Mode -eq 'Start') {
             throw 'Blocked before browser startup. Use a disposable Windows VM or a dedicated test account in MultiChromeTestRunners.'
         }
     }
-    foreach ($policy in @(@($logon, 2), @($userManagement, 1))) {
-        $rows = @(auditpol.exe /get "/subcategory:$($policy[0])" /r)
-        if ($LASTEXITCODE -or $rows.Count -lt 2) { throw 'Security audit policy could not be verified.' }
-        # Numeric setting in the CSV is independent of the Windows display language.
-        $row = $rows | ConvertFrom-Csv | Select-Object -Last 1
-        $fields = @($row.PSObject.Properties.Value)
-        if ($fields -notcontains $policy[0] -or -not ([int]$fields[-1] -band $policy[1])) {
-            throw 'Failed logon and successful user-account-management auditing must both be enabled.'
-        }
+    # AuditQuerySystemPolicy returns the effective bit mask directly, across
+    # Windows versions and display languages. auditpol CSV layouts vary.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+public static class BrowserAuditPolicy {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Policy { public Guid subcategory; public uint flags; public Guid category; }
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.U1)]
+    private static extern bool AuditQuerySystemPolicy(ref Guid id, uint count, out IntPtr result);
+    [DllImport("advapi32.dll")]
+    private static extern void AuditFree(IntPtr value);
+    public static uint Read(Guid id) {
+        IntPtr result;
+        if (!AuditQuerySystemPolicy(ref id, 1, out result)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try {
+            Policy policy = (Policy)Marshal.PtrToStructure(result, typeof(Policy));
+            if (policy.subcategory != id) throw new InvalidOperationException("Unexpected audit subcategory");
+            return policy.flags;
+        } finally { AuditFree(result); }
     }
+}
+'@
+    if (-not ([BrowserAuditPolicy]::Read([guid]$logon) -band 2)) { throw 'Failed logon auditing is disabled.' }
+    if (-not ([BrowserAuditPolicy]::Read([guid]$userManagement) -band 1)) { throw 'User account management success auditing is disabled.' }
     $last = Get-WinEvent -LogName Security -MaxEvents 1
     if (-not $last.RecordId) { throw 'Security event log unavailable.' }
     Write-Output $last.RecordId
