@@ -10,7 +10,7 @@ module.exports = function requireAuditedBuild() {
     const fs = require('node:fs');
     const path = require('node:path');
     const launcher = path.join(__dirname, '../dist/electron/services/browserLaunchService.js');
-    if (!fs.existsSync(launcher) || !fs.readFileSync(launcher, 'utf8').includes('await spawnAuditedTestBrowser(')) {
+    if (!fs.existsSync(launcher) || !fs.readFileSync(launcher, 'utf8').includes('await reserveWindowsTestLaunch(')) {
         throw new Error('Windows browser test protection missing from build. Run npm run build first.');
     }
 };

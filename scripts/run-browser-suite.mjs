@@ -49,9 +49,12 @@ async function runWindows() {
             await audit('-Mode', 'PrepareProfile', '-Directory', directory);
             return run(directory);
         };
-        return await supervise(start, check, 2000, (engine, count) => {
+        const code = await supervise(start, check, 2000, (engine, count) => {
             console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
         });
+        // Only this exit code certifies that a failed functional suite still
+        // completed its Windows Security audit. CI can collect independent UI results.
+        return code === 0 ? 0 : 10;
     } finally {
         lock.close();
     }
@@ -77,12 +80,13 @@ export async function supervise(startSuite, checkEvents, observationMs, report =
                 // A fresh permit timestamps this spawn, including when multiple windows are requested together.
                 fs.writeFileSync(path.join(directory, key + '.go'), '', { flag: 'wx' });
                 fs.unlinkSync(path.join(directory, request));
-                const deadline = Date.now() + 10000;
+                const deadline = Date.now() + 30000;
                 let receipt;
-                while (!(receipt = fs.readdirSync(directory).find(name => name.startsWith(key + '.') && name.endsWith('.started')))) {
+                while (!(receipt = fs.readdirSync(directory).find(name => name.startsWith(key + '.') && (name.endsWith('.started') || name.endsWith('.cancelled'))))) {
                     if (finished || Date.now() >= deadline) throw new Error('Missing browser PID after launch permit');
                     await delay(50);
                 }
+                if (receipt.endsWith('.cancelled')) continue;
                 const engine = receipt.split('.')[2];
                 const firstForEngine = !permitted.has(engine);
                 permitted.set(engine, (permitted.get(engine) ?? 0) + 1);
@@ -101,7 +105,7 @@ export async function supervise(startSuite, checkEvents, observationMs, report =
         const code = await result;
         await delay(observationMs);
         await check();
-        if (!permitted.size && code === 0) throw new Error('No browser starts observed. Windows audit unverified.');
+        if (!permitted.size) throw new Error('No browser starts observed. Windows audit unverified.');
         for (const [engine, count] of permitted) report(engine, count);
         return code;
     } catch (error) {

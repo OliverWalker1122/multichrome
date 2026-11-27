@@ -1,5 +1,5 @@
 import { spawn, type StdioOptions } from 'child_process';
-import { spawnAuditedTestBrowser } from '../drivers/windowsTestBrowser.js';
+import { reserveWindowsTestLaunch } from '../drivers/windowsTestBrowser.js';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -512,6 +512,7 @@ export class BrowserLaunchService {
     private async launchEnvironmentInternal(id: string): Promise<boolean> {
         let allocatedDebugPort: number | undefined;
         let startupGate: ProxyStartupGate | undefined;
+        let testPermit: Awaited<ReturnType<typeof reserveWindowsTestLaunch>> | undefined;
         try {
             const env = this.deps.repository.findAnyById(
                 id,
@@ -703,6 +704,10 @@ export class BrowserLaunchService {
                       }
                     : undefined;
 
+            if (process.platform === 'win32' && process.env.MULTICHROME_TEST_AUDIT_DIR) {
+                // Wait before creating the proxy gate so the test queue uses none of its safety deadline.
+                testPermit = await reserveWindowsTestLaunch(process.env.MULTICHROME_TEST_AUDIT_DIR, browserEngine);
+            }
             let chromeProxyAddress = proxyAddress;
             const needStartupHold =
                 !isFingerprintChromium &&
@@ -909,10 +914,8 @@ export class BrowserLaunchService {
                           env: spawnEnv,
                       };
 
-            const auditDirectory = process.platform === 'win32' && process.env.MULTICHROME_TEST_AUDIT_DIR;
-            const chromeProcess = auditDirectory
-                ? await spawnAuditedTestBrowser(auditDirectory, browserEngine, args,
-                    (testArgs: string[]) => spawn(chromePath, testArgs, spawnOptions))
+            const chromeProcess = testPermit
+                ? testPermit.spawn(args, testArgs => spawn(chromePath, testArgs, spawnOptions))
                 : spawn(chromePath, args, spawnOptions);
 
             if (needPipe && chromeProcess.stdio[3] && chromeProcess.stdio[4]) {
@@ -1249,6 +1252,7 @@ export class BrowserLaunchService {
             if (allocatedDebugPort !== undefined) {
                 this.portPool.release(allocatedDebugPort);
             }
+            testPermit?.cancel();
             if (startupGate) {
                 void startupGate.close();
             }

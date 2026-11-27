@@ -31,10 +31,8 @@ export function prepareTestProfile(auditDirectory, fixtureRoot, profileDirectory
  * Wait for a supervisor permit before using the normal executable and startup gate.
  * @param {string} directory
  * @param {string} engine
- * @param {string[]} args
- * @param {(args: string[]) => import('node:child_process').ChildProcess} launch
  */
-export async function spawnAuditedTestBrowser(directory, engine, args, launch) {
+export async function reserveWindowsTestLaunch(directory, engine) {
     const key = randomUUID();
     const file = suffix => path.join(directory, key + suffix);
     fs.writeFileSync(file('.request'), '', { flag: 'wx' });
@@ -45,19 +43,33 @@ export async function spawnAuditedTestBrowser(directory, engine, args, launch) {
         }
         await delay(50);
     }
-    if (fs.existsSync(path.join(directory, 'stop'))) throw new Error('Windows browser test audit stopped');
-    const dataArg = args.find(arg => arg.startsWith('--user-data-dir='));
-    prepareTestProfile(directory, process.env.MULTICHROME_TEST_PROFILE_ROOT, dataArg?.slice('--user-data-dir='.length));
-    const child = launch(windowsTestArgs(args));
-    if (!Number.isSafeInteger(child.pid)) {
-        child.once('error', () => {});
-        throw new Error('Windows test browser did not start');
-    }
-    try {
-        fs.writeFileSync(file(`.${child.pid}.${engine}.started`), '', { flag: 'wx' });
-    } catch (error) {
-        child.kill();
-        throw error;
-    }
-    return child;
+    let attempted = false;
+    return {
+        cancel() {
+            if (!attempted && fs.existsSync(directory)) fs.writeFileSync(file('.cancelled'), '');
+        },
+        /** @param {string[]} args @param {(args: string[]) => import('node:child_process').ChildProcess} launch */
+        spawn(args, launch) {
+            if (!fs.existsSync(file('.go')) || fs.existsSync(path.join(directory, 'stop'))) throw new Error('Windows browser test audit stopped');
+            const dataArg = args.find(arg => arg.startsWith('--user-data-dir='));
+            prepareTestProfile(directory, process.env.MULTICHROME_TEST_PROFILE_ROOT, dataArg?.slice('--user-data-dir='.length));
+            const testArgs = windowsTestArgs(args);
+            if (engine === 'fingerprint-chromium' && process.env.MULTICHROME_TEST_SOFTWARE_GL === '1') {
+                testArgs.unshift('--use-gl=angle', '--use-angle=swiftshader');
+            }
+            attempted = true;
+            const child = launch(testArgs);
+            if (!Number.isSafeInteger(child.pid)) {
+                child.once('error', () => {});
+                throw new Error('Windows test browser did not start');
+            }
+            try {
+                fs.writeFileSync(file(`.${child.pid}.${engine}.started`), '', { flag: 'wx' });
+            } catch (error) {
+                child.kill();
+                throw error;
+            }
+            return child;
+        },
+    };
 }

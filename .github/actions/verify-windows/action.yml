@@ -16,7 +16,13 @@ runs:
         Expand-Archive -LiteralPath $archive -DestinationPath $directory
         $kernels = @(Get-ChildItem -LiteralPath $directory -Filter chrome.exe -File -Recurse)
         if ($kernels.Count -ne 1) { throw 'Expected one verified kernel executable' }
+        # The hosted VM has no physical GPU. Exercise WebGL on the bundled ANGLE
+        # software renderer for the offline kernel fixtures only.
+        $env:MULTICHROME_TEST_SOFTWARE_GL = '1'
         npm run test:e2e -- --no-build --require-kernel "--kernel=$($kernels[0].FullName)"
-        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        $e2e = $LASTEXITCODE
+        Remove-Item Env:MULTICHROME_TEST_SOFTWARE_GL
+        if ($e2e -notin 0, 10) { exit $e2e }
         npm run test:ui
-        exit $LASTEXITCODE
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        exit $e2e

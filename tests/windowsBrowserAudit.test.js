@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { prepareTestProfile, spawnAuditedTestBrowser, windowsTestArgs } from '../electron/drivers/windowsTestBrowser.js';
+import { prepareTestProfile, reserveWindowsTestLaunch, windowsTestArgs } from '../electron/drivers/windowsTestBrowser.js';
 import { supervise } from '../scripts/run-browser-suite.mjs';
 
 test('Windows test launches merge disabled features without changing the caller or other arguments', () => {
@@ -18,10 +18,13 @@ test('Windows test launches merge disabled features without changing the caller 
 function simulate(engines, launched) {
     return directory => ({
         child: {},
-        done: Promise.all(engines.map(engine => spawnAuditedTestBrowser(directory, engine, [], () => {
-            launched.push(engine);
-            return { pid: 100 + launched.length };
-        }))).then(() => 0),
+        done: Promise.all(engines.map(async engine => {
+            const permit = await reserveWindowsTestLaunch(directory, engine);
+            permit.spawn([], () => {
+                launched.push(engine);
+                return { pid: 100 + launched.length };
+            });
+        })).then(() => 0),
     });
 }
 
