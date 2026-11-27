@@ -3,7 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { prepareTestProfile, reserveWindowsTestLaunch, windowsTestArgs } from '../electron/drivers/windowsTestBrowser.js';
+import {
+    prepareTestProfile,
+    reserveWindowsTestLaunch,
+    verifyWindowsTestLaunchReady,
+    windowsTestArgs,
+} from '../electron/drivers/windowsTestBrowser.js';
+import {
+    buildWindowsPasswordLocalState,
+    ensureFreshWindowsLocalState,
+} from '../electron/drivers/nativePreferences.js';
 import { supervise } from '../scripts/run-browser-suite.mjs';
 
 test('Windows test launches merge disabled features without changing the caller or other arguments', () => {
@@ -72,4 +81,47 @@ test('a missing audit or an unobserved successful suite cannot pass', async () =
     }, 1), /Security log unavailable/);
     assert.equal(launched.length, 0);
     await assert.rejects(supervise(simulate([], launched), () => {}, 1), /No browser starts observed/);
+});
+
+test('pure-JS Windows password cache seeds only fresh profiles and blocks unprotected test spawns', t => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-pure-local-state-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+    const profileA = path.join(root, 'profile-a');
+    assert.equal(ensureFreshWindowsLocalState(profileA, { platform: 'linux' }), false);
+    assert.equal(fs.existsSync(path.join(profileA, 'Local State')), false);
+
+    const fixedNow = Date.UTC(2026, 10, 27, 8, 0, 0);
+    assert.equal(ensureFreshWindowsLocalState(profileA, { platform: 'win32', nowMs: fixedNow }), true);
+    const parsed = JSON.parse(fs.readFileSync(path.join(profileA, 'Local State'), 'utf8'));
+    assert.equal(parsed.password_manager.os_password_blank, false);
+    assert.match(parsed.password_manager.os_password_last_changed, /^\d{17,}$/);
+
+    // Existing Local State is never overwritten
+    fs.writeFileSync(path.join(profileA, 'Local State'), '{"custom":true}');
+    assert.equal(ensureFreshWindowsLocalState(profileA, { platform: 'win32', nowMs: fixedNow }), false);
+    assert.equal(fs.readFileSync(path.join(profileA, 'Local State'), 'utf8'), '{"custom":true}');
+
+    // Disposable test profile without a PowerShell template still gets seeded and verified before spawn
+    const auditDir = fs.mkdirSync(path.join(root, 'audit'), { recursive: true });
+    const fixtureRoot = fs.mkdirSync(path.join(root, 'suite-fixtures'), { recursive: true });
+    const freshTestProfile = fs.mkdirSync(path.join(fixtureRoot, 'env-1'), { recursive: true });
+    prepareTestProfile(auditDir, fixtureRoot, freshTestProfile);
+    const mergedArgs = windowsTestArgs([`--user-data-dir=${freshTestProfile}`]);
+    assert.doesNotThrow(() => verifyWindowsTestLaunchReady(fixtureRoot, freshTestProfile, mergedArgs));
+
+    // Missing Autofill disable flag or blank password cache throws BEFORE spawn
+    assert.throws(
+        () => verifyWindowsTestLaunchReady(fixtureRoot, freshTestProfile, [`--user-data-dir=${freshTestProfile}`]),
+        /Missing required Windows lockout protection flag/,
+    );
+    fs.writeFileSync(
+        path.join(freshTestProfile, 'Local State'),
+        JSON.stringify({ password_manager: { os_password_blank: true, os_password_last_changed: '1' } }),
+    );
+    assert.throws(
+        () => verifyWindowsTestLaunchReady(fixtureRoot, freshTestProfile, mergedArgs),
+        /missing non-blank password cache/,
+    );
+    assert.equal(JSON.parse(buildWindowsPasswordLocalState(fixedNow)).password_manager.os_password_blank, false);
 });

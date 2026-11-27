@@ -4,6 +4,65 @@ import { applyFailClosedWebRTCPreferences } from '../domain/managedProxyArgs.js'
 import { cleanupLegacyFingerprintExtension } from './proxyStartupGate.js';
 import { applyLanguagePreferences } from '../domain/proxyGeo.js';
 
+const WINDOWS_TO_UNIX_EPOCH_MICROS = 11644473600000000n;
+const PASSWORD_CHECK_SKEW_MICROS = 5000000n;
+
+/**
+ * Build a Chromium Local State payload that marks the Windows OS account as
+ * password-protected (`os_password_blank: false`) as of `nowMs`, preventing
+ * fresh profiles from invoking blank-password `LogonUserW` probes (Event 4625)
+ * while keeping device reauthentication required.
+ *
+ * @param {number} [nowMs]
+ * @returns {string}
+ */
+export function buildWindowsPasswordLocalState(nowMs = Date.now()) {
+    const micros =
+        BigInt(Math.trunc(nowMs)) * 1000n +
+        WINDOWS_TO_UNIX_EPOCH_MICROS +
+        PASSWORD_CHECK_SKEW_MICROS;
+    return JSON.stringify({
+        password_manager: {
+            os_password_blank: false,
+            os_password_last_changed: String(micros),
+        },
+    });
+}
+
+/**
+ * Atomically seed `<dataDir>/Local State` ONLY when no `Local State` file
+ * exists yet (`wx`). Existing browser state is never opened or overwritten.
+ *
+ * @param {string} dataDir
+ * @param {{ platform?: string, nowMs?: number }} [options]
+ * @returns {boolean} true if a new Local State file was created
+ */
+export function ensureFreshWindowsLocalState(
+    dataDir,
+    { platform = process.platform, nowMs = Date.now() } = {},
+) {
+    if (
+        platform !== 'win32' ||
+        typeof dataDir !== 'string' ||
+        !dataDir.trim()
+    ) {
+        return false;
+    }
+    fs.mkdirSync(dataDir, { recursive: true });
+    const localStatePath = path.join(dataDir, 'Local State');
+    try {
+        fs.writeFileSync(localStatePath, buildWindowsPasswordLocalState(nowMs), {
+            flag: 'wx',
+        });
+        return true;
+    } catch (error) {
+        if (error && error.code === 'EEXIST') {
+            return false;
+        }
+        throw error;
+    }
+}
+
 /**
  * Persist pure native Chromium stealth & Fail-Closed preferences before launch:
  * - Locks WebRTC non-proxied UDP policy in Default/Preferences when proxied
@@ -29,6 +88,7 @@ export function writeNativeStealthPreferences({
     logger = undefined,
 }) {
     try {
+        ensureFreshWindowsLocalState(dataDir);
         const prefDir = path.join(dataDir, 'Default');
         const prefPath = path.join(prefDir, 'Preferences');
         fs.mkdirSync(prefDir, { recursive: true });

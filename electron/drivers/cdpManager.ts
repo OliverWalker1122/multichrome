@@ -517,7 +517,12 @@ export class CDPManager {
                         );
                         this.trackInjectionTask(
                             envId,
-                            this.injectToSession(envId, sessionId, ws, waitingForDebugger),
+                            this.injectToSession(
+                                envId,
+                                sessionId,
+                                ws,
+                                waitingForDebugger,
+                            ).then(() => {}),
                         );
                     } else if (waitingForDebugger) {
                         this.resumeTarget(ws, sessionId);
@@ -547,6 +552,19 @@ export class CDPManager {
         }
     }
 
+    private isEmulationCommandAcked(
+        resp: Record<string, unknown> | null,
+    ): boolean {
+        if (!resp) return false;
+        if (!('error' in resp && resp.error)) return true;
+        const errMsg = String(
+            (resp.error as { message?: unknown } | undefined)?.message || '',
+        );
+        // Blink's process-wide TimeZoneController returns this when a sibling frame/worker
+        // in the same RendererProcess already activated the timezone override.
+        return errMsg.includes('Timezone override is already in effect');
+    }
+
     /**
      * 对 Worker 目标施加 V8 时区覆盖并在确认响应后立即恢复执行
      */
@@ -559,29 +577,34 @@ export class CDPManager {
         try {
             const timezone = this.envTimezones.get(envId);
             const locale = this.envLocales.get(envId);
-            let lastPromise: Promise<Record<string, unknown> | null> =
-                Promise.resolve(null);
+            const tasks: Array<Promise<Record<string, unknown> | null>> = [];
             if (timezone) {
-                lastPromise = this.sendCommand(
-                    envId,
-                    ws,
-                    'Emulation.setTimezoneOverride',
-                    { timezoneId: timezone },
-                    sessionId,
-                    400,
+                tasks.push(
+                    this.sendCommand(
+                        envId,
+                        ws,
+                        'Emulation.setTimezoneOverride',
+                        { timezoneId: timezone },
+                        sessionId,
+                        3000,
+                    ),
                 );
             }
             if (locale) {
-                lastPromise = this.sendCommand(
-                    envId,
-                    ws,
-                    'Emulation.setLocaleOverride',
-                    { locale },
-                    sessionId,
-                    400,
+                tasks.push(
+                    this.sendCommand(
+                        envId,
+                        ws,
+                        'Emulation.setLocaleOverride',
+                        { locale },
+                        sessionId,
+                        3000,
+                    ),
                 );
             }
-            await lastPromise;
+            if (tasks.length > 0) {
+                await Promise.all(tasks);
+            }
         } finally {
             if (waitingForDebugger) {
                 this.resumeTarget(ws, sessionId);
@@ -590,14 +613,14 @@ export class CDPManager {
     }
 
     /**
-     * 向指定 session 施加纯原生 V8/Blink Emulation 覆盖（零 JS Hook），等待 ACK 后立即恢复执行
+     * 向指定 session 施加纯原生 V8/Blink Emulation 覆盖（零 JS Hook），等待全部命令 ACK 后再恢复执行
      */
     private async injectToSession(
         envId: string,
         sessionId: string,
         ws: WebSocket,
         waitingForDebugger: boolean,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const timezone = this.envTimezones.get(envId);
         const locale = this.envLocales.get(envId);
         const geolocation = this.envGeolocations.get(envId);
@@ -629,22 +652,25 @@ export class CDPManager {
             });
         }
 
+        let allAcked = true;
         try {
-            let lastPromise: Promise<Record<string, unknown> | null> =
-                Promise.resolve(null);
-            for (const cmd of cmds) {
-                lastPromise = this.sendCommand(
-                    envId,
-                    ws,
-                    cmd.method,
-                    cmd.params,
-                    sessionId,
-                    400,
+            if (cmds.length > 0) {
+                const responses = await Promise.all(
+                    cmds.map((cmd) =>
+                        this.sendCommand(
+                            envId,
+                            ws,
+                            cmd.method,
+                            cmd.params,
+                            sessionId,
+                            3000,
+                        ),
+                    ),
+                );
+                allAcked = responses.every((resp) =>
+                    this.isEmulationCommandAcked(resp),
                 );
             }
-
-            // 利用同 session FIFO 特性：等最后一条原生 Emulation 命令 ACK 后再标记就绪/放行
-            await lastPromise;
         } finally {
             if (waitingForDebugger) {
                 this.resumeTarget(ws, sessionId);
@@ -653,11 +679,22 @@ export class CDPManager {
 
         const sessions = this.envSessions.get(envId);
         const session = sessions?.get(sessionId);
-        if (session) session.injected = true;
+        if (!session) {
+            return true;
+        }
+        if (!allAcked) {
+            session.injected = false;
+            log.warn(
+                `[CDP] 原生 Emulation 命令未完全确认 (session ${sessionId.substring(0, 8)})`,
+            );
+            return false;
+        }
 
+        session.injected = true;
         log.info(
             `[CDP] 已施加 ${cmds.length} 条原生 Emulation 命令到 session ${sessionId.substring(0, 8)}`,
         );
+        return true;
     }
 
     /**
@@ -825,8 +862,8 @@ export class CDPManager {
             const ws = connection.ws;
             await this.enableAutoAttach(envId, ws);
 
-            // 若已有页面 session 附加则无需盲等；否则短轮询最多 1200ms
-            const deadline = Date.now() + 1200;
+            // 若已有页面 session 附加则无需盲等；否则短轮询最多 1500ms
+            const deadline = Date.now() + 1500;
             let pageSessionCount = this.countPageSessions(envId);
             while (pageSessionCount === 0 && Date.now() < deadline) {
                 await new Promise((resolve) => setTimeout(resolve, 30));
@@ -836,6 +873,35 @@ export class CDPManager {
             // 等待所有已附加页面与 Worker 完成原生 Emulation ACK
             await this.awaitPendingInjections(envId);
 
+            // 对尚未确认 ACK 的页面/iframe session 补发一次确认；若关键时区/语言仍未确认则 Fail-Closed 拒绝放行
+            const sessions = this.envSessions.get(envId);
+            if (sessions && sessions.size > 0) {
+                const uninjected = Array.from(sessions.values()).filter(
+                    (s) =>
+                        (s.type === 'page' || s.type === 'iframe') &&
+                        !s.injected,
+                );
+                if (uninjected.length > 0) {
+                    await Promise.all(
+                        uninjected.map((s) =>
+                            this.injectToSession(envId, s.sessionId, ws, false),
+                        ),
+                    );
+                }
+                if (this.shouldPauseOnAutoAttach(envId)) {
+                    const stillUninjected = Array.from(sessions.values()).some(
+                        (s) => s.type === 'page' && !s.injected,
+                    );
+                    if (stillUninjected) {
+                        log.error(
+                            `[CDP] 存在未确认时区与语言覆盖的页面 session，拒绝放行: ${envId.substring(0, 8)}`,
+                        );
+                        return false;
+                    }
+                }
+            }
+
+            pageSessionCount = this.countPageSessions(envId);
             const timezone = this.envTimezones.get(envId);
             const locale = this.envLocales.get(envId);
             if (pageSessionCount > 0) {
@@ -855,9 +921,11 @@ export class CDPManager {
 
     /**
      * 在全部恢复标签页完成原生 V8 时区/语言挂载后，安全放行代理启动闸门：
-     * - 若没有任何标签页在闸门放行前就从本地磁盘缓存 / Service Worker 抢跑提交，则直接放行（0 重载、0 丢包）；
-     * - 若检测到离线缓存 / Service Worker 抢跑页面，则先销毁闸门内全部旧 TCP 连接（物理阻断可能携带本机时区的旧 beacon），
-     *   打开闸门，并对恢复的 http(s) 标签页执行一次 Page.reload，确保全部页面在目标 V8 时区下重新加载。
+     * - 若没有任何 HTTP(S) 标签页在 CDP 挂载前发起或提交加载（如全新空白页/NewTab），直接放行（0 重载、0 丢包）；
+     * - 若存在会话恢复或首开抢跑的 HTTP(S) 标签页（含已命中磁盘缓存提交的页面与卡在挂起代理上的未提交投机帧），
+     *   先在闸门关闭态统一中止旧加载并切回 about:blank、确认 DevToolsSession 持久化时区状态，
+     *   再物理销毁闸门内全部旧 TCP 连接并打开闸门，最后统一用 Page.navigate 重新加载目标 URL，
+     *   杜绝跨进程投机渲染帧或缓存抢跑泄露宿主机时区。
      */
     public async flushStartupGate(
         envId: string,
@@ -899,8 +967,11 @@ export class CDPManager {
         const pageSessions = Array.from(sessions.values()).filter(
             (s) => s.type === 'page',
         );
-        const preCommitted: Array<{ session: AttachedSession; href: string }> = [];
-        const pendingHttp: AttachedSession[] = [];
+        const restoredHttpTabs: Array<{
+            session: AttachedSession;
+            targetUrl: string;
+            wasPreCommitted: boolean;
+        }> = [];
 
         await Promise.all(
             pageSessions.map(async (session) => {
@@ -915,7 +986,7 @@ export class CDPManager {
                             returnByValue: true,
                         },
                         session.sessionId,
-                        400,
+                        1500,
                     );
                     const resultObj = resp?.result as
                         | { result?: { value?: unknown } }
@@ -928,19 +999,48 @@ export class CDPManager {
                 }
 
                 const isPreCommittedHttp = /^https?:\/\//i.test(committedHref);
-                const isTargetHttp = /^https?:\/\//i.test(session.url || '');
-                if (isPreCommittedHttp) {
-                    preCommitted.push({ session, href: committedHref });
-                } else if (isTargetHttp) {
-                    pendingHttp.push(session);
+                let targetUrl = isPreCommittedHttp
+                    ? committedHref
+                    : /^https?:\/\//i.test(session.url || '')
+                      ? session.url
+                      : '';
+
+                if (!targetUrl && session.targetId) {
+                    const infoResp = await this.sendCommand(
+                        envId,
+                        ws,
+                        'Target.getTargetInfo',
+                        { targetId: session.targetId },
+                        undefined,
+                        800,
+                    );
+                    const liveUrl = (
+                        infoResp?.result as
+                            | { targetInfo?: { url?: unknown } }
+                            | undefined
+                    )?.targetInfo?.url;
+                    if (
+                        typeof liveUrl === 'string' &&
+                        /^https?:\/\//i.test(liveUrl)
+                    ) {
+                        targetUrl = liveUrl;
+                    }
+                }
+
+                if (targetUrl) {
+                    restoredHttpTabs.push({
+                        session,
+                        targetUrl,
+                        wasPreCommitted: isPreCommittedHttp,
+                    });
                 }
             }),
         );
 
-        if (preCommitted.length === 0) {
+        if (restoredHttpTabs.length === 0) {
             const forwardedCount = gate.release();
             log.info(
-                `[CDP] 启动闸门已放行（无离线缓存抢跑）: forwarded=${forwardedCount}`,
+                `[CDP] 启动闸门已放行（无抢跑 HTTP 标签页）: forwarded=${forwardedCount}`,
             );
             return {
                 preCommittedCount: 0,
@@ -950,17 +1050,21 @@ export class CDPManager {
             };
         }
 
-        // Step 1（闸门保持关闭）：先把离线缓存 / Service Worker 抢跑页切到 about:blank，
-        // 彻底销毁旧 Document 及其挂起中的 fetch/XHR 事务，杜绝断开旧 socket 后 Chrome 自动重试旧请求！
+        const preCommittedCount = restoredHttpTabs.filter(
+            (item) => item.wasPreCommitted,
+        ).length;
+
+        // Step 1（闸门保持关闭）：把所有恢复/抢跑的 HTTP(S) 标签页统一中止并切回 about:blank，
+        // 彻底销毁旧 Document 与 pre-CDP 投机渲染帧（Speculative RenderFrameHost），并在稳定空白帧上确认 Emulation 状态！
         await Promise.allSettled(
-            preCommitted.map(async ({ session }) => {
+            restoredHttpTabs.map(async ({ session }) => {
                 await this.sendCommand(
                     envId,
                     ws,
                     'Page.stopLoading',
                     {},
                     session.sessionId,
-                    400,
+                    800,
                 );
                 await this.sendCommand(
                     envId,
@@ -968,9 +1072,9 @@ export class CDPManager {
                     'Page.navigate',
                     { url: 'about:blank' },
                     session.sessionId,
-                    800,
+                    1500,
                 );
-                const blankDeadline = Date.now() + 400;
+                const blankDeadline = Date.now() + 600;
                 while (Date.now() < blankDeadline) {
                     const check = await this.sendCommand(
                         envId,
@@ -978,54 +1082,51 @@ export class CDPManager {
                         'Runtime.evaluate',
                         { expression: 'location.href', returnByValue: true },
                         session.sessionId,
-                        200,
+                        300,
                     );
                     const cur = (
                         check?.result as { result?: { value?: unknown } } | undefined
                     )?.result?.value;
                     if (cur === 'about:blank') break;
-                    await new Promise((r) => setTimeout(r, 15));
+                    await new Promise((r) => setTimeout(r, 20));
+                }
+                if (this.shouldEnableOverrides(envId)) {
+                    await this.injectToSession(
+                        envId,
+                        session.sessionId,
+                        ws,
+                        false,
+                    );
                 }
             }),
         );
 
-        // 等待 Network Service 进程完全处理完旧 Document 的 URLLoader 取消 IPC
+        // 等待 Network Service 进程完全处理完旧 Document / 挂起请求的 URLLoader 取消 IPC
         await new Promise((r) => setTimeout(r, 40));
 
-        // Step 2：旧 Document 已卸载、不会再触发任何自动重试 -> 物理销毁闸门内全部旧 TCP 连接并打开闸门！
+        // Step 2：物理销毁闸门内全部 pre-CDP 旧 TCP 连接并打开闸门
         const { droppedCount } = gate.dropHeldAndRelease();
 
-        // Step 3：在目标 V8 时区/语言已生效且闸门已打开状态下，用 Page.navigate 重新加载抢跑页
-        //（刻意不走 history back/BFCache，防止复活 CDP 挂载前的旧 JS 上下文），并重载其余 pending 标签页
-        await Promise.allSettled([
-            ...preCommitted.map(({ session, href }) =>
+        // Step 3：在 DevToolsSession 原生时区/语言已确认且闸门已打开状态下，统一用 Page.navigate 重新加载目标 URL
+        await Promise.allSettled(
+            restoredHttpTabs.map(({ session, targetUrl }) =>
                 this.sendCommand(
                     envId,
                     ws,
                     'Page.navigate',
-                    { url: href },
+                    { url: targetUrl },
                     session.sessionId,
-                    1500,
+                    2500,
                 ),
             ),
-            ...pendingHttp.map((session) =>
-                this.sendCommand(
-                    envId,
-                    ws,
-                    'Page.reload',
-                    { ignoreCache: false },
-                    session.sessionId,
-                    1500,
-                ),
-            ),
-        ]);
+        );
 
-        const reloadedCount = preCommitted.length + pendingHttp.length;
+        const reloadedCount = restoredHttpTabs.length;
         log.info(
-            `[CDP] 启动闸门检测到 ${preCommitted.length} 个离线缓存抢跑页，已卸载旧页、丢弃 ${droppedCount} 条旧连接并重载 ${reloadedCount} 个标签页`,
+            `[CDP] 启动闸门已对齐 ${reloadedCount} 个恢复标签页（离线抢跑=${preCommittedCount}），丢弃 ${droppedCount} 条旧连接并受控重载`,
         );
         return {
-            preCommittedCount: preCommitted.length,
+            preCommittedCount,
             reloadedCount,
             droppedCount,
             forwardedCount: 0,
@@ -1057,18 +1158,19 @@ export class CDPManager {
 
         // 先确认浏览器已有至少一个主页面目标，避免关闭临时后台标签页时把整个浏览器窗口关闭
         let hasOtherPage = false;
-        const pageWaitDeadline = Date.now() + 2000;
+        const pageWaitDeadline = Date.now() + 5000;
         while (Date.now() < pageWaitDeadline) {
-            const targetsResp = await this.sendCommand(envId, ws, 'Target.getTargets', {}, undefined, 1000);
+            const targetsResp = await this.sendCommand(envId, ws, 'Target.getTargets', {}, undefined, 1500);
             const infos = (targetsResp?.result as { targetInfos?: Array<{ type?: string }> } | undefined)
                 ?.targetInfos;
             if (Array.isArray(infos) && infos.some((t) => t.type === 'page')) {
                 hasOtherPage = true;
                 break;
             }
-            await new Promise((r) => setTimeout(r, 80));
+            await new Promise((r) => setTimeout(r, 100));
         }
         if (!hasOtherPage) {
+            log.warn(`[CDP] C++ 内核等待主页面目标超时，稍后重试 (${envId.substring(0, 8)})`);
             return false;
         }
 
@@ -1080,7 +1182,7 @@ export class CDPManager {
                 'Target.createTarget',
                 { url: 'chrome://settings/searchEngines', background: true },
                 undefined,
-                2000,
+                3000,
             );
             targetId = (created?.result as { targetId?: string } | undefined)?.targetId;
             if (!targetId) return false;
@@ -1091,13 +1193,13 @@ export class CDPManager {
                 'Target.attachToTarget',
                 { targetId, flatten: true },
                 undefined,
-                2000,
+                3000,
             );
             const sessionId = (attached?.result as { sessionId?: string } | undefined)?.sessionId;
             if (!sessionId) return false;
 
             // 等待 chrome://settings WebUI 脚本就绪
-            const readyDeadline = Date.now() + 3000;
+            const readyDeadline = Date.now() + 6000;
             let ready = false;
             while (Date.now() < readyDeadline) {
                 const probe = await this.sendCommand(
@@ -1109,15 +1211,18 @@ export class CDPManager {
                         returnByValue: true,
                     },
                     sessionId,
-                    800,
+                    1000,
                 );
                 if ((probe?.result as { result?: { value?: boolean } } | undefined)?.result?.value === true) {
                     ready = true;
                     break;
                 }
-                await new Promise((r) => setTimeout(r, 100));
+                await new Promise((r) => setTimeout(r, 120));
             }
-            if (!ready) return false;
+            if (!ready) {
+                log.warn(`[CDP] C++ 内核 chrome://settings WebUI 未在超时内就绪 (${envId.substring(0, 8)})`);
+                return false;
+            }
 
             const evalResp = await this.sendCommand(
                 envId,
@@ -1128,17 +1233,6 @@ export class CDPManager {
                         const mod = await import('chrome://settings/settings.js');
                         const proxy = mod.SearchEnginesBrowserProxyImpl && mod.SearchEnginesBrowserProxyImpl.getInstance();
                         if (!proxy) return { ok: false, reason: 'no_proxy' };
-
-                        const before = await proxy.getSearchEnginesList();
-                        const currentDefault = (before.defaults || []).find((d) => d.default);
-                        const isNoSearch =
-                            !currentDefault ||
-                            currentDefault.keyword === 'nosearch' ||
-                            currentDefault.name === 'No Search' ||
-                            currentDefault.url === 'http://%s';
-                        if (!isNoSearch) {
-                            return { ok: true, skipped: true, current: currentDefault.name };
-                        }
 
                         const findGoogle = (list) => {
                             const all = [
@@ -1153,47 +1247,86 @@ export class CDPManager {
                             );
                         };
 
-                        let googleEntry = findGoogle(before);
-                        if (!googleEntry) {
-                            for (const startId of [0, -1]) {
-                                proxy.searchEngineEditStarted(startId);
-                                const okName = await proxy.validateSearchEngineInput('searchEngine', 'Google');
-                                const okKey = await proxy.validateSearchEngineInput('keyword', 'google.com');
-                                const okUrl = await proxy.validateSearchEngineInput('queryUrl', 'https://www.google.com/search?q=%s');
-                                if (okName && okKey && okUrl) {
-                                    proxy.searchEngineEditCompleted(
-                                        'Google',
-                                        'google.com',
-                                        'https://www.google.com/search?q=%s',
-                                        ''
-                                    );
-                                    break;
-                                }
-                                proxy.searchEngineEditCancelled();
+                        const deadline = Date.now() + 4500;
+                        let lastReason = 'timeout';
+                        while (Date.now() < deadline) {
+                            const before = await proxy.getSearchEnginesList();
+                            const totalCount =
+                                (before.defaults || []).length +
+                                (before.actives || []).length +
+                                (before.others || []).length;
+                            if (totalCount === 0) {
+                                lastReason = 'service_not_loaded';
+                                await new Promise((r) => setTimeout(r, 200));
+                                continue;
                             }
+
+                            const currentDefault = (before.defaults || []).find((d) => d.default);
+                            const isNoSearch =
+                                !currentDefault ||
+                                currentDefault.keyword === 'nosearch' ||
+                                currentDefault.name === 'No Search' ||
+                                currentDefault.url === 'http://%s';
+                            if (!isNoSearch) {
+                                return { ok: true, skipped: true, current: currentDefault.name };
+                            }
+
+                            let googleEntry = findGoogle(before);
+                            if (!googleEntry) {
+                                let validated = false;
+                                for (const startId of [-1, 0]) {
+                                    proxy.searchEngineEditStarted(startId);
+                                    const okName = await proxy.validateSearchEngineInput('searchEngine', 'Google');
+                                    const okKey = await proxy.validateSearchEngineInput('keyword', 'google.com');
+                                    const okUrl = await proxy.validateSearchEngineInput('queryUrl', 'https://www.google.com/search?q=%s');
+                                    if (okName && okKey && okUrl) {
+                                        proxy.searchEngineEditCompleted(
+                                            'Google',
+                                            'google.com',
+                                            'https://www.google.com/search?q=%s',
+                                            ''
+                                        );
+                                        validated = true;
+                                        break;
+                                    }
+                                    proxy.searchEngineEditCancelled();
+                                }
+                                if (!validated) {
+                                    lastReason = 'validate_not_ready';
+                                    await new Promise((r) => setTimeout(r, 250));
+                                    continue;
+                                }
+                                await new Promise((r) => setTimeout(r, 250));
+                                const afterAdd = await proxy.getSearchEnginesList();
+                                googleEntry = findGoogle(afterAdd);
+                            }
+
+                            if (!googleEntry) {
+                                lastReason = 'add_failed';
+                                await new Promise((r) => setTimeout(r, 250));
+                                continue;
+                            }
+
+                            proxy.setDefaultSearchEngine(googleEntry.id, 0, null);
                             await new Promise((r) => setTimeout(r, 250));
-                            const afterAdd = await proxy.getSearchEnginesList();
-                            googleEntry = findGoogle(afterAdd);
+                            const afterSet = await proxy.getSearchEnginesList();
+                            const finalDefault = (afterSet.defaults || []).find((d) => d.default);
+                            if (finalDefault && finalDefault.name === 'Google') {
+                                return {
+                                    ok: true,
+                                    finalDefault: finalDefault.name,
+                                };
+                            }
+                            lastReason = 'set_default_pending';
+                            await new Promise((r) => setTimeout(r, 200));
                         }
-
-                        if (!googleEntry) {
-                            return { ok: false, reason: 'add_failed' };
-                        }
-
-                        proxy.setDefaultSearchEngine(googleEntry.id, 0, null);
-                        await new Promise((r) => setTimeout(r, 250));
-                        const afterSet = await proxy.getSearchEnginesList();
-                        const finalDefault = (afterSet.defaults || []).find((d) => d.default);
-                        return {
-                            ok: Boolean(finalDefault && finalDefault.name === 'Google'),
-                            finalDefault: finalDefault ? finalDefault.name : null,
-                        };
+                        return { ok: false, reason: lastReason };
                     })()`,
                     awaitPromise: true,
                     returnByValue: true,
                 },
                 sessionId,
-                5000,
+                8000,
             );
 
             const val = (evalResp?.result as { result?: { value?: { ok?: boolean; skipped?: boolean; finalDefault?: string } } } | undefined)

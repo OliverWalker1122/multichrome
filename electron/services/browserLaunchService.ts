@@ -467,10 +467,12 @@ export class BrowserLaunchService {
 
     private async waitForDebugEndpoint(
         debugPort: number,
-        timeoutMs = 8000,
+        timeoutMs = 15000,
+        shouldAbort?: () => boolean,
     ): Promise<boolean> {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
+            if (shouldAbort?.()) return false;
             const ready = await new Promise<boolean>((resolve) => {
                 const req = http.get(
                     `http://127.0.0.1:${debugPort}/json/version`,
@@ -486,6 +488,7 @@ export class BrowserLaunchService {
                 });
             });
             if (ready) return true;
+            if (shouldAbort?.()) return false;
             await new Promise((resolve) => setTimeout(resolve, 25));
         }
         return false;
@@ -725,7 +728,7 @@ export class BrowserLaunchService {
                             upstreamHost: parsedUpstream.host,
                             upstreamPort: parsedUpstream.port,
                             holdOnStart: needStartupHold,
-                            maxHoldMs: needStartupHold ? 8000 : 0,
+                            maxHoldMs: needStartupHold ? 22000 : 0,
                             failClosedOnTimeout: needStartupHold,
                             tunnelWatchdog: needTunnelWatchdog,
                             logger: log,
@@ -1055,9 +1058,15 @@ export class BrowserLaunchService {
             if (startupGate && needStartupHold) {
                 let gateHandshakeOk = false;
                 try {
+                    const isLaunchAborted = () =>
+                        chromeProcess.exitCode !== null ||
+                        chromeProcess.signalCode !== null ||
+                        Boolean(startupGate?.isAborted()) ||
+                        this.runningProcesses.get(id) !== launchRecord;
                     const debugReady = await this.waitForDebugEndpoint(
                         debugPort,
-                        7500,
+                        15000,
+                        isLaunchAborted,
                     );
                     if (
                         debugReady &&
@@ -1143,7 +1152,14 @@ export class BrowserLaunchService {
             }
 
             void (async () => {
-                const debugReady = await this.waitForDebugEndpoint(debugPort);
+                const debugReady = await this.waitForDebugEndpoint(
+                    debugPort,
+                    15000,
+                    () =>
+                        chromeProcess.exitCode !== null ||
+                        chromeProcess.signalCode !== null ||
+                        this.runningProcesses.get(id) !== launchRecord,
+                );
                 if (this.runningProcesses.get(id) !== launchRecord) return;
                 if (!debugReady) {
                     log.warn(
@@ -1192,17 +1208,30 @@ export class BrowserLaunchService {
                             '.google-search-ready',
                         );
                         if (!fs.existsSync(searchReadyMarker)) {
-                            const searchConfigured =
-                                await this.cdpManager.ensureDefaultGoogleSearch(
-                                    id,
-                                );
-                            if (this.runningProcesses.get(id) !== launchRecord)
-                                return;
-                            if (searchConfigured) {
-                                try {
-                                    fs.writeFileSync(searchReadyMarker, '1');
-                                } catch {
-                                    /* ignore */
+                            for (let attempt = 1; attempt <= 3; attempt += 1) {
+                                const searchConfigured =
+                                    await this.cdpManager.ensureDefaultGoogleSearch(
+                                        id,
+                                    );
+                                if (this.runningProcesses.get(id) !== launchRecord)
+                                    return;
+                                if (searchConfigured) {
+                                    try {
+                                        fs.writeFileSync(searchReadyMarker, '1');
+                                    } catch {
+                                        /* ignore */
+                                    }
+                                    break;
+                                }
+                                if (attempt < 3) {
+                                    await new Promise((r) =>
+                                        setTimeout(r, 700 * attempt),
+                                    );
+                                    if (
+                                        this.runningProcesses.get(id) !==
+                                        launchRecord
+                                    )
+                                        return;
                                 }
                             }
                         }
@@ -1315,12 +1344,12 @@ export class BrowserLaunchService {
     }> {
         const effectiveTimeoutMs =
             Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15000;
-        const deadline = Date.now() + effectiveTimeoutMs;
 
         const launched = await this.launchEnvironment(id);
         if (!launched) {
             throw new Error(`启动环境失败: ${id}`);
         }
+        const deadline = Date.now() + effectiveTimeoutMs;
 
         let liveWsEndpoint: string | null = null;
         let activeDebugPort = 0;

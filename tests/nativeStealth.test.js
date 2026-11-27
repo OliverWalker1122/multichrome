@@ -186,3 +186,176 @@ test('buildFingerprintChromiumArgs preserves native DeviceBoundSessions so exist
     assert.equal(disabledFeatures.includes('PersistDeviceBoundSessions'), false);
     assert.equal(disabledFeatures.includes('EnableBoundSessionCredentials'), false);
 });
+
+test('CDPManager fails closed when Emulation timezone ACK times out and symmetrically resets cached + uncached restored tabs', async () => {
+    const CDPManager = loadCDPManagerClass();
+    const cdp = new CDPManager();
+    cdp.primeEnvironment('env-timeout', {
+        timezone: 'Asia/Tokyo',
+        locale: 'en-US',
+    });
+
+    // 1. Simulate a session whose Emulation command times out (returns null) -> applyOverrides must return false (Fail-Closed)
+    const silentWs = {
+        readyState: 1,
+        send(raw) {
+            const payload = JSON.parse(raw);
+            if (payload.method === 'Target.setAutoAttach') {
+                const entry = cdp.pendingResponses.get(payload.id);
+                if (entry) {
+                    clearTimeout(entry.timer);
+                    cdp.pendingResponses.delete(payload.id);
+                    entry.resolve({ id: payload.id, result: {} });
+                }
+            }
+        },
+        close() {},
+    };
+    cdp.connections.set('env-timeout', {
+        ws: silentWs,
+        debugUrl: 'ws://127.0.0.1:9222/devtools/browser/t1',
+        debugPort: 9222,
+        envId: 'env-timeout',
+        browserPID: null,
+        connected: true,
+        autoAttachEnabled: false,
+        autoAttachPromise: null,
+        manualDisconnect: false,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        onDisconnect() {},
+    });
+    cdp.envSessions.set(
+        'env-timeout',
+        new Map([
+            [
+                'sess-stalled',
+                {
+                    sessionId: 'sess-stalled',
+                    targetId: 't-stalled',
+                    type: 'page',
+                    url: 'http://e2e-restore.invalid/restore-uncached',
+                    injected: false,
+                },
+            ],
+        ]),
+    );
+    // Stub sendCommand for fast deterministic timeout on Emulation commands
+    const origSend = cdp.sendCommand.bind(cdp);
+    cdp.sendCommand = (envId, ws, method, params, sessionId, timeoutMs) => {
+        if (envId === 'env-timeout' && method.startsWith('Emulation.')) {
+            return Promise.resolve(null);
+        }
+        return origSend(envId, ws, method, params, sessionId, timeoutMs);
+    };
+    assert.equal(await cdp.applyOverrides('env-timeout'), false);
+
+    // 2. Simulate restored session with one disk-cached tab (already committed) and one uncached tab (about:blank + pending session.url)
+    cdp.primeEnvironment('env-restore', {
+        timezone: 'Asia/Tokyo',
+        locale: 'en-US',
+    });
+    const sessionCalls = [];
+    const currentHref = new Map([
+        ['sess-cached', 'http://e2e-restore.invalid/restore-cached'],
+        ['sess-uncached', 'about:blank'],
+    ]);
+    const restoreWs = {
+        readyState: 1,
+        send(raw) {
+            const payload = JSON.parse(raw);
+            sessionCalls.push({
+                sessionId: payload.sessionId || null,
+                method: payload.method,
+                url: payload.params?.url,
+                timezoneId: payload.params?.timezoneId,
+            });
+            const entry = cdp.pendingResponses.get(payload.id);
+            if (!entry) return;
+            clearTimeout(entry.timer);
+            cdp.pendingResponses.delete(payload.id);
+            if (payload.method === 'Runtime.evaluate') {
+                entry.resolve({
+                    id: payload.id,
+                    result: { result: { value: currentHref.get(payload.sessionId) || 'about:blank' } },
+                });
+            } else if (payload.method === 'Page.navigate') {
+                currentHref.set(payload.sessionId, payload.params.url);
+                entry.resolve({ id: payload.id, result: {} });
+            } else if (
+                payload.method === 'Emulation.setTimezoneOverride' &&
+                payload.sessionId === 'sess-uncached'
+            ) {
+                // Also verify Chromium's "already in effect" response on shared renderer is accepted as ACK
+                entry.resolve({
+                    id: payload.id,
+                    error: { code: -32000, message: 'Timezone override is already in effect' },
+                });
+            } else {
+                entry.resolve({ id: payload.id, result: {} });
+            }
+        },
+        close() {},
+    };
+    cdp.connections.set('env-restore', {
+        ws: restoreWs,
+        debugUrl: 'ws://127.0.0.1:9223/devtools/browser/t2',
+        debugPort: 9223,
+        envId: 'env-restore',
+        browserPID: null,
+        connected: true,
+        autoAttachEnabled: true,
+        autoAttachPromise: Promise.resolve(),
+        manualDisconnect: false,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        onDisconnect() {},
+    });
+    cdp.envSessions.set(
+        'env-restore',
+        new Map([
+            [
+                'sess-cached',
+                {
+                    sessionId: 'sess-cached',
+                    targetId: 't-cached',
+                    type: 'page',
+                    url: 'http://e2e-restore.invalid/restore-cached',
+                    injected: true,
+                },
+            ],
+            [
+                'sess-uncached',
+                {
+                    sessionId: 'sess-uncached',
+                    targetId: 't-uncached',
+                    type: 'page',
+                    url: 'http://e2e-restore.invalid/restore-uncached',
+                    injected: false,
+                },
+            ],
+        ]),
+    );
+    assert.equal(await cdp.applyOverrides('env-restore'), true);
+
+    let gateDropped = false;
+    const gate = {
+        isReleased: () => gateDropped,
+        release: () => 0,
+        dropHeldAndRelease: () => {
+            gateDropped = true;
+            return { droppedCount: 4 };
+        },
+    };
+    const flushRes = await cdp.flushStartupGate('env-restore', gate);
+    assert.equal(flushRes.preCommittedCount, 1);
+    assert.equal(flushRes.reloadedCount, 2);
+    assert.equal(flushRes.droppedCount, 4);
+    // Both cached AND uncached restored tabs must reset via about:blank and finish with explicit Page.navigate to their target URLs
+    assert.equal(currentHref.get('sess-cached'), 'http://e2e-restore.invalid/restore-cached');
+    assert.equal(currentHref.get('sess-uncached'), 'http://e2e-restore.invalid/restore-uncached');
+    assert.equal(
+        sessionCalls.some((c) => c.method === 'Page.reload'),
+        false,
+    );
+});

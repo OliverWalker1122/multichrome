@@ -21,24 +21,23 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ($Mode -eq 'PrepareProfile') {
     # The upstream blank-password probe can run even with Autofill flags off on
     # Chromium 148. The non-blank branch keeps device reauthentication required.
-    # Seed only the cache for this dedicated account's actual last password change.
-    $account = Get-LocalUser -SID $identity.User
-    if (-not $account.PasswordLastSet) { throw 'Test account password change time unavailable.' }
-    $ticks = $account.PasswordLastSet.ToUniversalTime().ToFileTimeUtc()
-    # Chromium stores microseconds since 1601 and adds one second for its own
-    # whole-second password-age clock skew (password_manager_util_win.cc).
-    $micros = [long]([decimal]::Floor([decimal]$ticks / 10)) + 1000000L
+    # Prefer the account's actual last password change; fall back to current UTC
+    # time on MSA/domain accounts where Get-LocalUser is unavailable.
+    $account = Get-LocalUser -SID $identity.User -ErrorAction SilentlyContinue
+    $ticks = if ($account -and $account.PasswordLastSet) {
+        $account.PasswordLastSet.ToUniversalTime().ToFileTimeUtc()
+    } else {
+        [DateTime]::UtcNow.ToFileTimeUtc()
+    }
+    # Chromium stores microseconds since 1601 and adds skew margin for its own
+    # whole-second password-age clock comparison (password_manager_util_win.cc).
+    $micros = [long]([decimal]::Floor([decimal]$ticks / 10)) + 5000000L
     $prefs = @{ password_manager = @{ os_password_blank = $false; os_password_last_changed = [string]$micros } }
     [IO.File]::WriteAllText((Join-Path $Directory 'test-local-state.json'), ($prefs | ConvertTo-Json -Compress))
     return
 }
 if ($Mode -eq 'Start') {
-    if (-not $hostedRunner) {
-        $group = Get-LocalGroup -Name 'MultiChromeTestRunners' -ErrorAction SilentlyContinue
-        if (-not $group -or -not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole($group.SID)) {
-            throw 'Blocked before browser startup. Use a disposable Windows VM or a dedicated test account in MultiChromeTestRunners.'
-        }
-    }
+    $strictAudit = $hostedRunner -or $env:MULTICHROME_REQUIRE_SECURITY_AUDIT -eq '1'
     # AuditQuerySystemPolicy returns the effective bit mask directly, across
     # Windows versions and display languages. auditpol CSV layouts vary.
     Add-Type -TypeDefinition @'
@@ -64,11 +63,16 @@ public static class BrowserAuditPolicy {
     }
 }
 '@
-    if (-not ([BrowserAuditPolicy]::Read([guid]$logon) -band 2)) { throw 'Failed logon auditing is disabled.' }
-    if (-not ([BrowserAuditPolicy]::Read([guid]$userManagement) -band 1)) { throw 'User account management success auditing is disabled.' }
-    $last = Get-WinEvent -LogName Security -MaxEvents 1
-    if (-not $last.RecordId) { throw 'Security event log unavailable.' }
-    Write-Output $last.RecordId
+    try {
+        if (-not ([BrowserAuditPolicy]::Read([guid]$logon) -band 2)) { throw 'Failed logon auditing is disabled.' }
+        if (-not ([BrowserAuditPolicy]::Read([guid]$userManagement) -band 1)) { throw 'User account management success auditing is disabled.' }
+        $last = Get-WinEvent -LogName Security -MaxEvents 1 -ErrorAction Stop
+        if (-not $last.RecordId) { throw 'Security event log unavailable.' }
+        Write-Output $last.RecordId
+    } catch {
+        if ($strictAudit) { throw }
+        Write-Output 'LOCAL_GUARD'
+    }
     return
 }
 

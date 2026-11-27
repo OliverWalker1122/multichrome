@@ -2,28 +2,68 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { buildWindowsPasswordLocalState } from './nativePreferences.js';
+
+const REQUIRED_DISABLED_FEATURES = [
+    'AutofillAiWalletPrivatePasses',
+    'AutofillAmbientAutofill',
+];
 
 /** @param {string[]} args */
 export function windowsTestArgs(args) {
     const prefix = '--disable-features=';
     const switches = args.filter(arg => arg.startsWith(prefix));
     const features = new Set(switches.flatMap(arg => arg.slice(prefix.length).split(',')).filter(Boolean));
-    features.add('AutofillAiWalletPrivatePasses');
-    features.add('AutofillAmbientAutofill');
+    for (const item of REQUIRED_DISABLED_FEATURES) {
+        features.add(item);
+    }
     return [prefix + [...features].join(','), ...args.filter(arg => !arg.startsWith(prefix))];
+}
+
+function isInsideRoot(fixtureRoot, profileDirectory) {
+    if (!fixtureRoot || !profileDirectory) return false;
+    if (!fs.existsSync(fixtureRoot) || !fs.existsSync(profileDirectory)) return false;
+    const relative = path.relative(fs.realpathSync.native(fixtureRoot), fs.realpathSync.native(profileDirectory));
+    return Boolean(relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
 }
 
 // Create a synthetic first-run Local State exclusively inside this suite's
 // disposable profiles. Never open, copy from, or overwrite existing browser state.
 export function prepareTestProfile(auditDirectory, fixtureRoot, profileDirectory) {
-    if (!fixtureRoot || !profileDirectory) return;
-    const relative = path.relative(fs.realpathSync.native(fixtureRoot), fs.realpathSync.native(profileDirectory));
-    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) return;
+    if (!isInsideRoot(fixtureRoot, profileDirectory)) return;
+    const targetPath = path.join(profileDirectory, 'Local State');
+    const templatePath = auditDirectory ? path.join(auditDirectory, 'test-local-state.json') : '';
     try {
-        fs.copyFileSync(path.join(auditDirectory, 'test-local-state.json'),
-            path.join(profileDirectory, 'Local State'), fs.constants.COPYFILE_EXCL);
+        if (templatePath && fs.existsSync(templatePath)) {
+            fs.copyFileSync(templatePath, targetPath, fs.constants.COPYFILE_EXCL);
+        } else {
+            fs.writeFileSync(targetPath, buildWindowsPasswordLocalState(), { flag: 'wx' });
+        }
     } catch (error) {
         if (error.code !== 'EEXIST') throw error;
+    }
+}
+
+export function verifyWindowsTestLaunchReady(fixtureRoot, profileDirectory, testArgs) {
+    const prefix = '--disable-features=';
+    const featureArg = testArgs.find(arg => arg.startsWith(prefix)) || '';
+    const activeFeatures = new Set(featureArg.slice(prefix.length).split(',').filter(Boolean));
+    for (const required of REQUIRED_DISABLED_FEATURES) {
+        if (!activeFeatures.has(required)) {
+            throw new Error(`Missing required Windows lockout protection flag: ${required}`);
+        }
+    }
+    if (!profileDirectory) return;
+    const localStatePath = path.join(profileDirectory, 'Local State');
+    if (!fs.existsSync(localStatePath)) {
+        throw new Error('Windows test browser Local State was not initialized before launch');
+    }
+    if (isInsideRoot(fixtureRoot, profileDirectory)) {
+        const parsed = JSON.parse(fs.readFileSync(localStatePath, 'utf8'));
+        const pm = parsed?.password_manager;
+        if (pm?.os_password_blank !== false || !/^\d+$/.test(String(pm?.os_password_last_changed || ''))) {
+            throw new Error('Disposable Windows test profile is missing non-blank password cache');
+        }
     }
 }
 
@@ -52,11 +92,14 @@ export async function reserveWindowsTestLaunch(directory, engine) {
         spawn(args, launch) {
             if (!fs.existsSync(file('.go')) || fs.existsSync(path.join(directory, 'stop'))) throw new Error('Windows browser test audit stopped');
             const dataArg = args.find(arg => arg.startsWith('--user-data-dir='));
-            prepareTestProfile(directory, process.env.MULTICHROME_TEST_PROFILE_ROOT, dataArg?.slice('--user-data-dir='.length));
+            const profileDirectory = dataArg?.slice('--user-data-dir='.length);
+            const fixtureRoot = process.env.MULTICHROME_TEST_PROFILE_ROOT;
+            prepareTestProfile(directory, fixtureRoot, profileDirectory);
             const testArgs = windowsTestArgs(args);
             if (engine === 'fingerprint-chromium' && process.env.MULTICHROME_TEST_SOFTWARE_GL === '1') {
                 testArgs.unshift('--use-gl=angle', '--use-angle=swiftshader');
             }
+            verifyWindowsTestLaunchReady(fixtureRoot, profileDirectory, testArgs);
             attempted = true;
             const child = launch(testArgs);
             if (!Number.isSafeInteger(child.pid)) {

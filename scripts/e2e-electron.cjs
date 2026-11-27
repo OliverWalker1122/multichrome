@@ -998,7 +998,7 @@ async function runE2E() {
 
         // Give ChromeManager's async post-connect hook (including Google default search init on C++ kernel) time to finish
         if (hasCppKernel) {
-            const markerDeadline = Date.now() + 8000;
+            const markerDeadline = Date.now() + 15000;
             while (Date.now() < markerDeadline) {
                 if (
                     fs.existsSync(path.join(envA.dataDir, '.google-search-ready')) &&

@@ -17,9 +17,7 @@ MultiChrome 采用四层测试结构，分别覆盖纯业务逻辑、离线安�
 
 ## 验收与发布要求
 
-Windows 的 L2、L3 和 L4 通过表中的 npm 命令启动。日常账户默认只运行基础 CI。真浏览器测试使用 GitHub 托管 Windows VM，或在专用测试机上使用本地组 `MultiChromeTestRunners` 的专用账户（加入后重新登录）。专用账户需要有权读取 Security 日志，且系统须启用“登录”的失败审计和“用户账户管理”的成功审计。GitHub 作业会在临时 VM 内准备这些审计设置。
-
-测试启动器对真实浏览器合并 Chromium 上游的两个自动填充测试开关，逐个放行新进程并记录 PID。专用本地账户应设置密码。对于全新的临时测试目录，启动器按该账户实际的密码修改时间生成两个 Chromium 缓存字段，保留“需要设备身份验证”的分支，避免旧内核反复尝试空密码。已有 Local State 和指定的日常环境不参与初始化。遇到与浏览器 PID 匹配的 4625、测试账户的 4740 或无法核验日志，剩余启动会被阻断。已有窗口仍可同时运行。[Chromium 缺陷记录](https://issues.chromium.org/issues/541310282) · [148 缓存逻辑](https://chromium.googlesource.com/chromium/src/+/refs/tags/148.0.7778.215/chrome/browser/password_manager/password_manager_util_win.cc)
+Windows 的 L2、L3 和 L4 直接通过表中的 npm 命令在本机或 GitHub 托管 Windows VM 上运行，无需新建额外系统账户或安装本地虚拟机。Windows 启动器在拉起全新的浏览器目录前，会自动合并 Chromium 上游的两个自动填充开关（`AutofillAiWalletPrivatePasses`、`AutofillAmbientAutofill`），并仅在 `Local State` 尚未存在时排他写入 `os_password_blank = false` 与 `os_password_last_changed` 缓存字段，在保留设备重认证要求与不触碰已有浏览器数据的前提下阻断空密码 `LogonUserW` 探测。在 GitHub 托管 Windows VM（或已开启登录失败审计且具备 Security 日志读取权限的本机会话）中，监督器还会逐个记录浏览器 PID 并实时核查安全日志；一旦发现与浏览器 PID 匹配的 `4625` 或当前账户 `4740`，立即熔断剩余启动。[Chromium 缺陷记录](https://issues.chromium.org/issues/541310282) · [148 缓存逻辑](https://chromium.googlesource.com/chromium/src/+/refs/tags/148.0.7778.215/chrome/browser/password_manager/password_manager_util_win.cc)
 
 - 常规代码变更运行 `npm run ci`，包含准备测试用 sing-box、Lint、类型检查、L1 和完整构建。离线测试启用 `SKIP_DOTENV=true` 与 `DOTENV_CONFIG_PATH=/dev/null`；使用临时用户目录和合成配置。
 - 代理、内核、CDP、指纹或启动行为变更追加 L2；核心界面、弹窗或状态流转变更追加 L3。需要双内核验收时使用 `--require-kernel`，并在报告中核对两种引擎各自的实际检查。仅有系统 Chrome 结果时标为单内核。

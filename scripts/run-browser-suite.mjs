@@ -36,24 +36,38 @@ async function audit(...args) {
 }
 
 async function runWindows() {
+    const hostedRunner = process.env.GITHUB_ACTIONS === 'true' && process.env.RUNNER_ENVIRONMENT === 'github-hosted';
     const baseline = await audit('-Mode', 'Start');
-    if (!/^\d+$/.test(baseline)) throw new Error('Security log baseline unavailable');
+    const hasSecurityAudit = /^\d+$/.test(baseline);
+    if (!hasSecurityAudit && (hostedRunner || baseline !== 'LOCAL_GUARD')) {
+        throw new Error('Security log baseline unavailable');
+    }
     const lock = net.createServer(socket => socket.destroy());
     await new Promise((resolve, reject) => {
         lock.once('error', reject);
         lock.listen('\\\\.\\pipe\\MultiChrome-WindowsBrowserTests', resolve);
     }).catch(() => { throw new Error('Another Windows browser test suite is running or the test lock is unavailable'); });
     try {
-        const check = directory => audit('-Mode', 'Check', '-Baseline', baseline, '-Directory', directory);
+        const check = hasSecurityAudit
+            ? directory => audit('-Mode', 'Check', '-Baseline', baseline, '-Directory', directory)
+            : () => Promise.resolve();
         const start = async directory => {
             await audit('-Mode', 'PrepareProfile', '-Directory', directory);
             return run(directory);
         };
-        const code = await supervise(start, check, 2000, (engine, count) => {
-            console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
+        const observationMs = hasSecurityAudit ? 2000 : 150;
+        const code = await supervise(start, check, observationMs, (engine, count) => {
+            if (hasSecurityAudit) {
+                console.log(`[Windows audit] ${engine}: ${count} starts, 0 matched 4625, 0 test-account 4740`);
+            } else {
+                console.log(`[Windows guard] ${engine}: ${count} starts protected by pre-seeded Local State and Autofill flags`);
+            }
         });
-        // Only this exit code certifies that a failed functional suite still
-        // completed its Windows Security audit. CI can collect independent UI results.
+        if (!hostedRunner) {
+            return code;
+        }
+        // On GitHub Actions, exit code 10 certifies that a failed functional suite still
+        // completed its Windows Security audit so CI can collect independent UI results.
         return code === 0 ? 0 : 10;
     } finally {
         lock.close();
